@@ -1,0 +1,336 @@
+[
+  {
+    "model": "accounts.club",
+    "pk": 1,
+    "fields": {
+      "name": "Клуб Додзьо",
+      "region": "Житомир"
+    }
+  },
+  {
+    "model": "accounts.club",
+    "pk": 2,
+    "fields": {
+      "name": "Клуб Легіон",
+      "region": "Київ"
+    }
+  },
+
+  {
+    "model": "accounts.user",
+    "pk": 1,
+    "fields": {
+      "password": "pbkdf2_sha256$870000$demo0000000000000000000000000001$aBcDeFgHiJkLmNoPqRsTuVwXyZ012345678=",
+      "last_login": null,
+      "is_superuser": false,
+      "email": "organizer@demo.local",
+      "first_name": "Олег",
+      "last_name": "Організаторенко",
+      "role": "organizer",
+      "club": 1,
+      "is_active": true,
+      "is_staff": false,
+      "date_joined": "2026-01-01T10:00:00Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  },
+  {
+    "model": "accounts.user",
+    "pk": 2,
+    "fields": {
+      "password": "pbkdf2_sha256$870000$demo0000000000000000000000000002$aBcDeFgHiJkLmNoPqRsTuVwXyZ012345678=",
+      "last_login": null,
+      "is_superuser": false,
+      "email": "coach1@demo.local",
+      "first_name": "Іван",
+      "last_name": "Тренеренко",
+      "role": "coach",
+      "club": 1,
+      "is_active": true,
+      "is_staff": false,
+      "date_joined": "2026-01-01T10:00:00Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  },
+  {
+    "model": "accounts.user",
+    "pk": 3,
+    "fields": {
+      "password": "pbkdf2_sha256$870000$demo0000000000000000000000000003$aBcDeFgHiJkLmNoPqRsTuVwXyZ012345678=",
+      "last_login": null,
+      "is_superuser": false,
+      "email": "coach2@demo.local",
+      "first_name": "Марія",
+      "last_name": "Коченко",
+      "role": "coach",
+      "club": 2,
+      "is_active": true,
+      "is_staff": false,
+      "date_joined": "2026-01-01T10:00:00Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  },
+  {
+    "model": "accounts.user",
+    "pk": 4,
+    "fields": {
+      "password": "pbkdf2_sha256$870000$demo0000000000000000000000000004$aBcDeFgHiJkLmNoPqRsTuVwXyZ012345678=",
+      "last_login": null,
+      "is_superuser": false,
+      "email": "judge@demo.local",
+      "first_name": "Петро",
+      "last_name": "Суддяренко",
+      "role": "judge",
+      "club": null,
+      "is_active": true,
+      "is_staff": false,
+      "date_joined": "2026-01-01T10:00:00Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  },
+
+  {
+    "model": "athletes.athlete",
+    "pk": 1,
+    "fields": {
+      "coach": 2,
+      "club": 1,
+      "first_name": "Андрій",
+      "last_name": "Бойко",
+      "gender": "male",
+      "birth_date": "2000-03-15",
+      "base_weight": "73.50",
+      "skill_level": "Чорний пояс 1 дан"
+    }
+  },
+  {
+    "model": "athletes.athlete",
+    "pk": 2,
+    "fields": {
+      "coach": 2,
+      "club": 1,
+      "first_name": "Василь",
+      "last_name": "Гриценко",
+      "gender": "male",
+      "birth_date": "2001-07-22",
+      "base_weight": "74.00",
+      "skill_level": "Коричневий пояс"
+    }
+  },
+  {
+    "model": "athletes.athlete",
+    "pk": 3,
+    "fields": {
+      "coach": 2,
+      "club": 1,
+      "first_name": "Дмитро",
+      "last_name": "Захаренко",
+      "gender": "male",
+      "birth_date": "1999-11-05",
+      "base_weight": "72.80",
+      "skill_level": "Чорний пояс 1 дан"
+    }
+  },
+  {
+    "model": "athletes.athlete",
+    "pk": 4,
+    "fields": {
+      "coach": 2,
+      "club": 1,
+      "first_name": "Євген",
+      "last_name": "Кравченко",
+      "gender": "male",
+      "birth_date": "2002-04-18",
+      "base_weight": "74.90",
+      "skill_level": "Синій пояс"
+    }
+  },
+  {
+    "model": "athletes.athlete",
+    "pk": 5,
+    "fields": {
+      "coach": 3,
+      "club": 2,
+      "first_name": "Максим",
+      "last_name": "Литвиненко",
+      "gender": "male",
+      "birth_date": "2000-08-30",
+      "base_weight": "73.20",
+      "skill_level": "Чорний пояс 2 дан"
+    }
+  },
+  {
+    "model": "athletes.athlete",
+    "pk": 6,
+    "fields": {
+      "coach": 3,
+      "club": 2,
+      "first_name": "Олексій",
+      "last_name": "Мельниченко",
+      "gender": "male",
+      "birth_date": "2001-02-14",
+      "base_weight": "74.50",
+      "skill_level": "Чорний пояс 1 дан"
+    }
+  },
+  {
+    "model": "athletes.athlete",
+    "pk": 7,
+    "fields": {
+      "coach": 3,
+      "club": 2,
+      "first_name": "Сергій",
+      "last_name": "Пономаренко",
+      "gender": "male",
+      "birth_date": "1998-06-09",
+      "base_weight": "72.60",
+      "skill_level": "Чорний пояс 1 дан"
+    }
+  },
+  {
+    "model": "athletes.athlete",
+    "pk": 8,
+    "fields": {
+      "coach": 3,
+      "club": 2,
+      "first_name": "Тарас",
+      "last_name": "Романенко",
+      "gender": "male",
+      "birth_date": "2003-09-25",
+      "base_weight": "73.80",
+      "skill_level": "Синій пояс"
+    }
+  },
+
+  {
+    "model": "tournaments.tournament",
+    "pk": 1,
+    "fields": {
+      "organizer": 1,
+      "title": "Відкритий Кубок Чернівців з Карате 2026",
+      "sport_type": "Карате",
+      "location": "Палац спорту «Колос», Чернівці",
+      "start_date": "2026-06-14T09:00:00Z",
+      "end_date": "2026-06-14T18:00:00Z",
+      "status": "registration",
+      "created_at": "2026-04-01T12:00:00Z"
+    }
+  },
+
+  {
+    "model": "tournaments.category",
+    "pk": 1,
+    "fields": {
+      "tournament": 1,
+      "name": "Чоловіки до 75 кг",
+      "allowed_gender": "male",
+      "min_age": 18,
+      "max_age": 35,
+      "min_weight": "70.00",
+      "max_weight": "75.00",
+      "allowed_skill_level": "",
+      "bracket_format": "single_elimination"
+    }
+  },
+
+  {
+    "model": "tournaments.registration",
+    "pk": 1,
+    "fields": {
+      "athlete": 1,
+      "category": 1,
+      "seed_number": 1,
+      "recorded_weight": "73.50",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:00:00Z"
+    }
+  },
+  {
+    "model": "tournaments.registration",
+    "pk": 2,
+    "fields": {
+      "athlete": 2,
+      "category": 1,
+      "seed_number": 2,
+      "recorded_weight": "74.00",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:05:00Z"
+    }
+  },
+  {
+    "model": "tournaments.registration",
+    "pk": 3,
+    "fields": {
+      "athlete": 3,
+      "category": 1,
+      "seed_number": 3,
+      "recorded_weight": "72.80",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:10:00Z"
+    }
+  },
+  {
+    "model": "tournaments.registration",
+    "pk": 4,
+    "fields": {
+      "athlete": 4,
+      "category": 1,
+      "seed_number": 4,
+      "recorded_weight": "74.90",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:15:00Z"
+    }
+  },
+  {
+    "model": "tournaments.registration",
+    "pk": 5,
+    "fields": {
+      "athlete": 5,
+      "category": 1,
+      "seed_number": 5,
+      "recorded_weight": "73.20",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:20:00Z"
+    }
+  },
+  {
+    "model": "tournaments.registration",
+    "pk": 6,
+    "fields": {
+      "athlete": 6,
+      "category": 1,
+      "seed_number": 6,
+      "recorded_weight": "74.50",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:25:00Z"
+    }
+  },
+  {
+    "model": "tournaments.registration",
+    "pk": 7,
+    "fields": {
+      "athlete": 7,
+      "category": 1,
+      "seed_number": 7,
+      "recorded_weight": "72.60",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:30:00Z"
+    }
+  },
+  {
+    "model": "tournaments.registration",
+    "pk": 8,
+    "fields": {
+      "athlete": 8,
+      "category": 1,
+      "seed_number": 8,
+      "recorded_weight": "73.80",
+      "status": "confirmed",
+      "created_at": "2026-04-10T10:35:00Z"
+    }
+  }
+]
