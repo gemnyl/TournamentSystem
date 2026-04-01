@@ -1,0 +1,230 @@
+"""
+Моделі турнірного рівня: Tournament → Category → Registration.
+Повністю відповідають таблицям 2.5–2.7 пояснювальної записки.
+"""
+from django.core.exceptions import ValidationError
+from django.db import models
+from django.conf import settings
+
+
+class Tournament(models.Model):
+    """Турнір — корневий об'єкт ієрархії змагань."""
+
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Чернетка'
+        REGISTRATION = 'registration', 'Реєстрація'
+        ACTIVE = 'active', 'Триває'
+        COMPLETED = 'completed', 'Завершено'
+
+    organizer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='organized_tournaments',
+        verbose_name='Організатор'
+    )
+    title = models.CharField(max_length=255, verbose_name='Назва')
+    sport_type = models.CharField(
+        max_length=100,
+        verbose_name='Вид спорту',
+        help_text='Карате, Дзюдо, Тхеквондо, Грепплінг...'
+    )
+    location = models.CharField(max_length=255, verbose_name='Місце проведення')
+    start_date = models.DateTimeField(verbose_name='Початок')
+    end_date = models.DateTimeField(verbose_name='Завершення')
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        verbose_name='Статус'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tournament'
+        verbose_name = 'Турнір'
+        verbose_name_plural = 'Турніри'
+        ordering = ['-start_date']
+
+    def __str__(self):
+        return f'{self.title} ({self.start_date.date()})'
+
+    def clean(self):
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValidationError('Дата завершення не може бути раніше за дату початку')
+
+    # --- методи життєвого циклу ---
+
+    def open_registration(self):
+        if self.status != self.Status.DRAFT:
+            raise ValidationError('Відкрити реєстрацію можна лише з чернетки')
+        self.status = self.Status.REGISTRATION
+        self.save(update_fields=['status'])
+
+    def start_tournament(self):
+        if self.status != self.Status.REGISTRATION:
+            raise ValidationError('Турнір можна розпочати лише після реєстрації')
+        self.status = self.Status.ACTIVE
+        self.save(update_fields=['status'])
+
+    def complete_tournament(self):
+        if self.status != self.Status.ACTIVE:
+            raise ValidationError('Завершити можна лише активний турнір')
+        self.status = self.Status.COMPLETED
+        self.save(update_fields=['status'])
+
+
+class Category(models.Model):
+    """Вагова / вікова категорія турніру."""
+
+    class AllowedGender(models.TextChoices):
+        MALE = 'male', 'Чоловіча'
+        FEMALE = 'female', 'Жіноча'
+        MIXED = 'mixed', 'Змішана'
+
+    class BracketFormat(models.TextChoices):
+        SINGLE_ELIMINATION = 'single_elimination', 'Олімпійська (на вибування)'
+        ROUND_ROBIN = 'round_robin', 'Кругова'
+        # DOUBLE_ELIMINATION — заплановано у розширенні, MVP не підтримує
+
+    tournament = models.ForeignKey(
+        Tournament,
+        on_delete=models.CASCADE,
+        related_name='categories',
+        verbose_name='Турнір'
+    )
+    name = models.CharField(max_length=100, verbose_name='Назва категорії')
+    allowed_gender = models.CharField(
+        max_length=10,
+        choices=AllowedGender.choices,
+        verbose_name='Допустима стать'
+    )
+    min_age = models.PositiveSmallIntegerField(verbose_name='Мінімальний вік')
+    max_age = models.PositiveSmallIntegerField(verbose_name='Максимальний вік')
+    min_weight = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        verbose_name='Мін. вага (кг)'
+    )
+    max_weight = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        verbose_name='Макс. вага (кг)'
+    )
+    allowed_skill_level = models.CharField(
+        max_length=50, blank=True,
+        verbose_name='Допустимий рівень майстерності'
+    )
+    bracket_format = models.CharField(
+        max_length=50,
+        choices=BracketFormat.choices,
+        default=BracketFormat.SINGLE_ELIMINATION,
+        verbose_name='Формат сітки'
+    )
+
+    class Meta:
+        db_table = 'category'
+        verbose_name = 'Категорія'
+        verbose_name_plural = 'Категорії'
+        ordering = ['tournament', 'name']
+
+    def __str__(self):
+        return f'{self.name} — {self.tournament.title}'
+
+    def clean(self):
+        if self.min_age > self.max_age:
+            raise ValidationError('Мін. вік не може бути більшим за макс.')
+        if self.min_weight >= self.max_weight:
+            raise ValidationError('Мін. вага повинна бути меншою за макс.')
+
+    def validate_athlete_eligibility(self, athlete, reference_date=None):
+        """Перевіряє, чи підходить спортсмен під критерії категорії.
+
+        Повертає (is_eligible: bool, reasons: list[str]).
+        """
+        reasons = []
+
+        # Стать
+        if self.allowed_gender != self.AllowedGender.MIXED:
+            if athlete.gender != self.allowed_gender:
+                reasons.append(
+                    f'Стать не відповідає категорії ({self.get_allowed_gender_display()})'
+                )
+
+        # Вік
+        age = athlete.calculate_current_age(reference_date)
+        if not (self.min_age <= age <= self.max_age):
+            reasons.append(f'Вік {age} поза діапазоном [{self.min_age}; {self.max_age}]')
+
+        # Вага (базова, фактична перевіряється при зважуванні)
+        if not (self.min_weight <= athlete.base_weight <= self.max_weight):
+            reasons.append(
+                f'Базова вага {athlete.base_weight} кг поза діапазоном '
+                f'[{self.min_weight}; {self.max_weight}]'
+            )
+
+        return (len(reasons) == 0, reasons)
+
+
+class Registration(models.Model):
+    """Заявка спортсмена на участь у категорії."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Очікує підтвердження'
+        CONFIRMED = 'confirmed', 'Підтверджено'
+        REJECTED = 'rejected', 'Відхилено'
+        WITHDRAWN = 'withdrawn', 'Знято'
+
+    athlete = models.ForeignKey(
+        'athletes.Athlete',
+        on_delete=models.CASCADE,
+        related_name='registrations',
+        verbose_name='Спортсмен'
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name='registrations',
+        verbose_name='Категорія'
+    )
+    seed_number = models.PositiveIntegerField(
+        null=True, blank=True,
+        verbose_name='Номер посіву',
+        help_text='Встановлюється алгоритмом жеребкування'
+    )
+    recorded_weight = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        null=True, blank=True,
+        verbose_name='Вага при зважуванні (кг)'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        verbose_name='Статус'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'registration'
+        verbose_name = 'Реєстрація'
+        verbose_name_plural = 'Реєстрації'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['athlete', 'category'],
+                name='uq_registration_athlete_category'
+            )
+        ]
+        indexes = [
+            models.Index(fields=['category', 'status'], name='idx_reg_category_status'),
+        ]
+
+    def __str__(self):
+        return f'{self.athlete} → {self.category.name}'
+
+    def confirm_weigh_in(self, weight):
+        """Підтверджує зважування та переводить заявку у статус CONFIRMED."""
+        self.recorded_weight = weight
+        self.status = self.Status.CONFIRMED
+        self.save(update_fields=['recorded_weight', 'status'])
+
+    def assign_seed(self, number):
+        self.seed_number = number
+        self.save(update_fields=['seed_number'])
