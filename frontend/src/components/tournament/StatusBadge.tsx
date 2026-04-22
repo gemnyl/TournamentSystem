@@ -1,0 +1,64 @@
+import { Badge } from "@/components/ui/badge";
+import type { TournamentStatus, CategoryStatus, MatchStatus, RegistrationStatus } from "@/types/api";
+
+const TOURNAMENT_LABELS: Record<TournamentStatus, string> = {
+  draft:        "Чернетка",
+  registration: "Реєстрація",
+  ongoing:      "Триває",
+  completed:    "Завершено",
+  cancelled:    "Скасовано",
+};
+
+const CATEGORY_LABELS: Record<CategoryStatus, string> = {
+  draft:        "Чернетка",
+  registration: "Реєстрація",
+  ongoing:      "Триває",
+  completed:    "Завершено",
+};
+
+const MATCH_LABELS: Record<MatchStatus, string> = {
+  scheduled: "Заплановано",
+  ongoing:   "Йде",
+  completed: "Завершено",
+  bye:       "BYE",
+};
+
+const REGISTRATION_LABELS: Record<RegistrationStatus, string> = {
+  pending:   "Очікує",
+  confirmed: "Підтверджено",
+  withdrawn: "Знято",
+};
+
+type StatusBadgeVariant = TournamentStatus | CategoryStatus | MatchStatus | RegistrationStatus;
+
+const VARIANT_MAP: Record<string, "draft" | "registration" | "ongoing" | "completed" | "cancelled" | "secondary" | "destructive" | "outline"> = {
+  draft:        "draft",
+  registration: "registration",
+  ongoing:      "ongoing",
+  completed:    "completed",
+  cancelled:    "cancelled",
+  scheduled:    "secondary",
+  bye:          "outline",
+  pending:      "secondary",
+  confirmed:    "completed",
+  withdrawn:    "cancelled",
+};
+
+interface StatusBadgeProps {
+  status: StatusBadgeVariant;
+  type?: "tournament" | "category" | "match" | "registration";
+  className?: string;
+}
+
+export function StatusBadge({ status, type = "tournament", className }: StatusBadgeProps) {
+  const label =
+    type === "tournament" ? TOURNAMENT_LABELS[status as TournamentStatus] :
+    type === "category"   ? CATEGORY_LABELS[status as CategoryStatus] :
+    type === "match"      ? MATCH_LABELS[status as MatchStatus] :
+    REGISTRATION_LABELS[status as RegistrationStatus];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const variant = (VARIANT_MAP[status] ?? "secondary") as any;
+
+  return <Badge variant={variant} className={className}>{label ?? status}</Badge>;
+}
