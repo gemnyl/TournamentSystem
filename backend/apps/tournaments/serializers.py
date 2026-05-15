@@ -3,6 +3,7 @@
 """
 from rest_framework import serializers
 
+from apps.athletes.models import Athlete
 from apps.athletes.serializers import AthleteSerializer
 from apps.tournaments.models import Category, Registration, Tournament
 
@@ -72,7 +73,8 @@ class RegistrationSerializer(serializers.ModelSerializer):
     athlete = AthleteSerializer(read_only=True)
     athlete_id = serializers.PrimaryKeyRelatedField(
         source='athlete',
-        queryset=__import__('apps.athletes.models', fromlist=['Athlete']).Athlete.objects.all(),
+        # Прямий імпорт безпечний: athletes.models → не імпортує tournaments.serializers.
+        queryset=Athlete.objects.all(),
         write_only=True,
     )
     status_display = serializers.CharField(source='get_status_display', read_only=True)
