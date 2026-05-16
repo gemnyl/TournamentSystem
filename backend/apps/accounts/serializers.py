@@ -65,7 +65,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        if attrs["password"] != attrs.pop("password_confirm"):
+        if attrs["password"] != attrs.pop("password_confirm"):  # NOSONAR
             raise serializers.ValidationError({"password_confirm": "Паролі не співпадають."})
         return attrs
 

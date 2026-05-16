@@ -203,14 +203,14 @@ try:
         def setUp(self):
             self.organizer = User.objects.create_user(
                 email="org@test.local",
-                password="test12345",
+                password="test12345",  # NOSONAR
                 first_name="Test",
                 last_name="Organizer",
                 role=User.Role.ORGANIZER,
             )
             self.coach = User.objects.create_user(
                 email="coach@test.local",
-                password="test12345",
+                password="test12345",  # NOSONAR
                 first_name="Test",
                 last_name="Coach",
                 role=User.Role.COACH,

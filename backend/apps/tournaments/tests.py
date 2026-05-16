@@ -37,7 +37,7 @@ class TournamentAPITestCase(TestCase):
         # Користувачі
         self.organizer = User.objects.create_user(
             email="organizer@test.local",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Органіс",
             last_name="Таторенко",
             role=User.Role.ORGANIZER,
@@ -45,7 +45,7 @@ class TournamentAPITestCase(TestCase):
         )
         self.coach = User.objects.create_user(
             email="coach@test.local",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Тренер",
             last_name="Коченко",
             role=User.Role.COACH,
@@ -53,7 +53,7 @@ class TournamentAPITestCase(TestCase):
         )
         self.judge = User.objects.create_user(
             email="judge@test.local",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Суддя",
             last_name="Суддяренко",
             role=User.Role.JUDGE,
