@@ -3,7 +3,7 @@
 Веб-сервіс для управління турнірами з бойових мистецтв.
 
 [![CI](https://github.com/gemnyl/TournamentSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/gemnyl/TournamentSystem/actions/workflows/ci.yml)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=tournament-webservice&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=tournament-webservice)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=gemnyl_TournamentSystem&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=gemnyl_TournamentSystem)
 
 ## Tech Stack
 
