@@ -40,4 +40,4 @@ jobs:
       - name: Push mirror to GitLab
         run: |
           git remote add gitlab "${{ secrets.GITLAB_REPO_URL }}"
-          git push --mirror gitlab
+          git push gitlab 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*' --force
