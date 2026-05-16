@@ -18,10 +18,10 @@ export default function BracketPage() {
     setIsLoading(true);
     try {
       const [bracketRes, catRes] = await Promise.all([
-        api.get<any>(`/matches/bracket/?category=${id}`),
+        api.get<unknown>(`/matches/bracket/?category=${id}`),
         api.get<Category>(`/categories/${id}/`),
       ]);
-      
+
       const roundsData = bracketRes.data as {round_index: number, matches: Match[]}[];
       const rounds = roundsData.map(r => r.matches);
 

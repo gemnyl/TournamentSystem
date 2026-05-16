@@ -66,6 +66,7 @@ export default function TournamentDetailPage() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchAll(); }, [id]);
 
   // Зміна статусу турніру
@@ -217,7 +218,7 @@ export default function TournamentDetailPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Стать</Label>
-                <Select value={catGender} onValueChange={(v) => { setCatGender(v as any); setValue("allowed_gender", v as any); }}>
+                <Select value={catGender} onValueChange={(v) => { setCatGender(v as CategoryForm["allowed_gender"]); setValue("allowed_gender", v as CategoryForm["allowed_gender"]); }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="male">Чоловіки</SelectItem>
