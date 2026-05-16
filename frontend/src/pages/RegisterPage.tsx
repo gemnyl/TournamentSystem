@@ -101,7 +101,7 @@ export default function RegisterPage() {
 
           <div className="space-y-1.5">
             <Label>Роль</Label>
-            <Select defaultValue="spectator" onValueChange={(v) => setValue("role", v as any)}>
+            <Select defaultValue="spectator" onValueChange={(v) => setValue("role", v as RegisterForm["role"])}>
               <SelectTrigger>
                 <SelectValue placeholder="Оберіть роль..." />
               </SelectTrigger>

@@ -9,17 +9,19 @@ Views підсистеми облікових записів.
     GET  /api/clubs/            — список клубів
     GET  /api/users/            — список користувачів (тільки для admin)
 """
+
 from django.contrib.auth import login, logout
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Club, User
 from apps.accounts.serializers import (
-    ClubSerializer, LoginSerializer,
-    UserRegistrationSerializer, UserSerializer,
+    ClubSerializer,
+    LoginSerializer,
+    UserRegistrationSerializer,
+    UserSerializer,
 )
 
 
@@ -29,11 +31,9 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = LoginSerializer(
-            data=request.data, context={'request': request}
-        )
+        serializer = LoginSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
+        user = serializer.validated_data["user"]
         login(request, user)
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
@@ -45,7 +45,7 @@ class LogoutView(APIView):
 
     def post(self, request):
         logout(request)
-        return Response({'detail': 'Сесію завершено.'}, status=status.HTTP_200_OK)
+        return Response({"detail": "Сесію завершено."}, status=status.HTTP_200_OK)
 
 
 class MeView(APIView):
@@ -77,7 +77,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     serializer_class = ClubSerializer
 
     def get_permissions(self):
-        if self.action in ('list', 'retrieve'):
+        if self.action in ("list", "retrieve"):
             return [IsAuthenticated()]
         return [IsAdminUser()]
 
@@ -85,11 +85,9 @@ class ClubViewSet(viewsets.ModelViewSet):
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     """Список користувачів — тільки для адміністраторів."""
 
-    queryset = User.objects.select_related('club').all()
+    queryset = User.objects.select_related("club").all()
     serializer_class = UserSerializer
     permission_classes = [IsAdminUser]
 
-
-from django.shortcuts import render
 
 # Create your views here.

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Математичні утиліти для генерації турнірних сіток.
 
 Функції навмисно реалізовані як pure functions без залежності від
@@ -15,15 +15,17 @@ Django ORM — це робить їх легко тестованими, дет�
     4. Перевіряємо, чи не зустрічаються одноклубники до півфіналу,
        і за необхідності міняємо слоти місцями (див. resolve_club_conflicts).
 """
+
 from __future__ import annotations
+
 import math
 import random
 from dataclasses import dataclass
 
-
 # ---------------------------------------------------------------------------
 # Допоміжні структури
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Participant:
@@ -32,27 +34,29 @@ class Participant:
     Не залежить від Django моделей, щоб утиліти можна було тестувати
     у відриві від БД. У продуктивному коді створюється з об'єкта Registration.
     """
+
     id: int
     full_name: str
     club_id: int | None = None
     seed: int | None = None  # попередній рейтинг (1 = найсильніший)
 
     def __repr__(self):
-        return f'P({self.id}:{self.full_name})'
+        return f"P({self.id}:{self.full_name})"
 
 
 # Спеціальне значення, що позначає BYE (автоматичний прохід)
-BYE: Participant = Participant(id=-1, full_name='BYE', club_id=None, seed=None)
+BYE: Participant = Participant(id=-1, full_name="BYE", club_id=None, seed=None)
 
 
 # ---------------------------------------------------------------------------
 # Базова математика сітки
 # ---------------------------------------------------------------------------
 
+
 def next_power_of_two(n: int) -> int:
     """Найближчий ступінь двійки, не менший за n."""
     if n < 1:
-        raise ValueError('n має бути ≥ 1')
+        raise ValueError("n має бути ≥ 1")
     if n == 1:
         return 1
     return 1 << (n - 1).bit_length()
@@ -61,7 +65,7 @@ def next_power_of_two(n: int) -> int:
 def calculate_byes(participant_count: int) -> int:
     """Кількість BYE-проходів, потрібних щоб доповнити сітку до 2^k."""
     if participant_count < 2:
-        raise ValueError('Турнір вимагає щонайменше 2 учасників')
+        raise ValueError("Турнір вимагає щонайменше 2 учасників")
     return next_power_of_two(participant_count) - participant_count
 
 
@@ -73,7 +77,7 @@ def calculate_round_count(participant_count: int) -> int:
 def generate_seed_positions(bracket_size: int) -> list[int]:
     """Генерує стандартний порядок посівів у сітці розміру bracket_size."""
     if bracket_size < 1 or (bracket_size & (bracket_size - 1)) != 0:
-        raise ValueError('bracket_size має бути ступенем двійки')
+        raise ValueError("bracket_size має бути ступенем двійки")
 
     positions = [1, 2]
     while len(positions) < bracket_size:
@@ -89,6 +93,7 @@ def generate_seed_positions(bracket_size: int) -> list[int]:
 # ---------------------------------------------------------------------------
 # Розведення одноклубників
 # ---------------------------------------------------------------------------
+
 
 def resolve_club_conflicts(
     slots: list[Participant | None],
@@ -106,7 +111,8 @@ def resolve_club_conflicts(
 
     def count_conflicts(s):
         return sum(
-            1 for a, b in first_round_pairs(s)
+            1
+            for a, b in first_round_pairs(s)
             if a and b and a.club_id is not None and a.club_id == b.club_id
         )
 
@@ -129,7 +135,8 @@ def resolve_club_conflicts(
         if swap_with == conflict_idx + 1:
             continue
         current[conflict_idx + 1], current[swap_with] = (
-            current[swap_with], current[conflict_idx + 1]
+            current[swap_with],
+            current[conflict_idx + 1],
         )
         c = count_conflicts(current)
         if c < best_conflicts:
@@ -143,6 +150,7 @@ def resolve_club_conflicts(
 # Single elimination
 # ---------------------------------------------------------------------------
 
+
 def build_single_elimination_slots(
     participants: list[Participant],
     avoid_club_conflicts: bool = True,
@@ -150,7 +158,7 @@ def build_single_elimination_slots(
 ) -> list[Participant | None]:
     """Повертає впорядкований список слотів першого раунду."""
     if not participants:
-        raise ValueError('Потрібен хоча б один учасник')
+        raise ValueError("Потрібен хоча б один учасник")
 
     bracket_size = next_power_of_two(len(participants))
     positions = generate_seed_positions(bracket_size)
@@ -192,34 +200,40 @@ def build_single_elimination_tree(
             continue
         if a is None:
             auto_winners.append(b)
-            first_round.append({
-                'round_index': 1,
-                'match_order': match_order,
-                'reg_first': None,
-                'reg_second': b,
-                'auto_winner': b,
-                'is_bye': True,
-            })
+            first_round.append(
+                {
+                    "round_index": 1,
+                    "match_order": match_order,
+                    "reg_first": None,
+                    "reg_second": b,
+                    "auto_winner": b,
+                    "is_bye": True,
+                }
+            )
         elif b is None:
             auto_winners.append(a)
-            first_round.append({
-                'round_index': 1,
-                'match_order': match_order,
-                'reg_first': a,
-                'reg_second': None,
-                'auto_winner': a,
-                'is_bye': True,
-            })
+            first_round.append(
+                {
+                    "round_index": 1,
+                    "match_order": match_order,
+                    "reg_first": a,
+                    "reg_second": None,
+                    "auto_winner": a,
+                    "is_bye": True,
+                }
+            )
         else:
             auto_winners.append(None)
-            first_round.append({
-                'round_index': 1,
-                'match_order': match_order,
-                'reg_first': a,
-                'reg_second': b,
-                'auto_winner': None,
-                'is_bye': False,
-            })
+            first_round.append(
+                {
+                    "round_index": 1,
+                    "match_order": match_order,
+                    "reg_first": a,
+                    "reg_second": b,
+                    "auto_winner": None,
+                    "is_bye": False,
+                }
+            )
         match_order += 1
     rounds.append(first_round)
 
@@ -231,14 +245,16 @@ def build_single_elimination_tree(
         for i in range(current_size):
             a_auto = auto_winners[i * 2] if i * 2 < len(auto_winners) else None
             b_auto = auto_winners[i * 2 + 1] if i * 2 + 1 < len(auto_winners) else None
-            round_matches.append({
-                'round_index': round_index,
-                'match_order': i + 1,
-                'reg_first': a_auto,
-                'reg_second': b_auto,
-                'auto_winner': None,
-                'is_bye': False,
-            })
+            round_matches.append(
+                {
+                    "round_index": round_index,
+                    "match_order": i + 1,
+                    "reg_first": a_auto,
+                    "reg_second": b_auto,
+                    "auto_winner": None,
+                    "is_bye": False,
+                }
+            )
         rounds.append(round_matches)
         auto_winners = [None] * current_size
         current_size //= 2
@@ -251,12 +267,13 @@ def build_single_elimination_tree(
 # Round robin
 # ---------------------------------------------------------------------------
 
+
 def build_round_robin_schedule(
     participants: list[Participant],
 ) -> list[list[tuple[Participant | None, Participant | None]]]:
     """Генерує розклад кругового турніру за circle method."""
     if len(participants) < 2:
-        raise ValueError('Round robin вимагає щонайменше 2 учасників')
+        raise ValueError("Round robin вимагає щонайменше 2 учасників")
 
     players: list[Participant | None] = list(participants)
     if len(players) % 2 == 1:
@@ -269,7 +286,7 @@ def build_round_robin_schedule(
     fixed = players[0]
     rotating = players[1:]
 
-    for r in range(rounds_count):
+    for _ in range(rounds_count):
         round_pairs = []
         round_pairs.append((fixed, rotating[0]))
         for i in range(1, n // 2):

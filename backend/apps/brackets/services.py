@@ -5,13 +5,15 @@
 підтверджених заявок (Registration). Використовує pure-утиліти з utils.py
 для математики та розведення, а всі операції запису обгорнуті у транзакції.
 """
-from __future__ import annotations
-from django.db import transaction
-from django.core.exceptions import ValidationError
 
-from apps.tournaments.models import Category, Registration
-from apps.matches.models import Match
+from __future__ import annotations
+
+from django.core.exceptions import ValidationError
+from django.db import transaction
+
 from apps.brackets import utils
+from apps.matches.models import Match
+from apps.tournaments.models import Category, Registration
 
 
 class BracketGenerator:
@@ -34,7 +36,7 @@ class BracketGenerator:
             return self.generate_single_elimination()
         if fmt == Category.BracketFormat.ROUND_ROBIN:
             return self.generate_round_robin()
-        raise NotImplementedError(f'Формат {fmt} не підтримується у MVP')
+        raise NotImplementedError(f"Формат {fmt} не підтримується у MVP")
 
     @transaction.atomic
     def generate_single_elimination(self) -> list[Match]:
@@ -46,9 +48,7 @@ class BracketGenerator:
         participants = [self._to_participant(r) for r in registrations]
         reg_by_id = {r.id: r for r in registrations}
 
-        slots = utils.build_single_elimination_slots(
-            participants, avoid_club_conflicts=True
-        )
+        slots = utils.build_single_elimination_slots(participants, avoid_club_conflicts=True)
         tree = utils.build_single_elimination_tree(slots)
 
         created_by_round: list[list[Match]] = []
@@ -58,15 +58,15 @@ class BracketGenerator:
             for m in round_matches:
                 next_match = None
                 if created_by_round:
-                    parent_idx = (m['match_order'] - 1) // 2
+                    parent_idx = (m["match_order"] - 1) // 2
                     next_match = created_by_round[-1][parent_idx]
 
                 match_obj = Match.objects.create(
                     category=self.category,
-                    reg_first=reg_by_id.get(m['reg_first'].id) if m['reg_first'] else None,
-                    reg_second=reg_by_id.get(m['reg_second'].id) if m['reg_second'] else None,
-                    round_index=m['round_index'],
-                    match_order=m['match_order'],
+                    reg_first=reg_by_id.get(m["reg_first"].id) if m["reg_first"] else None,
+                    reg_second=reg_by_id.get(m["reg_second"].id) if m["reg_second"] else None,
+                    round_index=m["round_index"],
+                    match_order=m["match_order"],
                     next_match=next_match,
                     status=Match.Status.SCHEDULED,
                 )
@@ -117,21 +117,21 @@ class BracketGenerator:
     def _validate_preconditions(self):
         if Match.objects.filter(category=self.category).exists():
             raise ValidationError(
-                'Для цієї категорії сітку вже згенеровано. Видаліть існуючі '
-                'матчі перед повторною генерацією.'
+                "Для цієї категорії сітку вже згенеровано. Видаліть існуючі "
+                "матчі перед повторною генерацією."
             )
         count = self._get_confirmed_registrations().count()
         if count < 2:
             raise ValidationError(
-                f'Для генерації сітки потрібно щонайменше 2 підтверджені '
-                f'реєстрації (зараз {count}).'
+                f"Для генерації сітки потрібно щонайменше 2 підтверджені "
+                f"реєстрації (зараз {count})."
             )
 
     def _get_confirmed_registrations(self):
         return Registration.objects.filter(
             category=self.category,
             status=Registration.Status.CONFIRMED,
-        ).select_related('athlete', 'athlete__club')
+        ).select_related("athlete", "athlete__club")
 
     def _assign_seeds_if_missing(self, registrations):
         for idx, r in enumerate(registrations, start=1):
@@ -161,14 +161,15 @@ class BracketGenerator:
             match.win_method = Match.WinMethod.WALKOVER
             match.status = Match.Status.COMPLETED
             from django.utils import timezone
+
             match.completed_at = timezone.now()
-            match.save(update_fields=['winner', 'win_method', 'status', 'completed_at'])
+            match.save(update_fields=["winner", "win_method", "status", "completed_at"])
 
             if match.next_match:
                 nxt = match.next_match
                 if match.match_order % 2 == 1:
                     nxt.reg_first = winner
-                    nxt.save(update_fields=['reg_first'])
+                    nxt.save(update_fields=["reg_first"])
                 else:
                     nxt.reg_second = winner
-                    nxt.save(update_fields=['reg_second'])
+                    nxt.save(update_fields=["reg_second"])

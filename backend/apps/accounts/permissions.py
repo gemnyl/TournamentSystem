@@ -4,52 +4,53 @@
 Використовуються у view-класах для обмеження операцій
 залежно від ролі автентифікованого користувача.
 """
-from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 
 class IsOrganizer(BasePermission):
     """Дозволяє доступ лише користувачам з роллю ORGANIZER або ADMIN."""
 
-    message = 'Доступ лише для організаторів турнірів.'
+    message = "Доступ лише для організаторів турнірів."
 
     def has_permission(self, request, view):
         return bool(
-            request.user and
-            request.user.is_authenticated and
-            request.user.role in ('organizer', 'admin')
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ("organizer", "admin")
         )
 
 
 class IsCoach(BasePermission):
     """Дозволяє доступ лише тренерам та адміністраторам."""
 
-    message = 'Доступ лише для тренерів.'
+    message = "Доступ лише для тренерів."
 
     def has_permission(self, request, view):
         return bool(
-            request.user and
-            request.user.is_authenticated and
-            request.user.role in ('coach', 'admin')
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ("coach", "admin")
         )
 
 
 class IsJudge(BasePermission):
     """Дозволяє доступ суддям та адміністраторам."""
 
-    message = 'Доступ лише для суддів.'
+    message = "Доступ лише для суддів."
 
     def has_permission(self, request, view):
         return bool(
-            request.user and
-            request.user.is_authenticated and
-            request.user.role in ('judge', 'admin')
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ("judge", "admin")
         )
 
 
 class IsOwnerOrReadOnly(BasePermission):
     """Запис — лише власнику об'єкта; читання — будь-якому автентифікованому."""
 
-    message = 'Редагування дозволено лише власнику.'
+    message = "Редагування дозволено лише власнику."
 
     def has_object_permission(self, request, view, obj):
         # Безпечні методи (GET, HEAD, OPTIONS) — для всіх
@@ -58,10 +59,12 @@ class IsOwnerOrReadOnly(BasePermission):
 
         # Запис — лише якщо об'єкт «належить» поточному користувачу.
         # Підтримуємо атрибути owner, organizer, coach, user.
-        owner = getattr(obj, 'owner', None) \
-            or getattr(obj, 'organizer', None) \
-            or getattr(obj, 'coach', None) \
-            or getattr(obj, 'user', None)
+        owner = (
+            getattr(obj, "owner", None)
+            or getattr(obj, "organizer", None)
+            or getattr(obj, "coach", None)
+            or getattr(obj, "user", None)
+        )
 
         return owner == request.user
 
@@ -73,7 +76,7 @@ class IsOrganizerOrReadOnly(BasePermission):
         if request.method in SAFE_METHODS:
             return bool(request.user and request.user.is_authenticated)
         return bool(
-            request.user and
-            request.user.is_authenticated and
-            request.user.role in ('organizer', 'admin')
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ("organizer", "admin")
         )

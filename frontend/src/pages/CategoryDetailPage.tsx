@@ -64,6 +64,7 @@ export default function CategoryDetailPage() {
     setAthletes(Array.isArray(data) ? data : data.results);
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchAll(); }, [id]);
   useEffect(() => { if (regDialogOpen) fetchAthletes(); }, [regDialogOpen]);
 

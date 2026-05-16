@@ -83,6 +83,7 @@ export default function AthletesPage() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(); }, []);
 
   const filtered = athletes.filter((a) => {
@@ -102,7 +103,7 @@ export default function AthletesPage() {
         birth_date: data.date_of_birth,
         gender: genderMap[data.gender as "M" | "F"],
         base_weight: data.weight,
-        club_id: isCoach && !isOrganizer ? user?.club?.id : data.club,
+        club_id: isCoach && !isOrganizer ? user?.club?.id : ("club" in data ? data.club : undefined),
       };
 
       await api.post("/athletes/", payload);

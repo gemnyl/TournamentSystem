@@ -13,16 +13,18 @@ Unit-тести для підсистеми генерації турнірни�
 або
     python manage.py test apps.brackets
 """
-import pytest
+
 import random
+
+import pytest
 
 from apps.brackets import utils
 from apps.brackets.utils import Participant
 
-
 # ---------------------------------------------------------------------------
 # Математична база (не потребує БД)
 # ---------------------------------------------------------------------------
+
 
 class TestBracketMath:
     def test_next_power_of_two_basic(self):
@@ -69,14 +71,15 @@ class TestBracketMath:
 # Розведення одноклубників
 # ---------------------------------------------------------------------------
 
+
 class TestClubSeeding:
     def test_resolve_conflicts_fixes_adjacent_club_mates(self):
         # 4 учасники, усі перші двоє з одного клубу — слід розвести
         slots = [
-            Participant(1, 'A1', club_id=10),
-            Participant(2, 'A2', club_id=10),  # конфлікт
-            Participant(3, 'A3', club_id=20),
-            Participant(4, 'A4', club_id=30),
+            Participant(1, "A1", club_id=10),
+            Participant(2, "A2", club_id=10),  # конфлікт
+            Participant(3, "A3", club_id=20),
+            Participant(4, "A4", club_id=30),
         ]
         rng = random.Random(42)  # детермінований seed для тесту
         resolved = utils.resolve_club_conflicts(slots, rng=rng)
@@ -85,12 +88,11 @@ class TestClubSeeding:
         pair2 = (resolved[2], resolved[3])
         for a, b in (pair1, pair2):
             if a and b and a.club_id and b.club_id:
-                assert a.club_id != b.club_id, \
-                    f'Одноклубники {a} і {b} у першому раунді'
+                assert a.club_id != b.club_id, f"Одноклубники {a} і {b} у першому раунді"
 
     def test_resolve_with_all_same_club_gracefully_degrades(self):
         # Усі з одного клубу — розвести неможливо, має не зависати
-        slots = [Participant(i, f'A{i}', club_id=1) for i in range(1, 5)]
+        slots = [Participant(i, f"A{i}", club_id=1) for i in range(1, 5)]
         rng = random.Random(42)
         result = utils.resolve_club_conflicts(slots, rng=rng)
         assert len(result) == 4
@@ -100,36 +102,25 @@ class TestClubSeeding:
 # Повний цикл побудови single-elimination
 # ---------------------------------------------------------------------------
 
+
 class TestSingleEliminationSlots:
     def test_eight_participants_full_bracket(self):
-        participants = [
-            Participant(i, f'A{i}', club_id=i % 4, seed=i)
-            for i in range(1, 9)
-        ]
-        slots = utils.build_single_elimination_slots(
-            participants, avoid_club_conflicts=False
-        )
+        participants = [Participant(i, f"A{i}", club_id=i % 4, seed=i) for i in range(1, 9)]
+        slots = utils.build_single_elimination_slots(participants, avoid_club_conflicts=False)
         assert len(slots) == 8
         assert all(s is not None for s in slots)
         # Перший посів має бути на позиції 0
         assert slots[0].seed == 1
 
     def test_five_participants_bracket_padded_with_byes(self):
-        participants = [
-            Participant(i, f'A{i}', club_id=i, seed=i)
-            for i in range(1, 6)
-        ]
-        slots = utils.build_single_elimination_slots(
-            participants, avoid_club_conflicts=False
-        )
+        participants = [Participant(i, f"A{i}", club_id=i, seed=i) for i in range(1, 6)]
+        slots = utils.build_single_elimination_slots(participants, avoid_club_conflicts=False)
         assert len(slots) == 8
         none_count = sum(1 for s in slots if s is None)
         assert none_count == 3  # три BYE
 
     def test_tree_has_correct_number_of_rounds(self):
-        participants = [
-            Participant(i, f'A{i}', seed=i) for i in range(1, 9)
-        ]
+        participants = [Participant(i, f"A{i}", seed=i) for i in range(1, 9)]
         slots = utils.build_single_elimination_slots(participants)
         tree = utils.build_single_elimination_tree(slots)
         assert len(tree) == 3  # 1/4 → 1/2 → фінал
@@ -137,14 +128,12 @@ class TestSingleEliminationSlots:
         assert len(tree[-1]) == 1  # фінал — 1 матч
 
     def test_tree_for_five_has_auto_advances(self):
-        participants = [
-            Participant(i, f'A{i}', seed=i) for i in range(1, 6)
-        ]
+        participants = [Participant(i, f"A{i}", seed=i) for i in range(1, 6)]
         slots = utils.build_single_elimination_slots(participants)
         tree = utils.build_single_elimination_tree(slots)
         # Серед матчів першого раунду мають бути BYE
         first_round = tree[0]
-        bye_count = sum(1 for m in first_round if m.get('is_bye'))
+        bye_count = sum(1 for m in first_round if m.get("is_bye"))
         assert bye_count == 3
 
 
@@ -152,9 +141,10 @@ class TestSingleEliminationSlots:
 # Round robin
 # ---------------------------------------------------------------------------
 
+
 class TestRoundRobin:
     def test_even_count_generates_n_minus_one_rounds(self):
-        participants = [Participant(i, f'A{i}') for i in range(1, 5)]
+        participants = [Participant(i, f"A{i}") for i in range(1, 5)]
         schedule = utils.build_round_robin_schedule(participants)
         assert len(schedule) == 3
         # У кожному турі має бути 2 пари
@@ -162,7 +152,7 @@ class TestRoundRobin:
             assert len(round_) == 2
 
     def test_odd_count_adds_bye(self):
-        participants = [Participant(i, f'A{i}') for i in range(1, 6)]
+        participants = [Participant(i, f"A{i}") for i in range(1, 6)]
         schedule = utils.build_round_robin_schedule(participants)
         assert len(schedule) == 5
         # У кожному турі хтось один вільний (пара з None)
@@ -171,21 +161,21 @@ class TestRoundRobin:
             assert has_bye
 
     def test_every_pair_plays_exactly_once(self):
-        participants = [Participant(i, f'A{i}') for i in range(1, 7)]
+        participants = [Participant(i, f"A{i}") for i in range(1, 7)]
         schedule = utils.build_round_robin_schedule(participants)
         seen_pairs = set()
         for round_ in schedule:
             for a, b in round_:
                 if a and b:
                     key = tuple(sorted([a.id, b.id]))
-                    assert key not in seen_pairs, f'Дубль пари: {key}'
+                    assert key not in seen_pairs, f"Дубль пари: {key}"
                     seen_pairs.add(key)
         # Очікуване число пар = C(6, 2) = 15
         assert len(seen_pairs) == 15
 
     def test_rejects_single_participant(self):
         with pytest.raises(ValueError):
-            utils.build_round_robin_schedule([Participant(1, 'A1')])
+            utils.build_round_robin_schedule([Participant(1, "A1")])
 
 
 # ---------------------------------------------------------------------------
@@ -195,15 +185,16 @@ class TestRoundRobin:
 # без django-settings. Запускати через: python manage.py test apps.brackets
 
 try:
-    from django.test import TestCase
-    from django.utils import timezone
     from datetime import date, timedelta
 
-    from apps.accounts.models import User, Club
+    from django.test import TestCase
+    from django.utils import timezone
+
+    from apps.accounts.models import Club, User
     from apps.athletes.models import Athlete
-    from apps.tournaments.models import Tournament, Category, Registration
-    from apps.matches.models import Match
     from apps.brackets.services import BracketGenerator
+    from apps.matches.models import Match
+    from apps.tournaments.models import Category, Registration, Tournament
 
     class BracketGeneratorIntegrationTest(TestCase):
         """Інтеграційний тест: створюємо турнір, учасників і перевіряємо
@@ -211,33 +202,39 @@ try:
 
         def setUp(self):
             self.organizer = User.objects.create_user(
-                email='org@test.local', password='test12345',
-                first_name='Test', last_name='Organizer',
+                email="org@test.local",
+                password="test12345",
+                first_name="Test",
+                last_name="Organizer",
                 role=User.Role.ORGANIZER,
             )
             self.coach = User.objects.create_user(
-                email='coach@test.local', password='test12345',
-                first_name='Test', last_name='Coach',
+                email="coach@test.local",
+                password="test12345",
+                first_name="Test",
+                last_name="Coach",
                 role=User.Role.COACH,
             )
-            self.club_a = Club.objects.create(name='Club A', region='Kyiv')
-            self.club_b = Club.objects.create(name='Club B', region='Lviv')
+            self.club_a = Club.objects.create(name="Club A", region="Kyiv")
+            self.club_b = Club.objects.create(name="Club B", region="Lviv")
 
             self.tournament = Tournament.objects.create(
                 organizer=self.organizer,
-                title='Test Cup 2026',
-                sport_type='Karate',
-                location='Zhytomyr',
+                title="Test Cup 2026",
+                sport_type="Karate",
+                location="Zhytomyr",
                 start_date=timezone.now() + timedelta(days=30),
                 end_date=timezone.now() + timedelta(days=31),
                 status=Tournament.Status.REGISTRATION,
             )
             self.category = Category.objects.create(
                 tournament=self.tournament,
-                name='Men -75kg',
+                name="Men -75kg",
                 allowed_gender=Category.AllowedGender.MALE,
-                min_age=18, max_age=35,
-                min_weight=70, max_weight=75,
+                min_age=18,
+                max_age=35,
+                min_weight=70,
+                max_weight=75,
                 bracket_format=Category.BracketFormat.SINGLE_ELIMINATION,
             )
 
@@ -246,14 +243,17 @@ try:
             for i in range(1, count + 1):
                 club = self.club_a if i % 2 == 0 else self.club_b
                 athlete = Athlete.objects.create(
-                    coach=self.coach, club=club,
-                    first_name=f'Name{i}', last_name=f'Surname{i}',
+                    coach=self.coach,
+                    club=club,
+                    first_name=f"Name{i}",
+                    last_name=f"Surname{i}",
                     gender=Athlete.Gender.MALE,
                     birth_date=date(2000, 1, 1),
                     base_weight=73,
                 )
                 reg = Registration.objects.create(
-                    athlete=athlete, category=self.category,
+                    athlete=athlete,
+                    category=self.category,
                     seed_number=i,
                     recorded_weight=73,
                     status=Registration.Status.CONFIRMED,
@@ -264,7 +264,7 @@ try:
         def test_single_elimination_8_creates_7_matches(self):
             self._create_confirmed_registrations(8)
             gen = BracketGenerator(self.category)
-            matches = gen.generate_single_elimination()
+            gen.generate_single_elimination()
             # 8 учасників → 7 матчів (4+2+1)
             assert Match.objects.filter(category=self.category).count() == 7
 
@@ -298,13 +298,13 @@ try:
             self._create_confirmed_registrations(4)
             gen = BracketGenerator(self.category)
             gen.generate_single_elimination()
-            with pytest.raises(Exception):
+            with pytest.raises(Exception, match=".*"):
                 gen.generate_single_elimination()
 
         def test_rejects_with_less_than_two_participants(self):
             self._create_confirmed_registrations(1)
             gen = BracketGenerator(self.category)
-            with pytest.raises(Exception):
+            with pytest.raises(Exception, match=".*"):
                 gen.generate()
 
 except ImportError:
