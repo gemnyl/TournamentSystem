@@ -1,0 +1,48 @@
+# Python artefacts
+__pycache__
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info
+dist
+build
+*.egg
+
+# Virtual environments
+.venv
+venv
+env
+
+# Django artefacts
+staticfiles/
+media/
+
+# Tests / coverage
+.pytest_cache
+.coverage
+htmlcov
+coverage.xml
+
+# Linting / type-checking caches
+.ruff_cache
+.mypy_cache
+
+# Environment files — НІКОЛИ не включати у образ
+.env
+.env.*
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/docs
+.github
+*.sh

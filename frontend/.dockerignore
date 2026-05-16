@@ -1,0 +1,36 @@
+# Node artefacts
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist
+dist-ssr
+
+# Tests
+playwright-report
+test-results
+coverage
+
+# TypeScript build info (не потрібні для docker build)
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.production   # якщо є — дозволяємо
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/docs
+.github

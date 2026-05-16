@@ -1,0 +1,43 @@
+##
+# .github/workflows/mirror-gitlab.yml
+#
+# Мірорінг до університетського GitLab.
+# Тригер: push до main (merge PR).
+# Потрібні secrets:
+#   GITLAB_DEPLOY_KEY — приватний SSH-ключ (ed25519), публічна частина
+#                       додана як Deploy Key у GitLab-репо з правом Write.
+#   GITLAB_REPO_URL   — SSH URL репо у форматі git@gitlab.example.com:user/repo.git
+##
+
+name: Mirror to GitLab
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  mirror:
+    name: git push --mirror → GitLab
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # потрібно для --mirror
+
+      - name: Configure SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.GITLAB_DEPLOY_KEY }}
+
+      - name: Add GitLab host to known_hosts
+        run: |
+          GITLAB_HOST=$(echo "${{ secrets.GITLAB_REPO_URL }}" \
+            | sed -E 's|git@([^:]+):.*|\1|')
+          ssh-keyscan -H "$GITLAB_HOST" >> ~/.ssh/known_hosts
+
+      - name: Push mirror to GitLab
+        run: |
+          git remote add gitlab "${{ secrets.GITLAB_REPO_URL }}"
+          git push --mirror gitlab

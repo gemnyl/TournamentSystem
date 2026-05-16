@@ -2,6 +2,9 @@
 
 Веб-сервіс для управління турнірами з бойових мистецтв.
 
+[![CI](https://github.com/gemnyl/TournamentSystem/actions/workflows/ci.yml/badge.svg)](https://github.com/gemnyl/TournamentSystem/actions/workflows/ci.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=gemnyl_TournamentSystem&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=gemnyl_TournamentSystem)
+
 ## Tech Stack
 
 | Layer | Tech |
@@ -41,8 +44,6 @@ cp backend/.env.example backend/.env
 docker compose up -d db redis
 ```
 
-> ℹ️ Файл `docker-compose.yml` з'явиться у наступній фазі розробки.
-> Альтернатива: встановіть PostgreSQL і Redis локально та вкажіть їх параметри у `.env`.
 
 ### 4. Встановлюємо Python-залежності
 
@@ -132,26 +133,86 @@ pre-commit install
 
 ---
 
+## 🐳 Local development with Docker
+
+Повне середовище (PostgreSQL + Redis + backend + frontend) запускається однією командою:
+
+```bash
+# 1. Скопіюй .env.example (за потреби змін — відредагуй)
+cp backend/.env.example backend/.env
+
+# 2. Збери образи та стартуй всі сервіси у фоні
+docker compose up -d --build
+
+# 3. Перевір liveness
+curl http://localhost:8000/healthz/
+# → {"status": "ok"}
+
+# 4. Перевір readiness (БД + Redis)
+curl http://localhost:8000/readyz/
+# → {"status": "ok"}
+```
+
+| URL | Сервіс |
+|---|---|
+| `http://localhost` | Frontend (nginx → React SPA) |
+| `http://localhost:8000/api/` | Backend REST API |
+| `ws://localhost/ws/` | WebSocket (через nginx proxy) |
+| `http://localhost:8000/admin/` | Django Admin |
+
+### Запуск лише частини стеку
+
+```bash
+# Тільки інфраструктура (для локальної розробки без Docker-бекенду)
+docker compose up -d db redis
+
+# Зупинити і видалити контейнери (volumes збережуться)
+docker compose down
+
+# Повне очищення (включно з volumes)
+docker compose down -v
+```
+
+### Health endpoints
+
+| Endpoint | Призначення | Успішна відповідь |
+|---|---|---|
+| `GET /healthz/` | Liveness probe | `200 {"status": "ok"}` |
+| `GET /readyz/` | Readiness probe (DB + Redis) | `200 {"status": "ok"}` або `503` з деталями |
+
 ## 📁 Структура проєкту
 
 ```
 tournament-webservice/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml              # Lint + Test + Docker build
+│       ├── sonar.yml           # SonarCloud аналіз
+│       └── mirror-gitlab.yml   # Міроринг до університетського GitLab
 ├── backend/
 │   ├── apps/
-│   │   ├── accounts/     # Користувачі, клуби, ролі
-│   │   ├── athletes/     # Профілі спортсменів
-│   │   ├── tournaments/  # Турніри, категорії, реєстрації
-│   │   ├── matches/      # Матчі, WebSocket consumers
-│   │   └── brackets/     # Генерація турнірних сіток
-│   ├── config/           # Django settings, urls, asgi
-│   ├── fixtures/         # Demo data
+│   │   ├── accounts/           # Користувачі, клуби, ролі
+│   │   ├── athletes/           # Профілі спортсменів
+│   │   ├── common/             # Спільні утиліти (health endpoints)
+│   │   ├── tournaments/        # Турніри, категорії, реєстрації
+│   │   ├── matches/            # Матчі, WebSocket consumers
+│   │   └── brackets/           # Генерація турнірних сіток
+│   ├── config/                 # Django settings, urls, asgi
+│   ├── fixtures/               # Demo data
+│   ├── Dockerfile              # Multi-stage: builder → runtime (daphne)
+│   ├── .dockerignore
 │   ├── requirements.txt
 │   └── pyproject.toml
-└── frontend/
-    ├── src/
-    │   ├── pages/        # Сторінки (React Router)
-    │   ├── components/   # UI-компоненти
-    │   ├── stores/       # Zustand stores
-    │   └── lib/          # API client, utils
-    └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── pages/              # Сторінки (React Router)
+│   │   ├── components/         # UI-компоненти
+│   │   ├── stores/             # Zustand stores
+│   │   └── lib/                # API client, utils
+│   ├── Dockerfile              # Multi-stage: node builder → nginx runtime
+│   ├── nginx.conf              # SPA fallback + /api + /ws proxy
+│   ├── .dockerignore
+│   └── package.json
+├── docker-compose.yml          # Локальне середовище
+└── sonar-project.properties    # SonarCloud конфіг
 ```

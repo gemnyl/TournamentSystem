@@ -9,15 +9,20 @@
     /api/tournaments/— турніри + категорії + реєстрації
     /api/matches/    — поєдинки
 """
+
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
+
+from apps.common.health import liveness, readiness
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-
+    path("admin/", admin.site.urls),
+    # Health probes (liveness + readiness)
+    path("healthz/", liveness, name="healthz"),
+    path("readyz/", readiness, name="readyz"),
     # REST API
-    path('api/auth/',        include('apps.accounts.urls')),
-    path('api/',             include('apps.athletes.urls')),
-    path('api/',             include('apps.tournaments.urls')),
-    path('api/',             include('apps.matches.urls')),
+    path("api/auth/", include("apps.accounts.urls")),
+    path("api/", include("apps.athletes.urls")),
+    path("api/", include("apps.tournaments.urls")),
+    path("api/", include("apps.matches.urls")),
 ]
