@@ -25,6 +25,8 @@ class Match(models.Model):
         WITHDRAWAL = "withdrawal", "Знято з поєдинку"
         POINTS = "points", "За очками"
 
+    REG_MODEL = "tournaments.Registration"
+
     category = models.ForeignKey(
         "tournaments.Category",
         on_delete=models.CASCADE,
@@ -32,7 +34,7 @@ class Match(models.Model):
         verbose_name="Категорія",
     )
     reg_first = models.ForeignKey(
-        "tournaments.Registration",
+        REG_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -40,7 +42,7 @@ class Match(models.Model):
         verbose_name="Учасник 1",
     )
     reg_second = models.ForeignKey(
-        "tournaments.Registration",
+        REG_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

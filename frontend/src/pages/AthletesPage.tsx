@@ -97,13 +97,16 @@ export default function AthletesPage() {
     try {
       // Тренер: клуб беремо з його профілю, не питаємо
       const genderMap = { M: "male", F: "female" };
+      const isCoachOnly = isCoach && !isOrganizer;
+      const clubId = isCoachOnly ? user?.club?.id : ("club" in data ? data.club : undefined);
+
       const payload = {
         first_name: data.first_name,
         last_name: data.last_name,
         birth_date: data.date_of_birth,
         gender: genderMap[data.gender as "M" | "F"],
         base_weight: data.weight,
-        club_id: isCoach && !isOrganizer ? user?.club?.id : ("club" in data ? data.club : undefined),
+        club_id: clubId,
       };
 
       await api.post("/athletes/", payload);

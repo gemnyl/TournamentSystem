@@ -37,28 +37,28 @@ class MatchAPITestCase(TestCase):
 
         self.organizer = User.objects.create_user(
             email="org@match.test",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Орг",
             last_name="Тест",
             role=User.Role.ORGANIZER,
         )
         self.coach = User.objects.create_user(
             email="coach@match.test",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Тренер",
             last_name="Тест",
             role=User.Role.COACH,
         )
         self.judge = User.objects.create_user(
             email="judge@match.test",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Суддя",
             last_name="Тест",
             role=User.Role.JUDGE,
         )
         self.spectator = User.objects.create_user(
             email="spec@match.test",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Глядач",
             last_name="Тест",
             role=User.Role.SPECTATOR,
