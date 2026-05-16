@@ -1,0 +1,95 @@
+##
+# docker-compose.yml — локальне середовище розробки
+#
+# Сервіси:
+#   db       — PostgreSQL 16 (з healthcheck)
+#   redis    — Redis 7     (з healthcheck)
+#   backend  — Django/Daphne (чекає на db + redis)
+#   frontend — Vite build + nginx (чекає на backend)
+#
+# Запуск:
+#   docker compose up -d
+#   curl localhost:8000/healthz/
+#   відкрий http://localhost  (фронт)
+##
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-tournament_db}
+      POSTGRES_USER:     ${DB_USER:-tournament_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tournament_pass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ── Backend (Django / Daphne) ────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_SECRET_KEY:     ${DJANGO_SECRET_KEY:-django-insecure-local-dev-key-change-me}
+      DJANGO_DEBUG:          ${DJANGO_DEBUG:-True}
+      DJANGO_ALLOWED_HOSTS:  "localhost 127.0.0.1 backend"
+      DB_HOST:               db
+      DB_PORT:               5432
+      DB_NAME:               ${DB_NAME:-tournament_db}
+      DB_USER:               ${DB_USER:-tournament_user}
+      DB_PASSWORD:           ${DB_PASSWORD:-tournament_pass}
+      REDIS_HOST:            redis
+      REDIS_PORT:            6379
+      USE_REDIS_CHANNEL_LAYER: "True"
+      CORS_ALLOWED_ORIGINS:  "http://localhost http://127.0.0.1"
+    volumes:
+      - staticfiles:/app/staticfiles
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/healthz/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Frontend (nginx + React SPA) ────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  staticfiles:
