@@ -11,6 +11,7 @@
 Запуск:
     python manage.py test apps.tournaments
 """
+
 from datetime import date, timedelta
 
 from django.test import TestCase
@@ -30,32 +31,40 @@ class TournamentAPITestCase(TestCase):
         self.client = APIClient()
 
         # Клуби
-        self.club_a = Club.objects.create(name='Тест Клуб А', region='Київ')
-        self.club_b = Club.objects.create(name='Тест Клуб Б', region='Львів')
+        self.club_a = Club.objects.create(name="Тест Клуб А", region="Київ")
+        self.club_b = Club.objects.create(name="Тест Клуб Б", region="Львів")
 
         # Користувачі
         self.organizer = User.objects.create_user(
-            email='organizer@test.local', password='test12345',
-            first_name='Органіс', last_name='Таторенко',
-            role=User.Role.ORGANIZER, club=self.club_a,
+            email="organizer@test.local",
+            password="test12345",
+            first_name="Органіс",
+            last_name="Таторенко",
+            role=User.Role.ORGANIZER,
+            club=self.club_a,
         )
         self.coach = User.objects.create_user(
-            email='coach@test.local', password='test12345',
-            first_name='Тренер', last_name='Коченко',
-            role=User.Role.COACH, club=self.club_a,
+            email="coach@test.local",
+            password="test12345",
+            first_name="Тренер",
+            last_name="Коченко",
+            role=User.Role.COACH,
+            club=self.club_a,
         )
         self.judge = User.objects.create_user(
-            email='judge@test.local', password='test12345',
-            first_name='Суддя', last_name='Суддяренко',
+            email="judge@test.local",
+            password="test12345",
+            first_name="Суддя",
+            last_name="Суддяренко",
             role=User.Role.JUDGE,
         )
 
         # Базовий турнір
         self.tournament = Tournament.objects.create(
             organizer=self.organizer,
-            title='Тестовий Турнір',
-            sport_type='Карате',
-            location='Тест Арена',
+            title="Тестовий Турнір",
+            sport_type="Карате",
+            location="Тест Арена",
             start_date=timezone.now() + timedelta(days=30),
             end_date=timezone.now() + timedelta(days=31),
             status=Tournament.Status.REGISTRATION,
@@ -64,10 +73,12 @@ class TournamentAPITestCase(TestCase):
         # Базова категорія
         self.category = Category.objects.create(
             tournament=self.tournament,
-            name='Чоловіки -75кг',
+            name="Чоловіки -75кг",
             allowed_gender=Category.AllowedGender.MALE,
-            min_age=18, max_age=35,
-            min_weight=70, max_weight=75,
+            min_age=18,
+            max_age=35,
+            min_weight=70,
+            max_weight=75,
             bracket_format=Category.BracketFormat.SINGLE_ELIMINATION,
         )
 
@@ -79,15 +90,19 @@ class TournamentAPITestCase(TestCase):
         """Хелпер: створює атлета з підтвердженою реєстрацією."""
         club = club or self.club_a
         athlete = Athlete.objects.create(
-            coach=self.coach, club=club,
-            first_name=f'Ім\'я{idx}', last_name=f'Прізвище{idx}',
+            coach=self.coach,
+            club=club,
+            first_name=f"Ім'я{idx}",
+            last_name=f"Прізвище{idx}",
             gender=Athlete.Gender.MALE,
             birth_date=date(2000, 1, 1),
             base_weight=73,
         )
         reg = Registration.objects.create(
-            athlete=athlete, category=self.category,
-            seed_number=idx, recorded_weight=73,
+            athlete=athlete,
+            category=self.category,
+            seed_number=idx,
+            recorded_weight=73,
             status=Registration.Status.CONFIRMED,
         )
         return athlete, reg
@@ -99,28 +114,28 @@ class TestTournamentCreation(TournamentAPITestCase):
     def test_organizer_can_create_tournament(self):
         self._login(self.organizer)
         payload = {
-            'title': 'Новий Кубок',
-            'sport_type': 'Дзюдо',
-            'location': 'Спорткомплекс',
-            'start_date': (timezone.now() + timedelta(days=60)).isoformat(),
-            'end_date':   (timezone.now() + timedelta(days=61)).isoformat(),
+            "title": "Новий Кубок",
+            "sport_type": "Дзюдо",
+            "location": "Спорткомплекс",
+            "start_date": (timezone.now() + timedelta(days=60)).isoformat(),
+            "end_date": (timezone.now() + timedelta(days=61)).isoformat(),
         }
-        response = self.client.post('/api/tournaments/', payload, format='json')
+        response = self.client.post("/api/tournaments/", payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['title'], 'Новий Кубок')
-        self.assertEqual(response.data['status'], Tournament.Status.DRAFT)
+        self.assertEqual(response.data["title"], "Новий Кубок")
+        self.assertEqual(response.data["status"], Tournament.Status.DRAFT)
 
     def test_coach_cannot_create_tournament(self):
         """Тренер не має права створювати турніри."""
         self._login(self.coach)
         payload = {
-            'title': 'Спроба тренера',
-            'sport_type': 'Карате',
-            'location': 'Десь',
-            'start_date': (timezone.now() + timedelta(days=10)).isoformat(),
-            'end_date':   (timezone.now() + timedelta(days=11)).isoformat(),
+            "title": "Спроба тренера",
+            "sport_type": "Карате",
+            "location": "Десь",
+            "start_date": (timezone.now() + timedelta(days=10)).isoformat(),
+            "end_date": (timezone.now() + timedelta(days=11)).isoformat(),
         }
-        response = self.client.post('/api/tournaments/', payload, format='json')
+        response = self.client.post("/api/tournaments/", payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_tournament_status_transitions(self):
@@ -128,22 +143,24 @@ class TestTournamentCreation(TournamentAPITestCase):
         self._login(self.organizer)
         # Починаємо з чернетки
         t = Tournament.objects.create(
-            organizer=self.organizer, title='Стейт Турнір',
-            sport_type='Тхеквондо', location='Зал',
+            organizer=self.organizer,
+            title="Стейт Турнір",
+            sport_type="Тхеквондо",
+            location="Зал",
             start_date=timezone.now() + timedelta(days=10),
             end_date=timezone.now() + timedelta(days=11),
         )
         self.assertEqual(t.status, Tournament.Status.DRAFT)
 
-        r = self.client.post(f'/api/tournaments/{t.pk}/open_registration/')
+        r = self.client.post(f"/api/tournaments/{t.pk}/open_registration/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-        r = self.client.post(f'/api/tournaments/{t.pk}/start/')
+        r = self.client.post(f"/api/tournaments/{t.pk}/start/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-        r = self.client.post(f'/api/tournaments/{t.pk}/complete/')
+        r = self.client.post(f"/api/tournaments/{t.pk}/complete/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.data['status'], Tournament.Status.COMPLETED)
+        self.assertEqual(r.data["status"], Tournament.Status.COMPLETED)
 
 
 class TestAthleteRegistration(TournamentAPITestCase):
@@ -152,40 +169,45 @@ class TestAthleteRegistration(TournamentAPITestCase):
     def test_coach_can_register_athlete(self):
         self._login(self.coach)
         athlete = Athlete.objects.create(
-            coach=self.coach, club=self.club_a,
-            first_name='Новий', last_name='Атлет',
+            coach=self.coach,
+            club=self.club_a,
+            first_name="Новий",
+            last_name="Атлет",
             gender=Athlete.Gender.MALE,
             birth_date=date(2001, 5, 10),
             base_weight=73,
         )
-        payload = {'athlete_id': athlete.pk, 'category': self.category.pk}
-        response = self.client.post('/api/registrations/', payload, format='json')
+        payload = {"athlete_id": athlete.pk, "category": self.category.pk}
+        response = self.client.post("/api/registrations/", payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['status'], Registration.Status.PENDING)
+        self.assertEqual(response.data["status"], Registration.Status.PENDING)
 
     def test_organizer_can_confirm_weigh_in(self):
         """Організатор підтверджує зважування — статус стає confirmed."""
         self._login(self.coach)
         athlete = Athlete.objects.create(
-            coach=self.coach, club=self.club_a,
-            first_name='Зважений', last_name='Атлет',
+            coach=self.coach,
+            club=self.club_a,
+            first_name="Зважений",
+            last_name="Атлет",
             gender=Athlete.Gender.MALE,
             birth_date=date(2000, 3, 3),
             base_weight=73,
         )
         reg = Registration.objects.create(
-            athlete=athlete, category=self.category,
+            athlete=athlete,
+            category=self.category,
             status=Registration.Status.PENDING,
         )
 
         self._login(self.organizer)
         response = self.client.post(
-            f'/api/registrations/{reg.pk}/confirm_weigh_in/',
-            {'weight': 73.4},
-            format='json',
+            f"/api/registrations/{reg.pk}/confirm_weigh_in/",
+            {"weight": 73.4},
+            format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['status'], Registration.Status.CONFIRMED)
+        self.assertEqual(response.data["status"], Registration.Status.CONFIRMED)
 
 
 class TestBracketGeneration(TournamentAPITestCase):
@@ -199,9 +221,7 @@ class TestBracketGeneration(TournamentAPITestCase):
             self._create_athlete(i, club=club)
 
         self._login(self.organizer)
-        response = self.client.post(
-            f'/api/categories/{self.category.pk}/generate_bracket/'
-        )
+        response = self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(len(response.data), 7)
 
@@ -211,17 +231,13 @@ class TestBracketGeneration(TournamentAPITestCase):
             self._create_athlete(i)
 
         self._login(self.organizer)
-        self.client.post(f'/api/categories/{self.category.pk}/generate_bracket/')
-        response = self.client.post(
-            f'/api/categories/{self.category.pk}/generate_bracket/'
-        )
+        self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
+        response = self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_generate_bracket_insufficient_participants(self):
         """Менше 2 учасників → 400."""
         self._create_athlete(1)
         self._login(self.organizer)
-        response = self.client.post(
-            f'/api/categories/{self.category.pk}/generate_bracket/'
-        )
+        response = self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

@@ -1,4 +1,5 @@
 """Серіалайзери профілю спортсмена."""
+
 from rest_framework import serializers
 
 # Прямий імпорт безпечний: accounts.models не імпортує athletes.serializers,
@@ -13,7 +14,7 @@ class AthleteSerializer(serializers.ModelSerializer):
 
     club = ClubSerializer(read_only=True)
     club_id = serializers.PrimaryKeyRelatedField(
-        source='club',
+        source="club",
         queryset=Club.objects.all(),
         write_only=True,
     )
@@ -23,16 +24,24 @@ class AthleteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Athlete
         fields = [
-            'id', 'first_name', 'last_name', 'gender',
-            'birth_date', 'base_weight', 'skill_level',
-            'club', 'club_id', 'coach', 'age',
+            "id",
+            "first_name",
+            "last_name",
+            "gender",
+            "birth_date",
+            "base_weight",
+            "skill_level",
+            "club",
+            "club_id",
+            "coach",
+            "age",
         ]
-        read_only_fields = ['coach']
+        read_only_fields = ["coach"]
 
     def get_age(self, obj):
         return obj.calculate_current_age()
 
     def create(self, validated_data):
         # Тренер встановлюється автоматично з поточного запиту
-        validated_data['coach'] = self.context['request'].user
+        validated_data["coach"] = self.context["request"].user
         return super().create(validated_data)

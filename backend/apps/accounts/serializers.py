@@ -1,6 +1,7 @@
 """
 Серіалайзери підсистеми автентифікації та організаційної структури.
 """
+
 from django.contrib.auth import authenticate
 from rest_framework import serializers
 
@@ -12,7 +13,7 @@ class ClubSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Club
-        fields = ['id', 'name', 'region']
+        fields = ["id", "name", "region"]
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -24,10 +25,16 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'first_name', 'last_name',
-            'full_name', 'role', 'club', 'date_joined',
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "full_name",
+            "role",
+            "club",
+            "date_joined",
         ]
-        read_only_fields = ['date_joined']
+        read_only_fields = ["date_joined"]
 
     def get_full_name(self, obj):
         return obj.get_full_name()
@@ -40,7 +47,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     password_confirm = serializers.CharField(write_only=True)
     club_id = serializers.PrimaryKeyRelatedField(
         queryset=Club.objects.all(),
-        source='club',
+        source="club",
         required=False,
         allow_null=True,
     )
@@ -48,17 +55,22 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'email', 'first_name', 'last_name',
-            'role', 'club_id', 'password', 'password_confirm',
+            "email",
+            "first_name",
+            "last_name",
+            "role",
+            "club_id",
+            "password",
+            "password_confirm",
         ]
 
     def validate(self, attrs):
-        if attrs['password'] != attrs.pop('password_confirm'):
-            raise serializers.ValidationError({'password_confirm': 'Паролі не співпадають.'})
+        if attrs["password"] != attrs.pop("password_confirm"):
+            raise serializers.ValidationError({"password_confirm": "Паролі не співпадають."})
         return attrs
 
     def create(self, validated_data):
-        password = validated_data.pop('password')
+        password = validated_data.pop("password")
         user = User(**validated_data)
         user.set_password(password)
         user.save()
@@ -73,13 +85,13 @@ class LoginSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         user = authenticate(
-            request=self.context.get('request'),
-            username=attrs['email'],
-            password=attrs['password'],
+            request=self.context.get("request"),
+            username=attrs["email"],
+            password=attrs["password"],
         )
         if not user:
-            raise serializers.ValidationError('Невірний email або пароль.')
+            raise serializers.ValidationError("Невірний email або пароль.")
         if not user.is_active:
-            raise serializers.ValidationError('Обліковий запис деактивовано.')
-        attrs['user'] = user
+            raise serializers.ValidationError("Обліковий запис деактивовано.")
+        attrs["user"] = user
         return attrs
