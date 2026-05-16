@@ -6,6 +6,8 @@
 """
 import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,6 +28,13 @@ SECRET_KEY = os.environ.get(
 )
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
+
+# Guard: у production режимі стандартний insecure-ключ неприйнятний.
+if not DEBUG and SECRET_KEY.startswith('django-insecure-'):
+    raise ImproperlyConfigured(
+        'DJANGO_SECRET_KEY не встановлений або використовується небезпечне '
+        'значення за замовчуванням. Встановіть змінну оточення DJANGO_SECRET_KEY.'
+    )
 
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost 127.0.0.1').split()
 
@@ -109,19 +118,31 @@ DATABASES = {
 # Django Channels — Redis channel layer
 # ---------------------------------------------------------------------------
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [
-                (
-                    os.environ.get('REDIS_HOST', 'localhost'),
-                    int(os.environ.get('REDIS_PORT', 6379)),
-                )
-            ],
+# У тестовому середовищі (TEST=True або відсутній Redis) використовуємо InMemory.
+# Це дозволяє запускати pytest без запущеного Redis.
+_use_redis_channel_layer = os.environ.get('USE_REDIS_CHANNEL_LAYER', 'True') == 'True'
+
+if _use_redis_channel_layer:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [
+                    (
+                        os.environ.get('REDIS_HOST', 'localhost'),
+                        int(os.environ.get('REDIS_PORT', 6379)),
+                    )
+                ],
+            },
         },
-    },
-}
+    }
+else:
+    # Fallback для тестів без Redis
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 # ---------------------------------------------------------------------------
 # Кастомна модель користувача

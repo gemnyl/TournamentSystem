@@ -1,6 +1,9 @@
 """Серіалайзери профілю спортсмена."""
 from rest_framework import serializers
 
+# Прямий імпорт безпечний: accounts.models не імпортує athletes.serializers,
+# тому циклічної залежності немає.
+from apps.accounts.models import Club
 from apps.accounts.serializers import ClubSerializer, UserSerializer
 from apps.athletes.models import Athlete
 
@@ -11,7 +14,7 @@ class AthleteSerializer(serializers.ModelSerializer):
     club = ClubSerializer(read_only=True)
     club_id = serializers.PrimaryKeyRelatedField(
         source='club',
-        queryset=__import__('apps.accounts.models', fromlist=['Club']).Club.objects.all(),
+        queryset=Club.objects.all(),
         write_only=True,
     )
     coach = UserSerializer(read_only=True)
