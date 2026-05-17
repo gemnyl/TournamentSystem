@@ -1,0 +1,88 @@
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import Enum
+
+
+class JudgingMode(str, Enum):
+    POINTS = "points"
+    FLAGS = "flags"
+
+
+@dataclass(frozen=True)
+class ScoreAction:
+    key: str
+    label: str
+    points: int
+    is_warning: bool = False
+
+
+@dataclass(frozen=True)
+class WinMethodSpec:
+    key: str
+    label: str
+    requires_score_diff: bool = False
+
+
+@dataclass(frozen=True)
+class MatchState:
+    score_aka: int = 0
+    score_ao: int = 0
+    warnings_aka: int = 0
+    warnings_ao: int = 0
+    flags_aka: int | None = None
+    flags_ao: int | None = None
+    judges_count: int | None = None
+    senshu: str = "none"  # 'none' | 'aka' | 'ao'
+    winner: str | None = None
+    win_method: str | None = None
+    is_finished: bool = False
+
+
+@dataclass(frozen=True)
+class ScoreEvent:
+    corner: str  # 'aka' | 'ao'
+    action_key: str
+
+
+class BaseRuleSet(ABC):
+    key: str
+    name: str
+    sport_type: str
+    judging_mode: JudgingMode
+
+    @abstractmethod
+    def get_win_methods(self) -> Sequence[WinMethodSpec]: ...
+
+
+class PointsRuleSet(BaseRuleSet):
+    judging_mode = JudgingMode.POINTS
+
+    @abstractmethod
+    def get_score_actions(self) -> Sequence[ScoreAction]: ...
+
+    @abstractmethod
+    def apply_score_event(self, state: MatchState, event: ScoreEvent) -> MatchState: ...
+
+    @abstractmethod
+    def get_default_duration_seconds(self) -> int: ...
+
+    @abstractmethod
+    def get_max_warnings(self) -> int: ...
+
+    @abstractmethod
+    def check_auto_finish(self, state: MatchState) -> MatchState: ...
+
+
+class FlagsRuleSet(BaseRuleSet):
+    """Stub для Kata-фази — не реалізовано в поточній фазі."""
+
+    judging_mode = JudgingMode.FLAGS
+
+    @abstractmethod
+    def get_judges_count_options(self) -> Sequence[int]: ...
+
+    @abstractmethod
+    def apply_flags_decision(
+        self, state: MatchState, flags_aka: int, flags_ao: int, judges_count: int
+    ) -> MatchState: ...
