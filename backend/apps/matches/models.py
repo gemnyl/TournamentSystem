@@ -24,6 +24,16 @@ class Match(models.Model):
         WALKOVER = "walkover", "Неявка суперника"
         WITHDRAWAL = "withdrawal", "Знято з поєдинку"
         POINTS = "points", "За очками"
+        HANTEI = "hantei", "Hantei (рішення суддів)"
+        HANSOKU = "hansoku", "Hansoku (дискваліфікація)"
+        KIKEN = "kiken", "Kiken (відмова від участі)"
+        IPPON = "ippon", "Ippon"
+        WAZAARI = "wazaari", "Waza-ari"
+
+    class Senshu(models.TextChoices):
+        NONE = "none", "None"
+        AKA = "aka", "Aka"
+        AO = "ao", "Ao"
 
     category = models.ForeignKey(
         "tournaments.Category",
@@ -89,6 +99,21 @@ class Match(models.Model):
         related_name="loser_prev_matches",
         verbose_name="Матч для того, хто програв",
         help_text="Для double elimination (у MVP не використовується)",
+    )
+    senshu = models.CharField(
+        max_length=4,
+        choices=Senshu.choices,
+        default=Senshu.NONE,
+        verbose_name="Senshu (перша атака)",
+    )
+    flags_aka = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="Прапори Aka (Kata)"
+    )
+    flags_ao = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="Прапори Ao (Kata)"
+    )
+    judges_count = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="Кількість суддів (Kata)"
     )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.SCHEDULED, verbose_name="Статус"
