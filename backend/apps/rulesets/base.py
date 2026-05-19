@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class JudgingMode(str, Enum):
+class JudgingMode(StrEnum):
     POINTS = "points"
     FLAGS = "flags"
 
