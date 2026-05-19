@@ -129,12 +129,12 @@ class TestUpdateScore(MatchAPITestCase):
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/update_score/",
-            {"participant": 1, "delta": 1},
+            {"corner": "aka", "action_key": "yuko"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # yuko = 1 бал для aka (score_first)
         self.assertEqual(response.data["score_first"], 1)
-        # Статус має перейти в ONGOING
         self.assertEqual(response.data["status"], Match.Status.ONGOING)
 
     def test_spectator_cannot_update_score(self):
@@ -143,17 +143,27 @@ class TestUpdateScore(MatchAPITestCase):
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/update_score/",
-            {"participant": 1, "delta": 1},
+            {"corner": "aka", "action_key": "yuko"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_invalid_participant_returns_400(self):
+    def test_invalid_corner_returns_400(self):
         self._login(self.judge)
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/update_score/",
-            {"participant": 99, "delta": 1},
+            {"corner": "invalid_corner", "action_key": "yuko"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_fields_returns_400(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/update_score/",
+            {},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -169,21 +179,21 @@ class TestSetWinner(MatchAPITestCase):
 
         response = self.client.post(
             f"/api/matches/{match.pk}/set_winner/",
-            {"winner_id": winner_reg.pk, "method": Match.WinMethod.POINTS},
+            {"corner": "aka", "win_method": Match.WinMethod.HANTEI},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["winner"], winner_reg.pk)
-        self.assertEqual(response.data["win_method"], Match.WinMethod.POINTS)
+        self.assertEqual(response.data["win_method"], Match.WinMethod.HANTEI)
         self.assertEqual(response.data["status"], Match.Status.COMPLETED)
 
-    def test_invalid_winner_id_returns_400(self):
-        """winner_id не з учасників матчу → 400."""
+    def test_invalid_corner_returns_400(self):
+        """Неправильний corner → 400."""
         self._login(self.judge)
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/set_winner/",
-            {"winner_id": 99999, "method": "decision"},
+            {"corner": "invalid", "win_method": "hantei"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -203,7 +213,7 @@ class TestAdvanceParticipant(MatchAPITestCase):
 
         self.client.post(
             f"/api/matches/{match.pk}/set_winner/",
-            {"winner_id": winner_reg.pk, "method": "decision"},
+            {"corner": "aka", "win_method": "hantei"},
             format="json",
         )
 

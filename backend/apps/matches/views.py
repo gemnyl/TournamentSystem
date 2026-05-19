@@ -2,33 +2,39 @@
 Views підсистеми поєдинків.
 
 MatchViewSet:
-    update_score     — POST /api/matches/{id}/update_score/
-    add_warning      — POST /api/matches/{id}/add_warning/
-    set_winner       — POST /api/matches/{id}/set_winner/
-    bracket          — GET  /api/matches/bracket/?category={id}
+    update_score  — POST /api/matches/{id}/update_score/   body: {corner, action_key}
+    set_senshu    — POST /api/matches/{id}/set_senshu/     body: {value}
+    set_winner    — POST /api/matches/{id}/set_winner/     body: {corner, win_method}
+    bracket       — GET  /api/matches/bracket/?category={id}
 """
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.accounts.permissions import IsJudge
-from apps.matches.models import Match
+from apps.matches.models import Match, MatchEvent
 from apps.matches.serializers import BracketNodeSerializer, MatchSerializer
+from apps.matches.services.match_service import MatchService
 
 
-def _push_match_update(match: Match):
-    """Надсилає оновлений матч усім підписникам групи категорії через Channels."""
+def _push_match_event(match: Match, event: MatchEvent):
+    """Надсилає подію та актуальний стан матчу всім підписникам категорії."""
     channel_layer = get_channel_layer()
     group_name = f"category_{match.category_id}"
     async_to_sync(channel_layer.group_send)(
         group_name,
         {
-            "type": "match.update",
-            "data": MatchSerializer(match).data,
+            "type": "match.event",
+            "match_id": match.id,
+            "event": {
+                "sequence": event.sequence,
+                "event_type": event.event_type,
+                "payload": event.payload,
+            },
+            "match": MatchSerializer(match).data,
         },
     )
 
@@ -55,7 +61,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         return MatchSerializer
 
     def get_permissions(self):
-        if self.action in ("update_score", "add_warning", "set_winner"):
+        if self.action in ("update_score", "set_senshu", "set_winner"):
             return [IsJudge()]
         from rest_framework.permissions import AllowAny
 
@@ -68,82 +74,75 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"], url_path="update_score")
     def update_score(self, request, pk=None):
         """POST /api/matches/{id}/update_score/
-        Тіло: {"participant": 1, "delta": 1}
+        Тіло: {"corner": "aka"|"ao", "action_key": "yuko"|"wazaari"|"ippon"|"penalty"|...}
         """
         match = self.get_object()
-        participant = request.data.get("participant")
-        delta = int(request.data.get("delta", 1))
+        corner = request.data.get("corner")
+        action_key = request.data.get("action_key")
 
-        if participant not in (1, 2):
+        if not corner or not action_key:
             return Response(
-                {"detail": "participant має бути 1 або 2."},
+                {"detail": "Поля 'corner' та 'action_key' є обов'язковими."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            match.update_score(participant, delta)
-        except DjangoValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+            svc = MatchService(match)
+            svc.apply_score(corner, action_key, judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        _push_match_update(match)
+        last_event = match.events.order_by("-sequence").first()
+        _push_match_event(match, last_event)
         return Response(MatchSerializer(match).data)
 
-    @action(detail=True, methods=["post"], url_path="add_warning")
-    def add_warning(self, request, pk=None):
-        """POST /api/matches/{id}/add_warning/
-        Тіло: {"participant": 2}
+    @action(detail=True, methods=["post"], url_path="set_senshu")
+    def set_senshu(self, request, pk=None):
+        """POST /api/matches/{id}/set_senshu/
+        Тіло: {"value": "aka"|"ao"|"none"}
         """
         match = self.get_object()
-        participant = request.data.get("participant")
+        value = request.data.get("value")
 
-        if participant not in (1, 2):
+        if value is None:
             return Response(
-                {"detail": "participant має бути 1 або 2."},
+                {"detail": "Поле 'value' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            match.add_warning(participant)
-        except DjangoValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+            svc = MatchService(match)
+            svc.set_senshu(value, judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        _push_match_update(match)
+        last_event = match.events.order_by("-sequence").first()
+        _push_match_event(match, last_event)
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="set_winner")
     def set_winner(self, request, pk=None):
         """POST /api/matches/{id}/set_winner/
-        Тіло: {"winner_id": <registration_id>, "method": "ippon"}
+        Тіло: {"corner": "aka"|"ao", "win_method": "hantei"|"hansoku"|"kiken"|...}
         """
         match = self.get_object()
-        winner_id = request.data.get("winner_id")
-        method = request.data.get("method", Match.WinMethod.DECISION)
+        corner = request.data.get("corner")
+        win_method = request.data.get("win_method", Match.WinMethod.DECISION)
 
-        # Знаходимо реєстрацію серед учасників матчу
-        winner_reg = None
-        for reg in (match.reg_first, match.reg_second):
-            if reg and reg.id == winner_id:
-                winner_reg = reg
-                break
-
-        if winner_reg is None:
+        if not corner:
             return Response(
-                {"detail": "winner_id не відповідає жодному учаснику матчу."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if method not in Match.WinMethod.values:
-            return Response(
-                {"detail": f"Невідомий метод перемоги: {method}."},
+                {"detail": "Поле 'corner' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            match.set_winner(winner_reg, method)
-        except DjangoValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+            svc = MatchService(match)
+            svc.set_winner(corner, win_method, judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        _push_match_update(match)
+        last_event = match.events.order_by("-sequence").first()
+        _push_match_event(match, last_event)
         return Response(MatchSerializer(match).data)
 
     # ------------------------------------------------------------------
@@ -154,7 +153,6 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     def bracket(self, request):
         """GET /api/matches/bracket/?category={id}
         Повертає всі матчі категорії, згрупованих по раундах.
-        Зручно для візуалізації сітки на фронтенді.
         """
         category_id = request.query_params.get("category")
         if not category_id:
@@ -164,9 +162,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         matches = (
-            Match.objects.filter(
-                category_id=category_id,
-            )
+            Match.objects.filter(category_id=category_id)
             .select_related(
                 "reg_first__athlete__club",
                 "reg_second__athlete__club",
@@ -175,7 +171,6 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             .order_by("round_index", "match_order")
         )
 
-        # Групуємо по round_index
         rounds: dict[int, list] = {}
         for match in matches:
             rounds.setdefault(match.round_index, []).append(match)
