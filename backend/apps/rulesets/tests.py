@@ -2,6 +2,7 @@ from django.test import TestCase
 
 from apps.rulesets.base import MatchState, ScoreEvent
 from apps.rulesets.karate_wkf import KarateWKFRuleSet
+from apps.rulesets.registry import get_ruleset, list_rulesets
 from apps.rulesets.shobu_ippon import ShobuIpponRuleSet
 
 
@@ -126,3 +127,24 @@ class ShobuIpponRuleSetTest(TestCase):
         result = self.ruleset.check_auto_finish(state)
         self.assertTrue(result.is_finished)
         self.assertEqual(result.winner, "aka")
+
+
+class RegistryTest(TestCase):
+    def test_list_rulesets_returns_both(self):
+        rulesets = list_rulesets()
+        keys = {r["key"] for r in rulesets}
+        self.assertIn("karate_wkf", keys)
+        self.assertIn("shobu_ippon", keys)
+
+    def test_list_rulesets_has_required_fields(self):
+        for rs in list_rulesets():
+            for field in ("key", "name", "sport_type", "judging_mode"):
+                self.assertIn(field, rs)
+
+    def test_get_ruleset_returns_instance(self):
+        rs = get_ruleset("karate_wkf")
+        self.assertEqual(rs.key, "karate_wkf")
+
+    def test_get_ruleset_unknown_key_raises(self):
+        with self.assertRaises(KeyError):
+            get_ruleset("nonexistent_ruleset")

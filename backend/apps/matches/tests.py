@@ -23,6 +23,7 @@ from apps.accounts.models import Club, User
 from apps.athletes.models import Athlete
 from apps.brackets.services import BracketGenerator
 from apps.matches.models import Match
+from apps.matches.services.match_service import MatchService
 from apps.tournaments.models import Category, Registration, Tournament
 
 
@@ -223,6 +224,152 @@ class TestAdvanceParticipant(MatchAPITestCase):
             next_match.reg_first == winner_reg or next_match.reg_second == winner_reg,
             "Переможець не з'явився у next_match після set_winner",
         )
+
+
+class TestMatchService(MatchAPITestCase):
+    """Юніт-тести MatchService — без HTTP, без channel layer."""
+
+    def test_apply_score_creates_event(self):
+        match = self.first_round_match
+        MatchService(match).apply_score("aka", "yuko")
+        self.assertEqual(match.events.count(), 1)
+        event = match.events.first()
+        self.assertEqual(event.event_type, "score")
+        self.assertEqual(event.payload, {"corner": "aka", "action_key": "yuko"})
+
+    def test_apply_penalty_creates_warning_event(self):
+        match = self.first_round_match
+        MatchService(match).apply_score("ao", "penalty")
+        event = match.events.first()
+        self.assertEqual(event.event_type, "warning")
+        match.refresh_from_db()
+        self.assertEqual(match.warnings_second, 1)
+
+    def test_apply_score_invalid_action_key_raises(self):
+        match = self.first_round_match
+        with self.assertRaises(ValueError):
+            MatchService(match).apply_score("aka", "nonexistent")
+
+    def test_apply_score_invalid_corner_raises(self):
+        match = self.first_round_match
+        with self.assertRaises(ValueError):
+            MatchService(match).apply_score("shiro", "yuko")
+
+    def test_auto_finish_on_8_point_diff(self):
+        """3× ippon (9 балів) → auto-finish для WKF."""
+        match = self.first_round_match
+        svc = MatchService(match)
+        for _ in range(3):
+            svc.apply_score("aka", "ippon")
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+        self.assertEqual(match.winner, match.reg_first)
+        self.assertEqual(match.win_method, "points")
+
+    def test_set_senshu_updates_match_and_writes_event(self):
+        match = self.first_round_match
+        MatchService(match).set_senshu("aka")
+        match.refresh_from_db()
+        self.assertEqual(match.senshu, "aka")
+        event = match.events.first()
+        self.assertEqual(event.event_type, "senshu")
+        self.assertEqual(event.payload, {"value": "aka"})
+
+    def test_set_senshu_reset_to_none(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+        svc.set_senshu("ao")
+        svc.set_senshu("none")
+        match.refresh_from_db()
+        self.assertEqual(match.senshu, "none")
+
+    def test_set_senshu_invalid_value_raises(self):
+        match = self.first_round_match
+        with self.assertRaises(ValueError):
+            MatchService(match).set_senshu("shiro")
+
+    def test_set_winner_none_participant_raises(self):
+        match = self.first_round_match
+        match.reg_second = None
+        match.save(update_fields=["reg_second"])
+        with self.assertRaises(ValueError):
+            MatchService(match).set_winner("ao", "hantei")
+
+    def test_sequence_increments_per_event(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+        svc.apply_score("aka", "yuko")
+        svc.set_senshu("aka")
+        sequences = list(match.events.values_list("sequence", flat=True).order_by("sequence"))
+        self.assertEqual(sequences, [1, 2])
+
+
+class TestSetSenshuEndpoint(MatchAPITestCase):
+    """Тест ендпоінту set_senshu через HTTP."""
+
+    def test_judge_can_set_senshu(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/",
+            {"value": "aka"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["senshu"], "aka")
+
+    def test_reset_senshu_to_none(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        self.client.post(f"/api/matches/{match.pk}/set_senshu/", {"value": "ao"}, format="json")
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/", {"value": "none"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["senshu"], "none")
+
+    def test_invalid_value_returns_400(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/",
+            {"value": "shiro"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_value_returns_400(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(f"/api/matches/{match.pk}/set_senshu/", {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_spectator_cannot_set_senshu(self):
+        self._login(self.spectator)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/",
+            {"value": "aka"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestRulesetsEndpoint(MatchAPITestCase):
+    """Тест GET /api/rulesets/."""
+
+    def test_returns_all_rulesets(self):
+        response = self.client.get("/api/rulesets/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        keys = {r["key"] for r in response.data}
+        self.assertIn("karate_wkf", keys)
+        self.assertIn("shobu_ippon", keys)
+
+    def test_ruleset_has_required_fields(self):
+        response = self.client.get("/api/rulesets/")
+        first = response.data[0]
+        for field in ("key", "name", "sport_type", "judging_mode"):
+            self.assertIn(field, first)
 
 
 class TestBracketEndpoint(MatchAPITestCase):
