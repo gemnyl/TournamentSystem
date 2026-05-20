@@ -25,4 +25,5 @@ urlpatterns = [
     path("api/", include("apps.athletes.urls")),
     path("api/", include("apps.tournaments.urls")),
     path("api/", include("apps.matches.urls")),
+    path("api/", include("apps.rulesets.urls")),
 ]

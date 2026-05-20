@@ -14,7 +14,10 @@
 
 from datetime import date, timedelta
 
-from django.test import TestCase
+from channels.layers import get_channel_layer
+from channels.routing import URLRouter
+from channels.testing import WebsocketCommunicator
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -23,7 +26,15 @@ from apps.accounts.models import Club, User
 from apps.athletes.models import Athlete
 from apps.brackets.services import BracketGenerator
 from apps.matches.models import Match
+from apps.matches.routing import websocket_urlpatterns
+from apps.matches.services.match_service import MatchService
 from apps.tournaments.models import Category, Registration, Tournament
+
+_TEST_CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
 
 
 class MatchAPITestCase(TestCase):
@@ -129,12 +140,12 @@ class TestUpdateScore(MatchAPITestCase):
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/update_score/",
-            {"participant": 1, "delta": 1},
+            {"corner": "aka", "action_key": "yuko"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # yuko = 1 бал для aka (score_first)
         self.assertEqual(response.data["score_first"], 1)
-        # Статус має перейти в ONGOING
         self.assertEqual(response.data["status"], Match.Status.ONGOING)
 
     def test_spectator_cannot_update_score(self):
@@ -143,17 +154,27 @@ class TestUpdateScore(MatchAPITestCase):
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/update_score/",
-            {"participant": 1, "delta": 1},
+            {"corner": "aka", "action_key": "yuko"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_invalid_participant_returns_400(self):
+    def test_invalid_corner_returns_400(self):
         self._login(self.judge)
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/update_score/",
-            {"participant": 99, "delta": 1},
+            {"corner": "invalid_corner", "action_key": "yuko"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_fields_returns_400(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/update_score/",
+            {},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -169,21 +190,21 @@ class TestSetWinner(MatchAPITestCase):
 
         response = self.client.post(
             f"/api/matches/{match.pk}/set_winner/",
-            {"winner_id": winner_reg.pk, "method": Match.WinMethod.POINTS},
+            {"corner": "aka", "win_method": Match.WinMethod.HANTEI},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["winner"], winner_reg.pk)
-        self.assertEqual(response.data["win_method"], Match.WinMethod.POINTS)
+        self.assertEqual(response.data["win_method"], Match.WinMethod.HANTEI)
         self.assertEqual(response.data["status"], Match.Status.COMPLETED)
 
-    def test_invalid_winner_id_returns_400(self):
-        """winner_id не з учасників матчу → 400."""
+    def test_invalid_corner_returns_400(self):
+        """Неправильний corner → 400."""
         self._login(self.judge)
         match = self.first_round_match
         response = self.client.post(
             f"/api/matches/{match.pk}/set_winner/",
-            {"winner_id": 99999, "method": "decision"},
+            {"corner": "invalid", "win_method": "hantei"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -203,7 +224,7 @@ class TestAdvanceParticipant(MatchAPITestCase):
 
         self.client.post(
             f"/api/matches/{match.pk}/set_winner/",
-            {"winner_id": winner_reg.pk, "method": "decision"},
+            {"corner": "aka", "win_method": "hantei"},
             format="json",
         )
 
@@ -213,6 +234,154 @@ class TestAdvanceParticipant(MatchAPITestCase):
             next_match.reg_first == winner_reg or next_match.reg_second == winner_reg,
             "Переможець не з'явився у next_match після set_winner",
         )
+
+
+class TestMatchService(MatchAPITestCase):
+    """Юніт-тести MatchService — без HTTP, без channel layer."""
+
+    def test_apply_score_creates_event(self):
+        match = self.first_round_match
+        MatchService(match).apply_score("aka", "yuko")
+        self.assertEqual(match.events.count(), 1)
+        event = match.events.first()
+        self.assertEqual(event.event_type, "score")
+        self.assertEqual(event.payload, {"corner": "aka", "action_key": "yuko"})
+        self.assertIn("seq=1", str(event))
+        self.assertIn("R1.", str(match))
+
+    def test_apply_penalty_creates_warning_event(self):
+        match = self.first_round_match
+        MatchService(match).apply_score("ao", "penalty")
+        event = match.events.first()
+        self.assertEqual(event.event_type, "warning")
+        match.refresh_from_db()
+        self.assertEqual(match.warnings_second, 1)
+
+    def test_apply_score_invalid_action_key_raises(self):
+        match = self.first_round_match
+        with self.assertRaises(ValueError):
+            MatchService(match).apply_score("aka", "nonexistent")
+
+    def test_apply_score_invalid_corner_raises(self):
+        match = self.first_round_match
+        with self.assertRaises(ValueError):
+            MatchService(match).apply_score("shiro", "yuko")
+
+    def test_auto_finish_on_8_point_diff(self):
+        """3× ippon (9 балів) → auto-finish для WKF."""
+        match = self.first_round_match
+        svc = MatchService(match)
+        for _ in range(3):
+            svc.apply_score("aka", "ippon")
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+        self.assertEqual(match.winner, match.reg_first)
+        self.assertEqual(match.win_method, "points")
+
+    def test_set_senshu_updates_match_and_writes_event(self):
+        match = self.first_round_match
+        MatchService(match).set_senshu("aka")
+        match.refresh_from_db()
+        self.assertEqual(match.senshu, "aka")
+        event = match.events.first()
+        self.assertEqual(event.event_type, "senshu")
+        self.assertEqual(event.payload, {"value": "aka"})
+
+    def test_set_senshu_reset_to_none(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+        svc.set_senshu("ao")
+        svc.set_senshu("none")
+        match.refresh_from_db()
+        self.assertEqual(match.senshu, "none")
+
+    def test_set_senshu_invalid_value_raises(self):
+        match = self.first_round_match
+        with self.assertRaises(ValueError):
+            MatchService(match).set_senshu("shiro")
+
+    def test_set_winner_none_participant_raises(self):
+        match = self.first_round_match
+        match.reg_second = None
+        match.save(update_fields=["reg_second"])
+        with self.assertRaises(ValueError):
+            MatchService(match).set_winner("ao", "hantei")
+
+    def test_sequence_increments_per_event(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+        svc.apply_score("aka", "yuko")
+        svc.set_senshu("aka")
+        sequences = list(match.events.values_list("sequence", flat=True).order_by("sequence"))
+        self.assertEqual(sequences, [1, 2])
+
+
+class TestSetSenshuEndpoint(MatchAPITestCase):
+    """Тест ендпоінту set_senshu через HTTP."""
+
+    def test_judge_can_set_senshu(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/",
+            {"value": "aka"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["senshu"], "aka")
+
+    def test_reset_senshu_to_none(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        self.client.post(f"/api/matches/{match.pk}/set_senshu/", {"value": "ao"}, format="json")
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/", {"value": "none"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["senshu"], "none")
+
+    def test_invalid_value_returns_400(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/",
+            {"value": "shiro"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_value_returns_400(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(f"/api/matches/{match.pk}/set_senshu/", {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_spectator_cannot_set_senshu(self):
+        self._login(self.spectator)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_senshu/",
+            {"value": "aka"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestRulesetsEndpoint(MatchAPITestCase):
+    """Тест GET /api/rulesets/."""
+
+    def test_returns_all_rulesets(self):
+        response = self.client.get("/api/rulesets/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        keys = {r["key"] for r in response.data}
+        self.assertIn("karate_wkf", keys)
+        self.assertIn("shobu_ippon", keys)
+
+    def test_ruleset_has_required_fields(self):
+        response = self.client.get("/api/rulesets/")
+        first = response.data[0]
+        for field in ("key", "name", "sport_type", "judging_mode"):
+            self.assertIn(field, first)
 
 
 class TestBracketEndpoint(MatchAPITestCase):
@@ -231,3 +400,67 @@ class TestBracketEndpoint(MatchAPITestCase):
         self._login(self.judge)
         response = self.client.get("/api/matches/bracket/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+@override_settings(CHANNEL_LAYERS=_TEST_CHANNEL_LAYERS)
+class TestMatchConsumer(SimpleTestCase):
+    """Тести WebSocket consumer — підключення, ping/pong, match_event."""
+
+    async def _communicator(self, category_id: int = 1) -> WebsocketCommunicator:
+        return WebsocketCommunicator(
+            URLRouter(websocket_urlpatterns),
+            f"ws/category/{category_id}/",
+        )
+
+    async def test_connect_and_disconnect(self):
+        comm = await self._communicator()
+        connected, _ = await comm.connect()
+        self.assertTrue(connected)
+        await comm.disconnect()
+
+    async def test_ping_returns_pong(self):
+        comm = await self._communicator()
+        await comm.connect()
+        await comm.send_json_to({"type": "ping"})
+        response = await comm.receive_json_from()
+        self.assertEqual(response["type"], "pong")
+        await comm.disconnect()
+
+    async def test_non_ping_message_no_response(self):
+        comm = await self._communicator()
+        await comm.connect()
+        await comm.send_json_to({"type": "other"})
+        self.assertTrue(await comm.receive_nothing())
+        await comm.disconnect()
+
+    async def test_invalid_json_no_error(self):
+        comm = await self._communicator()
+        await comm.connect()
+        await comm.send_to(text_data="not-valid-json")
+        self.assertTrue(await comm.receive_nothing())
+        await comm.disconnect()
+
+    async def test_match_event_forwarded_to_client(self):
+        comm = await self._communicator(category_id=99)
+        await comm.connect()
+
+        channel_layer = get_channel_layer()
+        await channel_layer.group_send(
+            "category_99",
+            {
+                "type": "match.event",
+                "match_id": 7,
+                "event": {
+                    "sequence": 1,
+                    "event_type": "score",
+                    "payload": {"corner": "aka"},
+                },
+                "match": {"id": 7},
+            },
+        )
+
+        response = await comm.receive_json_from()
+        self.assertEqual(response["type"], "match.event")
+        self.assertEqual(response["match_id"], 7)
+        self.assertEqual(response["event"]["event_type"], "score")
+        await comm.disconnect()

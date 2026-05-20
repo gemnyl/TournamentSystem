@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "apps.tournaments",
     "apps.matches",
     "apps.brackets",
+    "apps.rulesets",
 ]
 
 MIDDLEWARE = [

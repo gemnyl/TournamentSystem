@@ -6,6 +6,7 @@
 (див. п. 2.2 пояснювальної записки, таблиця 2.8).
 """
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
@@ -24,6 +25,16 @@ class Match(models.Model):
         WALKOVER = "walkover", "Неявка суперника"
         WITHDRAWAL = "withdrawal", "Знято з поєдинку"
         POINTS = "points", "За очками"
+        HANTEI = "hantei", "Hantei (рішення суддів)"
+        HANSOKU = "hansoku", "Hansoku (дискваліфікація)"
+        KIKEN = "kiken", "Kiken (відмова від участі)"
+        IPPON = "ippon", "Ippon"
+        WAZAARI = "wazaari", "Waza-ari"
+
+    class Senshu(models.TextChoices):
+        NONE = "none", "None"
+        AKA = "aka", "Aka"
+        AO = "ao", "Ao"
 
     REG_MODEL = "tournaments.Registration"
 
@@ -91,6 +102,21 @@ class Match(models.Model):
         related_name="loser_prev_matches",
         verbose_name="Матч для того, хто програв",
         help_text="Для double elimination (у MVP не використовується)",
+    )
+    senshu = models.CharField(
+        max_length=4,
+        choices=Senshu.choices,
+        default=Senshu.NONE,
+        verbose_name="Senshu (перша атака)",
+    )
+    flags_aka = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="Прапори Aka (Kata)"
+    )
+    flags_ao = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="Прапори Ao (Kata)"
+    )
+    judges_count = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="Кількість суддів (Kata)"
     )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.SCHEDULED, verbose_name="Статус"
@@ -166,3 +192,51 @@ class Match(models.Model):
         # Якщо обидва слоти зайняті — це означає помилку в структурі дерева
         else:
             raise ValidationError(f"Наступний матч {nxt.id} вже заповнено обома учасниками")
+
+
+class MatchEvent(models.Model):
+    """Append-only лог подій поєдинку (Event Sourcing)."""
+
+    class EventType(models.TextChoices):
+        SCORE = "score", "Нарахування балів"
+        WARNING = "warning", "Попередження"
+        SENSHU = "senshu", "Сенсю"
+        FLAGS_DECISION = "flags_decision", "Рішення прапорами (Kata)"
+        FINISH = "finish", "Завершення поєдинку"
+        START = "start", "Початок поєдинку"
+        RESET = "reset", "Скидання стану"
+
+    match = models.ForeignKey(
+        Match,
+        on_delete=models.CASCADE,
+        related_name="events",
+        verbose_name="Поєдинок",
+    )
+    sequence = models.PositiveIntegerField(verbose_name="Порядковий номер події")
+    event_type = models.CharField(
+        max_length=20,
+        choices=EventType.choices,
+        verbose_name="Тип події",
+    )
+    payload = models.JSONField(default=dict, verbose_name="Дані події")
+    judge = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="judged_events",
+        verbose_name="Суддя",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "match_event"
+        verbose_name = "Подія поєдинку"
+        verbose_name_plural = "Події поєдинку"
+        ordering = ["match", "sequence"]
+        constraints = [
+            models.UniqueConstraint(fields=["match", "sequence"], name="uq_match_event_sequence")
+        ]
+
+    def __str__(self):
+        return f"Match {self.match_id} | seq={self.sequence} | {self.event_type}"

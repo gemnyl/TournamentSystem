@@ -104,6 +104,17 @@ class Category(models.Model):
         default=BracketFormat.SINGLE_ELIMINATION,
         verbose_name="Формат сітки",
     )
+    ruleset_key = models.CharField(
+        max_length=50,
+        default="karate_wkf",
+        verbose_name="Ключ рулсету",
+    )
+    match_duration_seconds = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Тривалість поєдинку (сек)",
+        help_text="Перевизначає значення за замовчуванням із рулсету",
+    )
 
     class Meta:
         db_table = "category"
