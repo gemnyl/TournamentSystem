@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
+from typing import cast
 
 
 class JudgingMode(StrEnum):
@@ -61,8 +62,20 @@ class PointsRuleSet(BaseRuleSet):
     @abstractmethod
     def get_score_actions(self) -> Sequence[ScoreAction]: ...
 
-    @abstractmethod
-    def apply_score_event(self, state: MatchState, event: ScoreEvent) -> MatchState: ...
+    def apply_score_event(self, state: MatchState, event: ScoreEvent) -> MatchState:
+        actions = {a.key: a for a in self.get_score_actions()}
+        action = actions.get(event.action_key)
+        if action is None:
+            raise ValueError(f"Unknown action_key: '{event.action_key}'")
+
+        if action.is_warning:
+            if event.corner == "aka":
+                return cast(MatchState, replace(state, warnings_aka=state.warnings_aka + 1))
+            return cast(MatchState, replace(state, warnings_ao=state.warnings_ao + 1))
+
+        if event.corner == "aka":
+            return cast(MatchState, replace(state, score_aka=state.score_aka + action.points))
+        return cast(MatchState, replace(state, score_ao=state.score_ao + action.points))
 
     @abstractmethod
     def get_default_duration_seconds(self) -> int: ...

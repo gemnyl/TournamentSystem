@@ -66,6 +66,27 @@ class KarateWKFRuleSetTest(TestCase):
     def test_max_warnings_5(self):
         self.assertEqual(self.ruleset.get_max_warnings(), 5)
 
+    def test_apply_penalty_ao(self):
+        state = MatchState()
+        event = ScoreEvent(corner="ao", action_key="penalty")
+        result = self.ruleset.apply_score_event(state, event)
+        self.assertEqual(result.warnings_ao, 1)
+        self.assertEqual(result.score_ao, 0)
+
+    def test_auto_finish_hansoku_ao_at_5_warnings(self):
+        state = MatchState(warnings_ao=5)
+        result = self.ruleset.check_auto_finish(state)
+        self.assertTrue(result.is_finished)
+        self.assertEqual(result.winner, "aka")
+        self.assertEqual(result.win_method, "hansoku")
+
+    def test_get_win_methods_defined(self):
+        methods = {m.key for m in self.ruleset.get_win_methods()}
+        self.assertIn("points", methods)
+        self.assertIn("hantei", methods)
+        self.assertIn("hansoku", methods)
+        self.assertIn("kiken", methods)
+
     def test_invalid_action_raises(self):
         with self.assertRaises(ValueError):
             self.ruleset.apply_score_event(MatchState(), ScoreEvent(corner="aka", action_key="???"))
@@ -127,6 +148,20 @@ class ShobuIpponRuleSetTest(TestCase):
         result = self.ruleset.check_auto_finish(state)
         self.assertTrue(result.is_finished)
         self.assertEqual(result.winner, "aka")
+
+    def test_auto_finish_hansoku_aka_at_3_warnings(self):
+        state = MatchState(warnings_aka=3)
+        result = self.ruleset.check_auto_finish(state)
+        self.assertTrue(result.is_finished)
+        self.assertEqual(result.winner, "ao")
+        self.assertEqual(result.win_method, "hansoku")
+
+    def test_get_win_methods_defined(self):
+        methods = {m.key for m in self.ruleset.get_win_methods()}
+        self.assertIn("ippon", methods)
+        self.assertIn("wazaari", methods)
+        self.assertIn("hansoku", methods)
+        self.assertIn("hantei", methods)
 
 
 class RegistryTest(TestCase):

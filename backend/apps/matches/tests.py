@@ -14,7 +14,10 @@
 
 from datetime import date, timedelta
 
-from django.test import TestCase
+from channels.layers import get_channel_layer
+from channels.routing import URLRouter
+from channels.testing import WebsocketCommunicator
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -23,8 +26,15 @@ from apps.accounts.models import Club, User
 from apps.athletes.models import Athlete
 from apps.brackets.services import BracketGenerator
 from apps.matches.models import Match
+from apps.matches.routing import websocket_urlpatterns
 from apps.matches.services.match_service import MatchService
 from apps.tournaments.models import Category, Registration, Tournament
+
+_TEST_CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
 
 
 class MatchAPITestCase(TestCase):
@@ -388,3 +398,67 @@ class TestBracketEndpoint(MatchAPITestCase):
         self._login(self.judge)
         response = self.client.get("/api/matches/bracket/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+@override_settings(CHANNEL_LAYERS=_TEST_CHANNEL_LAYERS)
+class TestMatchConsumer(SimpleTestCase):
+    """Тести WebSocket consumer — підключення, ping/pong, match_event."""
+
+    async def _communicator(self, category_id: int = 1) -> WebsocketCommunicator:
+        return WebsocketCommunicator(
+            URLRouter(websocket_urlpatterns),
+            f"ws/category/{category_id}/",
+        )
+
+    async def test_connect_and_disconnect(self):
+        comm = await self._communicator()
+        connected, _ = await comm.connect()
+        self.assertTrue(connected)
+        await comm.disconnect()
+
+    async def test_ping_returns_pong(self):
+        comm = await self._communicator()
+        await comm.connect()
+        await comm.send_json_to({"type": "ping"})
+        response = await comm.receive_json_from()
+        self.assertEqual(response["type"], "pong")
+        await comm.disconnect()
+
+    async def test_non_ping_message_no_response(self):
+        comm = await self._communicator()
+        await comm.connect()
+        await comm.send_json_to({"type": "other"})
+        self.assertTrue(await comm.receive_nothing())
+        await comm.disconnect()
+
+    async def test_invalid_json_no_error(self):
+        comm = await self._communicator()
+        await comm.connect()
+        await comm.send_to(text_data="not-valid-json")
+        self.assertTrue(await comm.receive_nothing())
+        await comm.disconnect()
+
+    async def test_match_event_forwarded_to_client(self):
+        comm = await self._communicator(category_id=99)
+        await comm.connect()
+
+        channel_layer = get_channel_layer()
+        await channel_layer.group_send(
+            "category_99",
+            {
+                "type": "match.event",
+                "match_id": 7,
+                "event": {
+                    "sequence": 1,
+                    "event_type": "score",
+                    "payload": {"corner": "aka"},
+                },
+                "match": {"id": 7},
+            },
+        )
+
+        response = await comm.receive_json_from()
+        self.assertEqual(response["type"], "match.event")
+        self.assertEqual(response["match_id"], 7)
+        self.assertEqual(response["event"]["event_type"], "score")
+        await comm.disconnect()
