@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     "apps.matches",
     "apps.brackets",
     "apps.rulesets",
+    "apps.tatamis",
 ]
 
 MIDDLEWARE = [

@@ -29,7 +29,7 @@ class MatchSerializer(serializers.ModelSerializer):
             "reg_second",
             "round_index",
             "match_order",
-            "tatami_number",
+            "tatami",
             "score_first",
             "score_second",
             "warnings_first",

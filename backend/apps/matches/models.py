@@ -64,8 +64,13 @@ class Match(models.Model):
         verbose_name="Номер раунду", help_text="1 = перший раунд, 2 = 1/8, 3 = 1/4 тощо"
     )
     match_order = models.PositiveSmallIntegerField(verbose_name="Порядковий номер у раунді")
-    tatami_number = models.PositiveSmallIntegerField(
-        null=True, blank=True, verbose_name="Номер татамі"
+    tatami = models.ForeignKey(
+        "tatamis.Tatami",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tatami_matches",
+        verbose_name="Татамі",
     )
     score_first = models.IntegerField(default=0, verbose_name="Бали учасника 1")
     score_second = models.IntegerField(default=0, verbose_name="Бали учасника 2")
