@@ -6,6 +6,12 @@ from apps.matches.models import Match, MatchEvent
 from apps.rulesets.base import MatchState, ScoreEvent
 
 
+def _broadcast_timer(match: Match) -> None:
+    from apps.common.broadcast import broadcast_timer_state
+
+    broadcast_timer_state(match)
+
+
 class MatchService:
     """Координує зміни стану матчу: ruleset → MatchEvent → Match."""
 
@@ -111,6 +117,77 @@ class MatchService:
         m.save(update_fields=["senshu"])
 
         self._write_event(MatchEvent.EventType.SENSHU, {"value": value}, judge)
+        return m
+
+    @transaction.atomic
+    def timer_start(self, judge=None) -> Match:
+        m = self.match
+        if m.timer_status != Match.TimerStatus.NOT_STARTED:
+            raise ValueError("Таймер вже запущено або завершено.")
+        m.timer_started_at = timezone.now()
+        m.timer_status = Match.TimerStatus.RUNNING
+        m.save(update_fields=["timer_started_at", "timer_status"])
+        self._write_event(MatchEvent.EventType.TIMER_START, {}, judge)
+        _broadcast_timer(m)
+        return m
+
+    @transaction.atomic
+    def timer_pause(self, judge=None) -> Match:
+        m = self.match
+        if m.timer_status != Match.TimerStatus.RUNNING:
+            raise ValueError("Таймер не запущено.")
+        delta = int((timezone.now() - m.timer_started_at).total_seconds() * 1000)
+        m.timer_elapsed_ms += delta
+        m.timer_started_at = None
+        m.timer_status = Match.TimerStatus.PAUSED
+        m.save(update_fields=["timer_elapsed_ms", "timer_started_at", "timer_status"])
+        self._write_event(MatchEvent.EventType.TIMER_PAUSE, {}, judge)
+        _broadcast_timer(m)
+        return m
+
+    @transaction.atomic
+    def timer_resume(self, judge=None) -> Match:
+        m = self.match
+        if m.timer_status != Match.TimerStatus.PAUSED:
+            raise ValueError("Таймер не на паузі.")
+        m.timer_started_at = timezone.now()
+        m.timer_status = Match.TimerStatus.RUNNING
+        m.save(update_fields=["timer_started_at", "timer_status"])
+        self._write_event(MatchEvent.EventType.TIMER_RESUME, {}, judge)
+        _broadcast_timer(m)
+        return m
+
+    @transaction.atomic
+    def timer_reset(self, judge=None) -> Match:
+        m = self.match
+        m.timer_status = Match.TimerStatus.NOT_STARTED
+        m.timer_elapsed_ms = 0
+        m.timer_started_at = None
+        m.save(update_fields=["timer_status", "timer_elapsed_ms", "timer_started_at"])
+        self._write_event(MatchEvent.EventType.TIMER_RESET, {}, judge)
+        _broadcast_timer(m)
+        return m
+
+    @transaction.atomic
+    def timer_set_duration(self, duration_ms: int, judge=None) -> Match:
+        m = self.match
+        if m.timer_status == Match.TimerStatus.RUNNING:
+            raise ValueError("Не можна змінювати тривалість під час бою.")
+        m.timer_duration_ms = duration_ms
+        m.save(update_fields=["timer_duration_ms"])
+        self._write_event(MatchEvent.EventType.TIMER_SET_DUR, {"duration_ms": duration_ms}, judge)
+        _broadcast_timer(m)
+        return m
+
+    @transaction.atomic
+    def timer_add_time(self, delta_ms: int, judge=None) -> Match:
+        m = self.match
+        if m.timer_status == Match.TimerStatus.RUNNING:
+            raise ValueError("Не можна змінювати тривалість під час бою.")
+        m.timer_duration_ms += delta_ms
+        m.save(update_fields=["timer_duration_ms"])
+        self._write_event(MatchEvent.EventType.TIMER_SET_DUR, {"delta_ms": delta_ms}, judge)
+        _broadcast_timer(m)
         return m
 
     @transaction.atomic

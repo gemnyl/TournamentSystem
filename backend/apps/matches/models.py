@@ -36,6 +36,12 @@ class Match(models.Model):
         AKA = "aka", "Aka"
         AO = "ao", "Ao"
 
+    class TimerStatus(models.TextChoices):
+        NOT_STARTED = "not_started", "Not started"
+        RUNNING = "running", "Running"
+        PAUSED = "paused", "Paused"
+        FINISHED = "finished", "Finished"
+
     REG_MODEL = "tournaments.Registration"
 
     category = models.ForeignKey(
@@ -128,6 +134,15 @@ class Match(models.Model):
     )
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    timer_status = models.CharField(
+        max_length=15,
+        choices=TimerStatus.choices,
+        default=TimerStatus.NOT_STARTED,
+        verbose_name="Статус таймера",
+    )
+    timer_started_at = models.DateTimeField(null=True, blank=True, verbose_name="Таймер запущено о")
+    timer_elapsed_ms = models.PositiveIntegerField(default=0, verbose_name="Накопичено мс")
+    timer_duration_ms = models.PositiveIntegerField(default=180000, verbose_name="Тривалість мс")
 
     class Meta:
         db_table = "match"
@@ -210,6 +225,11 @@ class MatchEvent(models.Model):
         FINISH = "finish", "Завершення поєдинку"
         START = "start", "Початок поєдинку"
         RESET = "reset", "Скидання стану"
+        TIMER_START = "timer_start", "Старт таймера"
+        TIMER_PAUSE = "timer_pause", "Пауза таймера"
+        TIMER_RESUME = "timer_resume", "Продовження таймера"
+        TIMER_RESET = "timer_reset", "Скидання таймера"
+        TIMER_SET_DUR = "timer_set_dur", "Зміна тривалості"
 
     match = models.ForeignKey(
         Match,

@@ -47,6 +47,10 @@ class MatchSerializer(serializers.ModelSerializer):
             "status_display",
             "started_at",
             "completed_at",
+            "timer_status",
+            "timer_started_at",
+            "timer_elapsed_ms",
+            "timer_duration_ms",
         ]
         read_only_fields = fields
 
