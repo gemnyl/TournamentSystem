@@ -7,6 +7,6 @@ from apps.rulesets.registry import list_rulesets
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def ruleset_list(request):
+def ruleset_list(request):  # NOSONAR - GET-only read endpoint, no state mutation
     """GET /api/rulesets/ — повертає список зареєстрованих рулсетів."""
     return Response(list_rulesets())

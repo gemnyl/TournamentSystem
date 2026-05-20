@@ -246,6 +246,8 @@ class TestMatchService(MatchAPITestCase):
         event = match.events.first()
         self.assertEqual(event.event_type, "score")
         self.assertEqual(event.payload, {"corner": "aka", "action_key": "yuko"})
+        self.assertIn("seq=1", str(event))
+        self.assertIn("R1.", str(match))
 
     def test_apply_penalty_creates_warning_event(self):
         match = self.first_round_match
