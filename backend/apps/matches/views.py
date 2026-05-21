@@ -35,6 +35,9 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         category_id = self.request.query_params.get("category")
         if category_id:
             qs = qs.filter(category_id=category_id)
+        tournament_id = self.request.query_params.get("tournament")
+        if tournament_id:
+            qs = qs.filter(category__tournament_id=tournament_id)
         return qs.order_by("round_index", "match_order")
 
     def get_serializer_class(self):

@@ -119,6 +119,31 @@ export interface Match {
   timer_started_at: string | null;  // ISO datetime
   timer_elapsed_ms: number;
   timer_duration_ms: number;
+  ruleset_key: string;
+  judging_mode: "points" | "flags";
+}
+
+// ─── Рулсет ─────────────────────────────────────────────────────────────────
+
+export interface ScoreAction {
+  key: string;
+  label: string;
+  points: number;
+  is_warning: boolean;
+}
+
+export interface WinMethodInfo {
+  key: string;
+  label: string;
+}
+
+export interface RulesetInfo {
+  key: string;
+  name: string;
+  sport_type: string;
+  judging_mode: "points" | "flags";
+  score_actions: ScoreAction[];
+  win_methods: WinMethodInfo[];
 }
 
 // ─── Татамі ──────────────────────────────────────────────────────────────────
