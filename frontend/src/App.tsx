@@ -13,6 +13,8 @@ import BracketPage from "@/pages/BracketPage";
 import JudgePanelPage from "@/pages/JudgePanelPage";
 import AthletesPage from "@/pages/AthletesPage";
 import NotFoundPage from "@/pages/NotFoundPage";
+import OperatorPanelPage from "@/pages/OperatorPanelPage";
+import ScoreboardPage from "@/pages/ScoreboardPage";
 
 export default function App() {
   return (
@@ -21,6 +23,10 @@ export default function App() {
         {/* Публічні маршрути без лейауту */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route
+          path="/scoreboard/tournament/:tid/tatami/:n"
+          element={<ScoreboardPage />}
+        />
 
         {/* Публічні маршрути З лейаутом (перегляд без логіну — як Uventex) */}
         <Route element={<AppLayout />}>
@@ -34,9 +40,13 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route path="/athletes" element={<AthletesPage />} />
           </Route>
-          
+
           <Route element={<ProtectedRoute allowedRoles={["judge", "organizer"]} />}>
             <Route path="/judge" element={<JudgePanelPage />} />
+            <Route
+              path="/operator/tournament/:tid/tatami/:n"
+              element={<OperatorPanelPage />}
+            />
           </Route>
         </Route>
 
