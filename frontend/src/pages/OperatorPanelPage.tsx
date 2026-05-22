@@ -149,9 +149,9 @@ export default function OperatorPanelPage() {
 
   // sorted matches for queue
   const sortedMatches = [...matches].sort((a, b) =>
-    a.round_index !== b.round_index
-      ? a.round_index - b.round_index
-      : a.match_order - b.match_order
+    a.round_index === b.round_index
+      ? a.match_order - b.match_order
+      : a.round_index - b.round_index
   );
 
   return (
@@ -198,6 +198,11 @@ export default function OperatorPanelPage() {
               const aoName = m.reg_second?.athlete?.full_name ?? "TBD";
               const akaName = m.reg_first?.athlete?.full_name ?? "TBD";
               const winnerReg = m.winner === m.reg_first?.id ? m.reg_first : m.reg_second;
+              const matchItemClass = isCurrent
+                ? "border-amber-500/60 bg-amber-500/10"
+                : isCompleted
+                  ? "border-border/40 bg-muted/20 opacity-50 cursor-default"
+                  : "border-border hover:border-border/80 hover:bg-muted/30 cursor-pointer";
 
               return (
                 <button
@@ -206,11 +211,7 @@ export default function OperatorPanelPage() {
                   onClick={() => handleAssignMatch(m.id)}
                   className={cn(
                     "w-full text-left rounded-lg border px-3 py-2 text-xs transition-all",
-                    isCurrent
-                      ? "border-amber-500/60 bg-amber-500/10"
-                      : isCompleted
-                        ? "border-border/40 bg-muted/20 opacity-50 cursor-default"
-                        : "border-border hover:border-border/80 hover:bg-muted/30 cursor-pointer"
+                    matchItemClass,
                   )}
                 >
                   <p className="font-medium text-muted-foreground mb-0.5">

@@ -15,6 +15,7 @@
 import time
 from datetime import date, timedelta
 
+from channels.layers import get_channel_layer
 from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 from django.test import TestCase, override_settings
@@ -218,6 +219,20 @@ class TestTatamiViewSet(TatamiTestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_assign_match_nonexistent_match_returns_400(self):
+        self._login(self.judge)
+        response = self.client.post(
+            f"/api/tatamis/{self.tatami.pk}/assign_match/",
+            {"match_id": 999999},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_state_endpoint_no_current_match(self):
+        response = self.client.get(f"/api/tatamis/{self.tatami.pk}/state/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["current_match"])
+
 
 # ── 2. TatamiService ──────────────────────────────────────────────────────────
 
@@ -259,6 +274,10 @@ class TestTatamiService(TatamiTestCase):
         snapshot = TatamiService.get_snapshot(self.tournament.pk, 1)
         self.assertIsNone(snapshot["current_match"])
 
+    def test_get_current_match_nonexistent_tatami_returns_none(self):
+        result = TatamiService.get_current_match(self.tournament.pk, 999)
+        self.assertIsNone(result)
+
 
 # ── 3. MatchSerializer — field validation ────────────────────────────────────
 
@@ -289,6 +308,13 @@ class TestMatchSerializerFields(TatamiTestCase):
         self.assertIn("judging_mode", data)
         self.assertEqual(data["ruleset_key"], "karate_wkf")
         self.assertEqual(data["judging_mode"], "points")
+
+    def test_judging_mode_unknown_ruleset_returns_none(self):
+        self.category.ruleset_key = "unknown_ruleset_xyz"
+        self.category.save(update_fields=["ruleset_key"])
+        self.match.refresh_from_db()
+        data = MatchSerializer(self.match).data
+        self.assertIsNone(data["judging_mode"])
 
 
 # ── 4. Timer endpoints ────────────────────────────────────────────────────────
@@ -438,4 +464,62 @@ class TestTatamiConsumer(TatamiTestCase):
         pong = await communicator.receive_json_from(timeout=3)
         self.assertEqual(pong["type"], "pong")
 
+        # channel layer handlers: match_event, timer_state, tatami_state
+        channel_layer = get_channel_layer()
+        group = f"tatami_{self.tournament.pk}_{self.tatami.number}"
+
+        await channel_layer.group_send(group, {"type": "match.event", "match_id": 1})
+        msg = await communicator.receive_json_from(timeout=3)
+        self.assertEqual(msg["type"], "match.event")
+
+        await channel_layer.group_send(group, {"type": "timer.state", "status": "running"})
+        msg = await communicator.receive_json_from(timeout=3)
+        self.assertEqual(msg["type"], "timer.state")
+
+        await channel_layer.group_send(group, {"type": "tatami.state", "tatami": {}})
+        msg = await communicator.receive_json_from(timeout=3)
+        self.assertEqual(msg["type"], "tatami.state")
+
+        # invalid JSON → no error, no response
+        await communicator.send_to(text_data="not-valid{{json")
+        self.assertTrue(await communicator.receive_nothing(timeout=0.5))
+
         await communicator.disconnect()
+
+
+# ── 6. Models ─────────────────────────────────────────────────────────────────
+
+
+class TestTatamiModels(TatamiTestCase):
+    def test_str_with_name(self):
+        self.assertIn("Tatami A", str(self.tatami))
+
+    def test_str_without_name(self):
+        unnamed = Tatami.objects.create(tournament=self.tournament, number=99)
+        self.assertIn("Tatami 99", str(unnamed))
+
+
+# ── 7. Broadcast coverage ─────────────────────────────────────────────────────
+
+
+@override_settings(CHANNEL_LAYERS=_TEST_CHANNEL_LAYERS)
+class TestBroadcast(TatamiTestCase):
+    """Покриває гілки broadcast.py, недосяжні через звичайні API-тести."""
+
+    def test_broadcast_match_event_sends_to_tatami_group(self):
+        from apps.common.broadcast import broadcast_match_event
+
+        self.match.tatami = self.tatami
+        self.match.save(update_fields=["tatami"])
+        from apps.matches.services.match_service import MatchService
+
+        MatchService(self.match).apply_score("aka", "yuko")
+        event = self.match.events.order_by("-sequence").first()
+        broadcast_match_event(self.match, event)  # must not raise
+
+    def test_broadcast_timer_state_sends_to_tatami_group(self):
+        from apps.common.broadcast import broadcast_timer_state
+
+        self.match.tatami = self.tatami
+        self.match.save(update_fields=["tatami"])
+        broadcast_timer_state(self.match)  # must not raise

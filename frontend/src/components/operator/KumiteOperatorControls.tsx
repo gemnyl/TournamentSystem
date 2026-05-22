@@ -30,7 +30,7 @@ export default function KumiteOperatorControls({
   timerState,
   remainingMs,
   onMatchUpdate,
-}: KumiteOperatorControlsProps) {
+}: Readonly<KumiteOperatorControlsProps>) {
   const [busy, setBusy] = useState(false);
 
   const post = async (url: string, body?: Record<string, unknown>) => {
@@ -84,7 +84,7 @@ export default function KumiteOperatorControls({
 
         <div className="flex items-center justify-center gap-1 text-sm text-muted-foreground">
           {Array.from({ length: match.warnings_second }).map((_, i) => (
-            <span key={i} className="text-amber-400">⚠</span>
+            <span key={`w-ao-${i}`} className="text-amber-400">⚠</span>
           ))}
           {match.warnings_second === 0 && <span className="text-xs opacity-40">0 попер.</span>}
         </div>
@@ -197,7 +197,7 @@ export default function KumiteOperatorControls({
 
         <div className="flex items-center justify-center gap-1 text-sm text-muted-foreground">
           {Array.from({ length: match.warnings_first }).map((_, i) => (
-            <span key={i} className="text-amber-400">⚠</span>
+            <span key={`w-aka-${i}`} className="text-amber-400">⚠</span>
           ))}
           {match.warnings_first === 0 && <span className="text-xs opacity-40">0 попер.</span>}
         </div>

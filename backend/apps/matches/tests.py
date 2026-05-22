@@ -132,6 +132,18 @@ class MatchAPITestCase(TestCase):
         self.client.force_authenticate(user=user)
 
 
+class TestMatchGetQueryset(MatchAPITestCase):
+    """Покриває гілки get_queryset: фільтр по tournament."""
+
+    def test_filter_by_tournament(self):
+        response = self.client.get(f"/api/matches/?tournament={self.tournament.pk}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        self.assertGreater(len(results), 0)
+        for m in results:
+            self.assertEqual(m["category"], self.category.pk)
+
+
 class TestUpdateScore(MatchAPITestCase):
     """Тест 1: Суддя може оновити рахунок."""
 

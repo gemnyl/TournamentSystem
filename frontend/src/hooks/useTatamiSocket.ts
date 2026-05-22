@@ -34,8 +34,8 @@ export function useTatamiSocket(
   const connect = useCallback(() => {
     if (!isMounted.current) return;
 
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${proto}://${window.location.host}/ws/tournament/${tid}/tatami/${n}/`;
+    const proto = globalThis.location.protocol === "https:" ? "wss" : "ws";
+    const url = `${proto}://${globalThis.location.host}/ws/tournament/${tid}/tatami/${n}/`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 

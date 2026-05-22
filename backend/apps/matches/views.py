@@ -211,10 +211,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"], url_path="timer/reset")
     def timer_reset(self, request, pk=None):
         match = self.get_object()
-        try:
-            MatchService(match).timer_reset(judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        MatchService(match).timer_reset(judge=request.user)
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="timer/set_duration")

@@ -49,7 +49,7 @@ class TatamiConsumer(AsyncWebsocketConsumer):
                 if match and match.timer_status == "running":
                     await sync_to_async(broadcast_timer_state)(match)
         except asyncio.CancelledError:
-            pass
+            raise
 
     # ------------------------------------------------------------------
     # Channel layer handlers

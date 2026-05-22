@@ -34,7 +34,7 @@ interface AthleteColumnProps {
   hasSenshu: boolean;
 }
 
-function AthleteColumn({ side, name, club, score, warnings, hasSenshu }: AthleteColumnProps) {
+function AthleteColumn({ side, name, club, score, warnings, hasSenshu }: Readonly<AthleteColumnProps>) {
   const isAka = side === "aka";
   return (
     <div className={cn(
@@ -58,7 +58,7 @@ function AthleteColumn({ side, name, club, score, warnings, hasSenshu }: Athlete
       {/* Warnings */}
       <div className="flex gap-2 h-10 items-center">
         {Array.from({ length: warnings }).map((_, i) => (
-          <span key={i} className="text-4xl leading-none">⚠</span>
+          <span key={`w-${i}`} className="text-4xl leading-none">⚠</span>
         ))}
       </div>
 
