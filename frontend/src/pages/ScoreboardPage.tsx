@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { useTatamiSocket } from "@/hooks/useTatamiSocket";
 import { useTimer, formatTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
-import type { Match, Tatami } from "@/types/api";
+import type { Match } from "@/types/api";
 
 // Scoreboard is mirrored vs operator: Aka LEFT, Ao RIGHT
 
@@ -82,7 +82,6 @@ function AthleteColumn({ side, name, club, score, warnings, hasSenshu }: Athlete
 export default function ScoreboardPage() {
   const { tid, n } = useParams<{ tid: string; n: string }>();
 
-  const [tatami, setTatami] = useState<Tatami | null>(null);
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
@@ -93,7 +92,6 @@ export default function ScoreboardPage() {
 
   useTatamiSocket(tid!, n!, {
     onSnapshot(data) {
-      setTatami(data.tatami);
       if (data.current_match) {
         setCurrentMatch(data.current_match);
         setTimerState(matchToTimerState(data.current_match));
@@ -115,7 +113,6 @@ export default function ScoreboardPage() {
       });
     },
     onTatamiState(data) {
-      setTatami(data.tatami);
       if (data.current_match) {
         setCurrentMatch(data.current_match);
         setTimerState(matchToTimerState(data.current_match));

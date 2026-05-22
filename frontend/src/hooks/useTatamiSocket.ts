@@ -72,7 +72,7 @@ export function useTatamiSocket(
 
         case "tatami.state":
           optsRef.current.onTatamiState(
-            msg as { tatami: TatamiSnapshot["tatami"]; current_match: Match | null },
+            msg as unknown as { tatami: TatamiSnapshot["tatami"]; current_match: Match | null },
           );
           break;
       }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ExternalLink, Trophy, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
