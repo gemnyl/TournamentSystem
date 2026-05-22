@@ -16,12 +16,29 @@ def get_ruleset(key: str) -> BaseRuleSet:
 
 
 def list_rulesets() -> list[dict]:
-    return [
-        {
+    from apps.rulesets.base import PointsRuleSet
+
+    result = []
+    for cls in _REGISTRY.values():
+        instance = cls()
+        entry: dict = {
             "key": cls.key,
             "name": cls.name,
             "sport_type": cls.sport_type,
             "judging_mode": cls.judging_mode,
+            "win_methods": [{"key": w.key, "label": w.label} for w in instance.get_win_methods()],
         }
-        for cls in _REGISTRY.values()
-    ]
+        if isinstance(instance, PointsRuleSet):
+            entry["score_actions"] = [
+                {
+                    "key": a.key,
+                    "label": a.label,
+                    "points": a.points,
+                    "is_warning": a.is_warning,
+                }
+                for a in instance.get_score_actions()
+            ]
+        else:
+            entry["score_actions"] = []
+        result.append(entry)
+    return result

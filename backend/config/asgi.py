@@ -18,13 +18,12 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django_asgi_app = get_asgi_application()
 
 # Імпортуємо WebSocket-маршрути після ініціалізації Django
-from apps.matches.routing import websocket_urlpatterns  # noqa: E402
+from apps.matches.routing import websocket_urlpatterns as matches_ws  # noqa: E402
+from apps.tatamis.routing import websocket_urlpatterns as tatamis_ws  # noqa: E402
 
 application = ProtocolTypeRouter(
     {
-        # Стандартні HTTP-запити
         "http": django_asgi_app,
-        # WebSocket-з'єднання: через AuthMiddlewareStack для доступу до request.user
-        "websocket": AuthMiddlewareStack(URLRouter(websocket_urlpatterns)),
+        "websocket": AuthMiddlewareStack(URLRouter(matches_ws + tatamis_ws)),
     }
 )

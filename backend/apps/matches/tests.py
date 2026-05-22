@@ -132,6 +132,24 @@ class MatchAPITestCase(TestCase):
         self.client.force_authenticate(user=user)
 
 
+class TestMatchGetQueryset(MatchAPITestCase):
+    """Покриває гілки get_queryset: фільтр по category і tournament."""
+
+    def test_filter_by_tournament(self):
+        response = self.client.get(f"/api/matches/?tournament={self.tournament.pk}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        self.assertGreater(len(results), 0)
+        for m in results:
+            self.assertEqual(m["category"], self.category.pk)
+
+    def test_filter_by_category(self):
+        response = self.client.get(f"/api/matches/?category={self.category.pk}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        self.assertGreater(len(results), 0)
+
+
 class TestUpdateScore(MatchAPITestCase):
     """Тест 1: Суддя може оновити рахунок."""
 
@@ -205,6 +223,17 @@ class TestSetWinner(MatchAPITestCase):
         response = self.client.post(
             f"/api/matches/{match.pk}/set_winner/",
             {"corner": "invalid", "win_method": "hantei"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_corner_returns_400(self):
+        """Відсутній corner → 400."""
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_winner/",
+            {"win_method": "hantei"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -314,6 +343,58 @@ class TestMatchService(MatchAPITestCase):
         svc.set_senshu("aka")
         sequences = list(match.events.values_list("sequence", flat=True).order_by("sequence"))
         self.assertEqual(sequences, [1, 2])
+
+    def test_set_winner_invalid_registration_raises(self):
+        from django.core.exceptions import ValidationError
+
+        other_match = (
+            Match.objects.filter(
+                category=self.category,
+                round_index=1,
+                reg_first__isnull=False,
+            )
+            .exclude(id=self.first_round_match.id)
+            .first()
+        )
+        invalid_reg = other_match.reg_first
+        with self.assertRaises(ValidationError):
+            self.first_round_match.set_winner(invalid_reg)
+
+    def test_advance_participant_no_next_match_returns_silently(self):
+        match = self.first_round_match
+        match.winner = match.reg_first
+        match.next_match = None
+        match.advance_participant()  # повинно повернутись без помилки
+
+    def test_advance_participant_fills_reg_second(self):
+        match = self.first_round_match
+        match.winner = match.reg_first
+        nxt = match.next_match
+        nxt.reg_first = match.reg_second
+        nxt.save(update_fields=["reg_first"])
+        match.advance_participant()
+        nxt.refresh_from_db()
+        self.assertEqual(nxt.reg_second, match.reg_first)
+
+    def test_advance_participant_both_slots_full_raises(self):
+        from django.core.exceptions import ValidationError
+
+        match = self.first_round_match
+        match.winner = match.reg_first
+        nxt = match.next_match
+        regs = list(
+            Match.objects.filter(
+                category=self.category, round_index=1, reg_first__isnull=False
+            ).values_list("reg_first_id", flat=True)
+        )
+        from apps.tournaments.models import Registration
+
+        r1, r2 = Registration.objects.filter(id__in=regs)[:2]
+        nxt.reg_first = r1
+        nxt.reg_second = r2
+        nxt.save(update_fields=["reg_first", "reg_second"])
+        with self.assertRaises(ValidationError):
+            match.advance_participant()
 
 
 class TestSetSenshuEndpoint(MatchAPITestCase):

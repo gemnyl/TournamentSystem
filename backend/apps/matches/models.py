@@ -36,6 +36,12 @@ class Match(models.Model):
         AKA = "aka", "Aka"
         AO = "ao", "Ao"
 
+    class TimerStatus(models.TextChoices):
+        NOT_STARTED = "not_started", "Not started"
+        RUNNING = "running", "Running"
+        PAUSED = "paused", "Paused"
+        FINISHED = "finished", "Finished"
+
     REG_MODEL = "tournaments.Registration"
 
     category = models.ForeignKey(
@@ -64,8 +70,13 @@ class Match(models.Model):
         verbose_name="Номер раунду", help_text="1 = перший раунд, 2 = 1/8, 3 = 1/4 тощо"
     )
     match_order = models.PositiveSmallIntegerField(verbose_name="Порядковий номер у раунді")
-    tatami_number = models.PositiveSmallIntegerField(
-        null=True, blank=True, verbose_name="Номер татамі"
+    tatami = models.ForeignKey(
+        "tatamis.Tatami",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tatami_matches",
+        verbose_name="Татамі",
     )
     score_first = models.IntegerField(default=0, verbose_name="Бали учасника 1")
     score_second = models.IntegerField(default=0, verbose_name="Бали учасника 2")
@@ -123,6 +134,15 @@ class Match(models.Model):
     )
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    timer_status = models.CharField(
+        max_length=15,
+        choices=TimerStatus.choices,
+        default=TimerStatus.NOT_STARTED,
+        verbose_name="Статус таймера",
+    )
+    timer_started_at = models.DateTimeField(null=True, blank=True, verbose_name="Таймер запущено о")
+    timer_elapsed_ms = models.PositiveIntegerField(default=0, verbose_name="Накопичено мс")
+    timer_duration_ms = models.PositiveIntegerField(default=180000, verbose_name="Тривалість мс")
 
     class Meta:
         db_table = "match"
@@ -140,25 +160,6 @@ class Match(models.Model):
         f = self.reg_first.athlete.get_full_name() if self.reg_first else "TBD"
         s = self.reg_second.athlete.get_full_name() if self.reg_second else "TBD"
         return f"R{self.round_index}.{self.match_order}: {f} vs {s}"
-
-    # --- бізнес-методи ---
-
-    def update_score(self, participant, delta=1):
-        """Оновлює рахунок учасника (1 або 2)."""
-        if participant not in (1, 2):
-            raise ValidationError("participant має бути 1 або 2")
-        field = "score_first" if participant == 1 else "score_second"
-        setattr(self, field, getattr(self, field) + delta)
-        if self.status == self.Status.SCHEDULED:
-            self.status = self.Status.ONGOING
-        self.save(update_fields=[field, "status"])
-
-    def add_warning(self, participant):
-        if participant not in (1, 2):
-            raise ValidationError("participant має бути 1 або 2")
-        field = "warnings_first" if participant == 1 else "warnings_second"
-        setattr(self, field, getattr(self, field) + 1)
-        self.save(update_fields=[field])
 
     @transaction.atomic
     def set_winner(self, winner_registration, method=WinMethod.DECISION):
@@ -205,6 +206,11 @@ class MatchEvent(models.Model):
         FINISH = "finish", "Завершення поєдинку"
         START = "start", "Початок поєдинку"
         RESET = "reset", "Скидання стану"
+        TIMER_START = "timer_start", "Старт таймера"
+        TIMER_PAUSE = "timer_pause", "Пауза таймера"
+        TIMER_RESUME = "timer_resume", "Продовження таймера"
+        TIMER_RESET = "timer_reset", "Скидання таймера"
+        TIMER_SET_DUR = "timer_set_dur", "Зміна тривалості"
 
     match = models.ForeignKey(
         Match,

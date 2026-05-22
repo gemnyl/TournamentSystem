@@ -8,35 +8,15 @@ MatchViewSet:
     bracket       — GET  /api/matches/bracket/?category={id}
 """
 
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.accounts.permissions import IsJudge
-from apps.matches.models import Match, MatchEvent
+from apps.common.broadcast import broadcast_match_event
+from apps.matches.models import Match
 from apps.matches.serializers import BracketNodeSerializer, MatchSerializer
 from apps.matches.services.match_service import MatchService
-
-
-def _push_match_event(match: Match, event: MatchEvent):
-    """Надсилає подію та актуальний стан матчу всім підписникам категорії."""
-    channel_layer = get_channel_layer()
-    group_name = f"category_{match.category_id}"
-    async_to_sync(channel_layer.group_send)(
-        group_name,
-        {
-            "type": "match.event",
-            "match_id": match.id,
-            "event": {
-                "sequence": event.sequence,
-                "event_type": event.event_type,
-                "payload": event.payload,
-            },
-            "match": MatchSerializer(match).data,
-        },
-    )
 
 
 class MatchViewSet(viewsets.ReadOnlyModelViewSet):
@@ -55,13 +35,27 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         category_id = self.request.query_params.get("category")
         if category_id:
             qs = qs.filter(category_id=category_id)
+        tournament_id = self.request.query_params.get("tournament")
+        if tournament_id:
+            qs = qs.filter(category__tournament_id=tournament_id)
         return qs.order_by("round_index", "match_order")
 
     def get_serializer_class(self):
         return MatchSerializer
 
     def get_permissions(self):
-        if self.action in ("update_score", "set_senshu", "set_winner"):
+        judge_actions = (
+            "update_score",
+            "set_senshu",
+            "set_winner",
+            "timer_start",
+            "timer_pause",
+            "timer_resume",
+            "timer_reset",
+            "timer_set_duration",
+            "timer_add_time",
+        )
+        if self.action in judge_actions:
             return [IsJudge()]
         from rest_framework.permissions import AllowAny
 
@@ -93,7 +87,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         last_event = match.events.order_by("-sequence").first()
-        _push_match_event(match, last_event)
+        broadcast_match_event(match, last_event)
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="set_senshu")
@@ -117,7 +111,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         last_event = match.events.order_by("-sequence").first()
-        _push_match_event(match, last_event)
+        broadcast_match_event(match, last_event)
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="set_winner")
@@ -142,7 +136,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         last_event = match.events.order_by("-sequence").first()
-        _push_match_event(match, last_event)
+        broadcast_match_event(match, last_event)
         return Response(MatchSerializer(match).data)
 
     # ------------------------------------------------------------------
@@ -182,3 +176,70 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
 
         serializer = BracketNodeSerializer(result, many=True)
         return Response(serializer.data)
+
+    # ------------------------------------------------------------------
+    # Таймер
+    # ------------------------------------------------------------------
+
+    @action(detail=True, methods=["post"], url_path="timer/start")
+    def timer_start(self, request, pk=None):
+        match = self.get_object()
+        try:
+            MatchService(match).timer_start(judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="timer/pause")
+    def timer_pause(self, request, pk=None):
+        match = self.get_object()
+        try:
+            MatchService(match).timer_pause(judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="timer/resume")
+    def timer_resume(self, request, pk=None):
+        match = self.get_object()
+        try:
+            MatchService(match).timer_resume(judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="timer/reset")
+    def timer_reset(self, request, pk=None):
+        match = self.get_object()
+        MatchService(match).timer_reset(judge=request.user)
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="timer/set_duration")
+    def timer_set_duration(self, request, pk=None):
+        match = self.get_object()
+        duration_ms = request.data.get("duration_ms")
+        if duration_ms is None:
+            return Response(
+                {"detail": "Поле 'duration_ms' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            MatchService(match).timer_set_duration(int(duration_ms), judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="timer/add_time")
+    def timer_add_time(self, request, pk=None):
+        match = self.get_object()
+        delta_ms = request.data.get("delta_ms")
+        if delta_ms is None:
+            return Response(
+                {"detail": "Поле 'delta_ms' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            MatchService(match).timer_add_time(int(delta_ms), judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MatchSerializer(match).data)

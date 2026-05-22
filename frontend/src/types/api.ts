@@ -94,24 +94,73 @@ export interface Registration {
 
 export type MatchStatus = "scheduled" | "ongoing" | "completed" | "bye";
 export type WinMethod = "points" | "ippon" | "waza_ari" | "disqualification" | "withdrawal" | "bye";
+export type TimerStatus = "not_started" | "running" | "paused" | "finished";
 
 export interface Match {
   id: number;
   category: number;
   round_index: number;
   match_order: number;
+  tatami: number | null;
   reg_first: Registration | null;   // null = BYE
   reg_second: Registration | null;  // null = BYE
   score_first: number;
   score_second: number;
   warnings_first: number;
   warnings_second: number;
+  senshu: "none" | "aka" | "ao";
   status: MatchStatus;
   winner: number | null;            // Registration id
   win_method: WinMethod | null;
   next_match: number | null;        // Match id куди йде переможець
   started_at: string | null;
   completed_at: string | null;
+  timer_status: TimerStatus;
+  timer_started_at: string | null;  // ISO datetime
+  timer_elapsed_ms: number;
+  timer_duration_ms: number;
+  ruleset_key: string;
+  judging_mode: "points" | "flags";
+}
+
+// ─── Рулсет ─────────────────────────────────────────────────────────────────
+
+export interface ScoreAction {
+  key: string;
+  label: string;
+  points: number;
+  is_warning: boolean;
+}
+
+export interface WinMethodInfo {
+  key: string;
+  label: string;
+}
+
+export interface RulesetInfo {
+  key: string;
+  name: string;
+  sport_type: string;
+  judging_mode: "points" | "flags";
+  score_actions: ScoreAction[];
+  win_methods: WinMethodInfo[];
+}
+
+// ─── Татамі ──────────────────────────────────────────────────────────────────
+
+export interface Tatami {
+  id: number;
+  tournament: number;
+  number: number;
+  name: string;
+  current_match: number | null;
+  is_active: boolean;
+}
+
+export interface TatamiSnapshot {
+  tatami: Tatami;
+  server_ts_ms: number;
+  current_match: Match | null;
 }
 
 // ─── Сітка ──────────────────────────────────────────────────────────────────

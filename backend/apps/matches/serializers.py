@@ -19,6 +19,16 @@ class MatchSerializer(serializers.ModelSerializer):
     win_method_display = serializers.CharField(source="get_win_method_display", read_only=True)
     reg_first = RegistrationSerializer(read_only=True)
     reg_second = RegistrationSerializer(read_only=True)
+    ruleset_key = serializers.CharField(source="category.ruleset_key", read_only=True)
+    judging_mode = serializers.SerializerMethodField()
+
+    def get_judging_mode(self, obj):
+        from apps.rulesets.registry import get_ruleset
+
+        try:
+            return get_ruleset(obj.category.ruleset_key).judging_mode
+        except KeyError:
+            return None
 
     class Meta:
         model = Match
@@ -29,7 +39,7 @@ class MatchSerializer(serializers.ModelSerializer):
             "reg_second",
             "round_index",
             "match_order",
-            "tatami_number",
+            "tatami",
             "score_first",
             "score_second",
             "warnings_first",
@@ -47,6 +57,12 @@ class MatchSerializer(serializers.ModelSerializer):
             "status_display",
             "started_at",
             "completed_at",
+            "timer_status",
+            "timer_started_at",
+            "timer_elapsed_ms",
+            "timer_duration_ms",
+            "ruleset_key",
+            "judging_mode",
         ]
         read_only_fields = fields
 
