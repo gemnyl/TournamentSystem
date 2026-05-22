@@ -161,25 +161,6 @@ class Match(models.Model):
         s = self.reg_second.athlete.get_full_name() if self.reg_second else "TBD"
         return f"R{self.round_index}.{self.match_order}: {f} vs {s}"
 
-    # --- бізнес-методи ---
-
-    def update_score(self, participant, delta=1):
-        """Оновлює рахунок учасника (1 або 2)."""
-        if participant not in (1, 2):
-            raise ValidationError("participant має бути 1 або 2")
-        field = "score_first" if participant == 1 else "score_second"
-        setattr(self, field, getattr(self, field) + delta)
-        if self.status == self.Status.SCHEDULED:
-            self.status = self.Status.ONGOING
-        self.save(update_fields=[field, "status"])
-
-    def add_warning(self, participant):
-        if participant not in (1, 2):
-            raise ValidationError("participant має бути 1 або 2")
-        field = "warnings_first" if participant == 1 else "warnings_second"
-        setattr(self, field, getattr(self, field) + 1)
-        self.save(update_fields=[field])
-
     @transaction.atomic
     def set_winner(self, winner_registration, method=WinMethod.DECISION):
         """Фіксує переможця, завершує матч і просуває його у next_match."""

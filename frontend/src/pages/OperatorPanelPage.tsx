@@ -198,11 +198,14 @@ export default function OperatorPanelPage() {
               const aoName = m.reg_second?.athlete?.full_name ?? "TBD";
               const akaName = m.reg_first?.athlete?.full_name ?? "TBD";
               const winnerReg = m.winner === m.reg_first?.id ? m.reg_first : m.reg_second;
-              const matchItemClass = isCurrent
-                ? "border-amber-500/60 bg-amber-500/10"
-                : isCompleted
-                  ? "border-border/40 bg-muted/20 opacity-50 cursor-default"
-                  : "border-border hover:border-border/80 hover:bg-muted/30 cursor-pointer";
+              let matchItemClass: string;
+              if (isCurrent) {
+                matchItemClass = "border-amber-500/60 bg-amber-500/10";
+              } else if (isCompleted) {
+                matchItemClass = "border-border/40 bg-muted/20 opacity-50 cursor-default";
+              } else {
+                matchItemClass = "border-border hover:border-border/80 hover:bg-muted/30 cursor-pointer";
+              }
 
               return (
                 <button

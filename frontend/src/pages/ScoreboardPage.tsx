@@ -57,8 +57,8 @@ function AthleteColumn({ side, name, club, score, warnings, hasSenshu }: Readonl
 
       {/* Warnings */}
       <div className="flex gap-2 h-10 items-center">
-        {Array.from({ length: warnings }).map((_, i) => (
-          <span key={`w-${i}`} className="text-4xl leading-none">⚠</span>
+        {Array.from({ length: warnings }, (_, i) => i + 1).map((n) => (
+          <span key={`w-${n}`} className="text-4xl leading-none">⚠</span>
         ))}
       </div>
 

@@ -40,16 +40,13 @@ class TatamiConsumer(AsyncWebsocketConsumer):
 
     async def _timer_heartbeat(self):
         """Кожні 5 с надсилає timer.state якщо таймер running (drift correction)."""
-        try:
-            while True:
-                await asyncio.sleep(5)
-                match = await sync_to_async(TatamiService.get_current_match)(
-                    self.tournament_id, self.tatami_number
-                )
-                if match and match.timer_status == "running":
-                    await sync_to_async(broadcast_timer_state)(match)
-        except asyncio.CancelledError:
-            raise
+        while True:
+            await asyncio.sleep(5)
+            match = await sync_to_async(TatamiService.get_current_match)(
+                self.tournament_id, self.tatami_number
+            )
+            if match and match.timer_status == "running":
+                await sync_to_async(broadcast_timer_state)(match)
 
     # ------------------------------------------------------------------
     # Channel layer handlers
