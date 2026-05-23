@@ -52,9 +52,9 @@ export function useMatchUpdates(
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data as string) as { type: string; data: Match };
-        if (msg.type === "match_update") {
-          onUpdateRef.current(msg.data);
+        const msg = JSON.parse(event.data as string) as { type: string; match: Match };
+        if (msg.type === "match.event") {
+          onUpdateRef.current(msg.match);
         }
       } catch {
         // ігноруємо невалідні повідомлення
