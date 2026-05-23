@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Trophy, Users, Shield, LogOut, ChevronDown, Menu, X, LogIn, Loader2 } from "lucide-react";
+import { Trophy, Users, LogOut, ChevronDown, Menu, X, LogIn, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
 }
 
 export default function AppLayout() {
-  const { user, logout, isAuthenticated, isInitialized, isOrganizer, isJudge, fetchMe } = useAuth();
+  const { user, logout, isAuthenticated, isInitialized, isOrganizer, fetchMe } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -93,7 +93,6 @@ export default function AppLayout() {
           <nav className="hidden md:flex items-center gap-6">
             <NavItem to="/tournaments">Турніри</NavItem>
             {isAuthenticated && <NavItem to="/athletes">Атлети</NavItem>}
-            {isJudge && <NavItem to="/judge">Панель судді</NavItem>}
           </nav>
 
           {/* Права частина */}
@@ -126,11 +125,6 @@ export default function AppLayout() {
                   {isOrganizer && (
                     <DropdownMenuItem asChild>
                       <Link to="/tournaments"><Trophy className="w-4 h-4" />Мої турніри</Link>
-                    </DropdownMenuItem>
-                  )}
-                  {isJudge && (
-                    <DropdownMenuItem asChild>
-                      <Link to="/judge"><Shield className="w-4 h-4" />Панель судді</Link>
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem asChild>
@@ -173,11 +167,6 @@ export default function AppLayout() {
             {isAuthenticated && (
               <NavLink to="/athletes" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
                 Атлети
-              </NavLink>
-            )}
-            {isJudge && (
-              <NavLink to="/judge" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
-                Панель судді
               </NavLink>
             )}
             {!isAuthenticated && (
