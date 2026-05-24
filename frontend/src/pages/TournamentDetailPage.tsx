@@ -21,16 +21,19 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
 import { CategoryCard } from "@/components/tournament/CategoryCard";
-import type { Tournament, Category, PaginatedResponse } from "@/types/api";
+import type { Tournament, Category, PaginatedResponse, RulesetInfo } from "@/types/api";
 
 const categorySchema = z.object({
-  name:           z.string().min(2, "Введіть назву"),
-  allowed_gender: z.enum(["male", "female", "mixed"]),
-  min_age:        z.coerce.number().min(5).max(100),
-  max_age:        z.coerce.number().min(5).max(100),
-  min_weight:     z.coerce.number().min(20).max(300),
-  max_weight:     z.coerce.number().min(20).max(300),
-  bracket_format: z.enum(["single_elimination", "double_elimination", "round_robin"]),
+  name:                   z.string().min(2, "Введіть назву"),
+  allowed_gender:         z.enum(["male", "female", "mixed"]),
+  min_age:                z.coerce.number().min(5).max(100),
+  max_age:                z.coerce.number().min(5).max(100),
+  min_weight:             z.coerce.number().min(20).max(300),
+  max_weight:             z.coerce.number().min(20).max(300),
+  bracket_format:         z.enum(["single_elimination", "round_robin"]),
+  ruleset_key:            z.string().min(1, "Оберіть правила"),
+  match_duration_seconds: z.string().optional().transform(v => v === "" || v === undefined ? undefined : Number(v)),
+  allowed_skill_level:    z.string().optional(),
 });
 type CategoryForm = z.infer<typeof categorySchema>;
 
@@ -47,10 +50,41 @@ export default function TournamentDetailPage() {
   const [catGender, setCatGender] = useState<"male" | "female" | "mixed">("male");
   const [catFormat, setCatFormat] = useState<CategoryForm["bracket_format"]>("single_elimination");
 
-  const { register, handleSubmit, setValue, reset, formState: { errors } } = useForm<CategoryForm>({
+  const [rulesets, setRulesets] = useState<RulesetInfo[]>([]);
+  const [selectedRuleset, setSelectedRuleset] = useState<RulesetInfo | null>(null);
+
+  const { register, handleSubmit, setValue, watch, reset, formState: { errors } } = useForm<CategoryForm>({
     resolver: zodResolver(categorySchema),
-    defaultValues: { allowed_gender: "male", bracket_format: "single_elimination" },
+    defaultValues: {
+      allowed_gender: "male",
+      bracket_format: "single_elimination",
+      ruleset_key: "karate_wkf",
+    },
   });
+
+  const watchRulesetKey = watch("ruleset_key");
+
+  // Завантаження рулсетів
+  const fetchRulesets = async () => {
+    try {
+      const { data } = await api.get<RulesetInfo[]>("/rulesets/");
+      setRulesets(data);
+      if (data.length > 0) {
+        // Якщо ruleset_key не обрано або порожній, ставимо перший
+        setValue("ruleset_key", data[0].key);
+        setSelectedRuleset(data[0]);
+      }
+    } catch {
+      // ігноруємо помилки
+    }
+  };
+
+  useEffect(() => {
+    if (catDialogOpen) {
+      fetchRulesets();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catDialogOpen]);
 
   const fetchAll = async () => {
     setIsLoading(true);
@@ -108,7 +142,7 @@ export default function TournamentDetailPage() {
 
   const canOpenReg  = tournament.status === "draft";
   const canStart    = tournament.status === "registration";
-  const canComplete = tournament.status === "ongoing";
+  const canComplete = tournament.status === "active";
 
   return (
     <div className="container py-8 space-y-6">
@@ -258,10 +292,53 @@ export default function TournamentDetailPage() {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="single_elimination">Single Elimination</SelectItem>
-                  <SelectItem value="double_elimination">Double Elimination</SelectItem>
                   <SelectItem value="round_robin">Round Robin</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Правила (Рулсет)</Label>
+              <Select
+                value={watchRulesetKey || ""}
+                onValueChange={(v) => {
+                  setValue("ruleset_key", v);
+                  const r = rulesets.find((item) => item.key === v);
+                  setSelectedRuleset(r || null);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Оберіть правила..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {rulesets.map((r) => (
+                    <SelectItem key={r.key} value={r.key}>
+                      {r.name} ({r.sport_type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.ruleset_key && <p className="text-xs text-destructive">{errors.ruleset_key.message}</p>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Тривалість поєдинку (сек, опціонально)</Label>
+              <Input
+                type="number"
+                placeholder={
+                  selectedRuleset?.default_duration_seconds
+                    ? `${selectedRuleset.default_duration_seconds} (за замовчуванням)`
+                    : "180"
+                }
+                {...register("match_duration_seconds")}
+              />
+              {errors.match_duration_seconds && <p className="text-xs text-destructive">{errors.match_duration_seconds.message}</p>}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Допустимий рівень майстерності (опціонально)</Label>
+              <Input placeholder="напр. Чорний пояс 1 дан" {...register("allowed_skill_level")} />
+              {errors.allowed_skill_level && <p className="text-xs text-destructive">{errors.allowed_skill_level.message}</p>}
             </div>
 
             <DialogFooter>
