@@ -1,6 +1,6 @@
 // ─── Користувач та аутентифікація ───────────────────────────────────────────
 
-export type UserRole = "organizer" | "coach" | "judge" | "spectator";
+export type UserRole = "organizer" | "coach" | "judge" | "spectator" | "admin";
 
 export interface User {
   id: number;
@@ -16,8 +16,7 @@ export interface User {
 export interface Club {
   id: number;
   name: string;
-  city: string;
-  country: string;
+  region: string;
 }
 
 // ─── Атлет ──────────────────────────────────────────────────────────────────
@@ -31,13 +30,13 @@ export interface Athlete {
   birth_date: string; // ISO date
   gender: "male" | "female";
   base_weight: number;       // кг, float
-  club?: { id: number; name: string; city: string; country: string };
+  club?: { id: number; name: string; region: string } | null;
   club_id?: number;
 }
 
 // ─── Турнір ─────────────────────────────────────────────────────────────────
 
-export type TournamentStatus = "draft" | "registration" | "ongoing" | "completed" | "cancelled";
+export type TournamentStatus = "draft" | "registration" | "active" | "completed";
 
 export interface Tournament {
   id: number;
@@ -56,7 +55,7 @@ export interface Tournament {
 // ─── Категорія ──────────────────────────────────────────────────────────────
 
 export type BracketFormat = "single_elimination" | "double_elimination" | "round_robin";
-export type CategoryStatus = "draft" | "registration" | "ongoing" | "completed";
+export type CategoryStatus = TournamentStatus;
 
 export interface Category {
   id: number;
@@ -92,8 +91,8 @@ export interface Registration {
 
 // ─── Матч ───────────────────────────────────────────────────────────────────
 
-export type MatchStatus = "scheduled" | "ongoing" | "completed" | "bye";
-export type WinMethod = "points" | "ippon" | "waza_ari" | "disqualification" | "withdrawal" | "bye";
+export type MatchStatus = "scheduled" | "ongoing" | "completed";
+export type WinMethod = "decision" | "disqualification" | "walkover" | "withdrawal" | "points" | "hantei" | "hansoku" | "kiken" | "ippon" | "wazaari";
 export type TimerStatus = "not_started" | "running" | "paused" | "finished";
 
 export interface Match {
@@ -142,6 +141,7 @@ export interface RulesetInfo {
   name: string;
   sport_type: string;
   judging_mode: "points" | "flags";
+  default_duration_seconds?: number | null;
   score_actions: ScoreAction[];
   win_methods: WinMethodInfo[];
 }
@@ -187,6 +187,7 @@ export interface RegisterData {
   password_confirm: string;
   first_name: string;
   last_name: string;
+  role: UserRole;
 }
 
 export interface CreateTournamentData {
@@ -208,15 +209,7 @@ export interface CreateCategoryData {
   bracket_format: BracketFormat;
 }
 
-export interface UpdateScoreData {
-  participant: 1 | 2;
-  delta: number;
-}
-
-export interface SetWinnerData {
-  winner_id: number;
-  method: WinMethod;
-}
+// Legacy UpdateScoreData та SetWinnerData видалено
 
 // ─── Пагінація DRF ──────────────────────────────────────────────────────────
 

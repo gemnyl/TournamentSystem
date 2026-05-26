@@ -34,6 +34,8 @@ class CategorySerializer(serializers.ModelSerializer):
             "min_weight",
             "max_weight",
             "allowed_skill_level",
+            "ruleset_key",
+            "match_duration_seconds",
             "bracket_format",
             "bracket_format_display",
             "confirmed_registrations_count",

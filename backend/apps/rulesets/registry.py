@@ -26,6 +26,9 @@ def list_rulesets() -> list[dict]:
             "name": cls.name,
             "sport_type": cls.sport_type,
             "judging_mode": cls.judging_mode,
+            "default_duration_seconds": instance.get_default_duration_seconds()
+            if isinstance(instance, PointsRuleSet)
+            else None,
             "win_methods": [{"key": w.key, "label": w.label} for w in instance.get_win_methods()],
         }
         if isinstance(instance, PointsRuleSet):

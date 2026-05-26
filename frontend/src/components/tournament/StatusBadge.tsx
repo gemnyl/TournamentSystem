@@ -4,15 +4,14 @@ import type { TournamentStatus, CategoryStatus, MatchStatus, RegistrationStatus 
 const TOURNAMENT_LABELS: Record<TournamentStatus, string> = {
   draft:        "Чернетка",
   registration: "Реєстрація",
-  ongoing:      "Триває",
+  active:       "Триває",
   completed:    "Завершено",
-  cancelled:    "Скасовано",
 };
 
 const CATEGORY_LABELS: Record<CategoryStatus, string> = {
   draft:        "Чернетка",
   registration: "Реєстрація",
-  ongoing:      "Триває",
+  active:       "Триває",
   completed:    "Завершено",
 };
 
@@ -20,7 +19,6 @@ const MATCH_LABELS: Record<MatchStatus, string> = {
   scheduled: "Заплановано",
   ongoing:   "Йде",
   completed: "Завершено",
-  bye:       "BYE",
 };
 
 const REGISTRATION_LABELS: Record<RegistrationStatus, string> = {
@@ -34,11 +32,10 @@ type StatusBadgeVariant = TournamentStatus | CategoryStatus | MatchStatus | Regi
 const VARIANT_MAP: Record<string, "draft" | "registration" | "ongoing" | "completed" | "cancelled" | "secondary" | "destructive" | "outline"> = {
   draft:        "draft",
   registration: "registration",
+  active:       "ongoing",
   ongoing:      "ongoing",
   completed:    "completed",
-  cancelled:    "cancelled",
   scheduled:    "secondary",
-  bye:          "outline",
   pending:      "secondary",
   confirmed:    "completed",
   withdrawn:    "cancelled",

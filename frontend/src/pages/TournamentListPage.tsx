@@ -126,17 +126,9 @@ export default function TournamentListPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((t) => {
-            try {
-              return <TournamentCard key={t.id} tournament={t} />;
-            } catch {
-              return (
-                <div key={t.id} className="rounded-xl border border-destructive/30 p-4 text-sm text-muted-foreground">
-                  Помилка відображення турніру #{t.id}
-                </div>
-              );
-            }
-          })}
+          {filtered.map((t) => (
+            <TournamentCard key={t.id} tournament={t} />
+          ))}
         </div>
       )}
 

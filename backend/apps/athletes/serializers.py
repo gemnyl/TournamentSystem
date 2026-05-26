@@ -17,6 +17,8 @@ class AthleteSerializer(serializers.ModelSerializer):
         source="club",
         queryset=Club.objects.all(),
         write_only=True,
+        required=False,
+        allow_null=True,
     )
     coach = UserSerializer(read_only=True)
     age = serializers.SerializerMethodField()

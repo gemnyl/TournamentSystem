@@ -118,7 +118,7 @@ export default function CategoryDetailPage() {
   }
   if (!category) return null;
 
-  const canGenerateBracket = isOrganizer && category.status === "ongoing" && registrations.some(r => r.status === "confirmed");
+  const canGenerateBracket = isOrganizer && category.status === "active" && registrations.some(r => r.status === "confirmed");
   const canRegister = (isOrganizer || isCoach) && category.status === "registration";
 
   return (
@@ -151,7 +151,7 @@ export default function CategoryDetailPage() {
               Згенерувати сітку
             </Button>
           )}
-          {category.status === "ongoing" || category.status === "completed" ? (
+          {category.status === "active" || category.status === "completed" ? (
             <Button asChild variant="outline" size="sm">
               <Link to={`/categories/${id}/bracket`}>
                 <GitBranch className="w-4 h-4" /> Переглянути сітку

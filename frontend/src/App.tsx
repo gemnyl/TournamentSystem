@@ -10,7 +10,6 @@ import TournamentListPage from "@/pages/TournamentListPage";
 import TournamentDetailPage from "@/pages/TournamentDetailPage";
 import CategoryDetailPage from "@/pages/CategoryDetailPage";
 import BracketPage from "@/pages/BracketPage";
-import JudgePanelPage from "@/pages/JudgePanelPage";
 import AthletesPage from "@/pages/AthletesPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import OperatorPanelPage from "@/pages/OperatorPanelPage";
@@ -42,7 +41,6 @@ export default function App() {
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["judge", "organizer"]} />}>
-            <Route path="/judge" element={<JudgePanelPage />} />
             <Route
               path="/operator/tournament/:tid/tatami/:n"
               element={<OperatorPanelPage />}
