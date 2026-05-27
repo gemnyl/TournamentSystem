@@ -35,6 +35,12 @@ class Tournament(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.DRAFT, verbose_name="Статус"
     )
+    weigh_in_required = models.BooleanField(
+        default=True,
+        verbose_name="Потрібне зважування",
+        help_text="Якщо вимкнено, учасники автоматично "
+        "підтверджуються при реєстрації без зважування",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

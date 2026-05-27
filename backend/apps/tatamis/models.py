@@ -1,7 +1,16 @@
+from django.conf import settings
 from django.db import models
 
 
 class Tatami(models.Model):
+    assigned_judge = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_tatamis",
+        verbose_name="Призначений суддя",
+    )
     tournament = models.ForeignKey(
         "tournaments.Tournament",
         on_delete=models.CASCADE,
