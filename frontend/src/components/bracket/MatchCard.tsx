@@ -55,17 +55,24 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
         firstWon && "bg-green-500/10",
         isDone && !firstWon && match.reg_first && "opacity-50",
       )}>
-        <div className="min-w-0 flex-1">
-          <p className={cn(
-            "text-sm font-medium truncate leading-tight",
-            !match.reg_first && "text-muted-foreground italic",
-            firstWon && "text-green-400 font-semibold",
-          )}>
-            {participantName(match.reg_first)}
-          </p>
-          {!compact && match.reg_first && (
-            <p className="text-[10px] text-muted-foreground truncate">{participantClub(match.reg_first)}</p>
+        <div className="min-w-0 flex-1 flex items-center gap-1.5">
+          {match.reg_first && (
+            <span className="text-[9px] font-black text-red-500 bg-red-500/10 border border-red-500/20 px-1 rounded shrink-0 leading-none">
+              AKA
+            </span>
           )}
+          <div className="min-w-0 flex-1">
+            <p className={cn(
+              "text-sm font-medium truncate leading-tight",
+              !match.reg_first && "text-muted-foreground italic",
+              firstWon && "text-green-400 font-semibold",
+            )}>
+              {participantName(match.reg_first)}
+            </p>
+            {!compact && match.reg_first && (
+              <p className="text-[10px] text-muted-foreground truncate">{participantClub(match.reg_first)}</p>
+            )}
+          </div>
         </div>
         <span className={cn(
           "font-mono text-base font-bold shrink-0 w-6 text-right",
@@ -84,17 +91,24 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
         secondWon && "bg-green-500/10",
         isDone && !secondWon && match.reg_second && "opacity-50",
       )}>
-        <div className="min-w-0 flex-1">
-          <p className={cn(
-            "text-sm font-medium truncate leading-tight",
-            !match.reg_second && "text-muted-foreground italic",
-            secondWon && "text-green-400 font-semibold",
-          )}>
-            {isBye && !match.reg_first ? "BYE" : participantName(match.reg_second)}
-          </p>
-          {!compact && match.reg_second && (
-            <p className="text-[10px] text-muted-foreground truncate">{participantClub(match.reg_second)}</p>
+        <div className="min-w-0 flex-1 flex items-center gap-1.5">
+          {match.reg_second && (
+            <span className="text-[9px] font-black text-blue-500 bg-blue-500/10 border border-blue-500/20 px-1 rounded shrink-0 leading-none">
+              AO
+            </span>
           )}
+          <div className="min-w-0 flex-1">
+            <p className={cn(
+              "text-sm font-medium truncate leading-tight",
+              !match.reg_second && "text-muted-foreground italic",
+              secondWon && "text-green-400 font-semibold",
+            )}>
+              {isBye && !match.reg_first ? "BYE" : participantName(match.reg_second)}
+            </p>
+            {!compact && match.reg_second && (
+              <p className="text-[10px] text-muted-foreground truncate">{participantClub(match.reg_second)}</p>
+            )}
+          </div>
         </div>
         <span className={cn(
           "font-mono text-base font-bold shrink-0 w-6 text-right",

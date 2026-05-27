@@ -49,6 +49,7 @@ export interface Tournament {
   status_display: string;
   organizer: number;
   organizer_name: string;
+  weigh_in_required: boolean;
   created_at: string;
 }
 
@@ -119,6 +120,7 @@ export interface Match {
   timer_elapsed_ms: number;
   timer_duration_ms: number;
   ruleset_key: string;
+  category_name?: string;
   judging_mode: "points" | "flags";
 }
 
@@ -154,6 +156,8 @@ export interface Tatami {
   number: number;
   name: string;
   current_match: number | null;
+  assigned_judge: number | null;
+  assigned_judge_name?: string;
   is_active: boolean;
 }
 

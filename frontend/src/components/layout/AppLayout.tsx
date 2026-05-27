@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Trophy, Users, LogOut, ChevronDown, Menu, X, LogIn, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -40,12 +41,29 @@ export default function AppLayout() {
   const { user, logout, isAuthenticated, isInitialized, isOrganizer, fetchMe } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [judgeTatami, setJudgeTatami] = useState<any | null>(null);
 
   // Перевіряємо сесію один раз при старті
   useEffect(() => {
     fetchMe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated && user?.role === "judge") {
+      api.get<any[]>("/tatamis/")
+        .then((res) => {
+          const list = Array.isArray(res.data) ? res.data : (res.data as any).results;
+          const assigned = list.find((t: any) => t.assigned_judge === user.id);
+          if (assigned) {
+            setJudgeTatami(assigned);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setJudgeTatami(null);
+    }
+  }, [isAuthenticated, user]);
 
   const handleLogout = async () => {
     await logout();
@@ -89,10 +107,14 @@ export default function AppLayout() {
             </span>
           </Link>
 
-          {/* Навігація (десктоп) */}
           <nav className="hidden md:flex items-center gap-6">
             <NavItem to="/tournaments">Турніри</NavItem>
             {isAuthenticated && <NavItem to="/athletes">Атлети</NavItem>}
+            {judgeTatami && (
+              <NavItem to={`/operator/tournament/${judgeTatami.tournament}/tatami/${judgeTatami.number}`}>
+                Мій татамі
+              </NavItem>
+            )}
           </nav>
 
           {/* Права частина */}
@@ -167,6 +189,15 @@ export default function AppLayout() {
             {isAuthenticated && (
               <NavLink to="/athletes" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
                 Атлети
+              </NavLink>
+            )}
+            {judgeTatami && (
+              <NavLink
+                to={`/operator/tournament/${judgeTatami.tournament}/tatami/${judgeTatami.number}`}
+                className="text-sm font-medium py-1 text-amber-500 font-bold"
+                onClick={() => setMobileOpen(false)}
+              >
+                Мій татамі
               </NavLink>
             )}
             {!isAuthenticated && (
