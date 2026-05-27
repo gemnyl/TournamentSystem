@@ -241,3 +241,62 @@ class TestBracketGeneration(TournamentAPITestCase):
         self._login(self.organizer)
         response = self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_generate_bracket_with_custom_format(self):
+        """Зміна формату при генерації сітки."""
+        for i in range(1, 3):
+            self._create_athlete(i)
+        self._login(self.organizer)
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/generate_bracket/",
+            {"bracket_format": "round_robin"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.category.refresh_from_db()
+        self.assertEqual(self.category.bracket_format, "round_robin")
+
+    def test_delete_bracket(self):
+        """Видалення згенерованої сітки."""
+        for i in range(1, 3):
+            self._create_athlete(i)
+        self._login(self.organizer)
+        self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
+        self.assertTrue(self.category.matches.exists())
+
+        response = self.client.post(f"/api/categories/{self.category.pk}/delete_bracket/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(self.category.matches.exists())
+
+    def test_generate_all_brackets(self):
+        """Генерація сіток для всього турніру."""
+        for i in range(1, 3):
+            self._create_athlete(i)
+        self._login(self.organizer)
+
+        response = self.client.post(f"/api/tournaments/{self.tournament.pk}/generate_all_brackets/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(self.category.matches.exists())
+
+    def test_registration_blocked_if_not_registration_status(self):
+        """Реєстрація спортсменів блокується, якщо статус не 'registration'."""
+        self.tournament.status = Tournament.Status.ACTIVE
+        self.tournament.save(update_fields=["status"])
+
+        self._login(self.coach)
+        athlete = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_a,
+            first_name="Блокований",
+            last_name="Атлет",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2001, 5, 10),
+            base_weight=73,
+        )
+        payload = {"athlete_id": athlete.pk, "category": self.category.pk}
+        response = self.client.post("/api/registrations/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn(
+            "Реєстрація можлива лише тоді",
+            response.data[0] if isinstance(response.data, list) else str(response.data),
+        )

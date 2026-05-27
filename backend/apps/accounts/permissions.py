@@ -80,3 +80,16 @@ class IsOrganizerOrReadOnly(BasePermission):
             and request.user.is_authenticated
             and request.user.role in ("organizer", "admin")
         )
+
+
+class IsJudgeOrOrganizer(BasePermission):
+    """Дозволяє доступ суддям, організаторам та адміністраторам."""
+
+    message = "Доступ лише для суддів та організаторів."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ("judge", "organizer", "admin")
+        )

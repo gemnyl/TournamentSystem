@@ -20,6 +20,7 @@ class CategorySerializer(serializers.ModelSerializer):
     )
     status = serializers.CharField(source="tournament.status", read_only=True)
     confirmed_registrations_count = serializers.SerializerMethodField()
+    has_bracket = serializers.SerializerMethodField()
 
     class Meta:
         model = Category
@@ -39,11 +40,15 @@ class CategorySerializer(serializers.ModelSerializer):
             "bracket_format",
             "bracket_format_display",
             "confirmed_registrations_count",
+            "has_bracket",
             "status",
         ]
 
     def get_confirmed_registrations_count(self, obj):
         return obj.registrations.filter(status=Registration.Status.CONFIRMED).count()
+
+    def get_has_bracket(self, obj):
+        return obj.matches.exists()
 
 
 class TournamentSerializer(serializers.ModelSerializer):
@@ -65,6 +70,7 @@ class TournamentSerializer(serializers.ModelSerializer):
             "status_display",
             "organizer",
             "organizer_name",
+            "weigh_in_required",
             "created_at",
         ]
         read_only_fields = ["organizer", "created_at", "status"]
@@ -107,3 +113,17 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["seed_number", "recorded_weight", "status", "created_at"]
+
+    def validate(self, attrs):
+        category = attrs.get("category")
+        if category and category.tournament.status != category.tournament.Status.REGISTRATION:
+            raise serializers.ValidationError(
+                "Реєстрація можлива лише тоді, коли турнір знаходиться у статусі 'Реєстрація'."
+            )
+        return attrs
+
+    def create(self, validated_data):
+        category = validated_data.get("category")
+        if category and not category.tournament.weigh_in_required:
+            validated_data["status"] = "confirmed"
+        return super().create(validated_data)

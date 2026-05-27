@@ -74,3 +74,24 @@ def broadcast_tatami_state(tatami) -> None:
             "current_match": (MatchSerializer(current_match).data if current_match else None),
         },
     )
+
+
+def broadcast_match_update(match) -> None:
+    """Оновлення поєдинку для category group + tatami group (якщо є) без події."""
+    from apps.matches.serializers import MatchSerializer
+
+    channel_layer = get_channel_layer()
+    payload = {
+        "type": "match.event",
+        "match_id": match.id,
+        "event": {
+            "sequence": 0,
+            "event_type": "update",
+            "payload": {},
+        },
+        "match": MatchSerializer(match).data,
+    }
+    async_to_sync(channel_layer.group_send)(f"category_{match.category_id}", payload)
+    group = _tatami_group(match)
+    if group:
+        async_to_sync(channel_layer.group_send)(group, payload)

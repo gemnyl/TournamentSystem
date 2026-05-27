@@ -20,6 +20,7 @@ class MatchSerializer(serializers.ModelSerializer):
     reg_first = RegistrationSerializer(read_only=True)
     reg_second = RegistrationSerializer(read_only=True)
     ruleset_key = serializers.CharField(source="category.ruleset_key", read_only=True)
+    category_name = serializers.CharField(source="category.name", read_only=True)
     judging_mode = serializers.SerializerMethodField()
 
     def get_judging_mode(self, obj):
@@ -62,6 +63,7 @@ class MatchSerializer(serializers.ModelSerializer):
             "timer_elapsed_ms",
             "timer_duration_ms",
             "ruleset_key",
+            "category_name",
             "judging_mode",
         ]
         read_only_fields = fields

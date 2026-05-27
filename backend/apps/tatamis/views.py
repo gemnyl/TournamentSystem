@@ -30,19 +30,25 @@ class TatamiViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_permissions(self):
-        if self.action == "create":
+        if self.action in ("create", "update", "partial_update", "destroy"):
             from apps.accounts.permissions import IsOrganizer
 
             return [IsOrganizer()]
         if self.action in ("assign_match", "release"):
-            from apps.accounts.permissions import IsJudge
+            from apps.accounts.permissions import IsJudgeOrOrganizer
 
-            return [IsJudge()]
+            return [IsJudgeOrOrganizer()]
         return [AllowAny()]
 
     @action(detail=True, methods=["post"], url_path="assign_match")
     def assign_match(self, request, pk=None):
         tatami = self.get_object()
+        if request.user.is_authenticated and request.user.role == "judge":
+            if tatami.assigned_judge_id != request.user.id:
+                return Response(
+                    {"detail": "Ви не закріплені за цим татамі!"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         match_id = request.data.get("match_id")
         if not match_id:
             return Response(
@@ -59,6 +65,12 @@ class TatamiViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="release")
     def release(self, request, pk=None):
         tatami = self.get_object()
+        if request.user.is_authenticated and request.user.role == "judge":
+            if tatami.assigned_judge_id != request.user.id:
+                return Response(
+                    {"detail": "Ви не закріплені за цим татамі!"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         TatamiService.release(tatami)
         tatami.refresh_from_db()
         return Response(TatamiSerializer(tatami).data)
@@ -66,6 +78,12 @@ class TatamiViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="state")
     def state(self, request, pk=None):
         tatami = self.get_object()
+        if request.user.is_authenticated and request.user.role == "judge":
+            if tatami.assigned_judge_id != request.user.id:
+                return Response(
+                    {"detail": "Ви не закріплені за цим татамі!"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         current_match = tatami.current_match
         return Response(
             {

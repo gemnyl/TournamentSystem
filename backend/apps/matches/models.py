@@ -177,6 +177,10 @@ class Match(models.Model):
 
         self.advance_participant()
 
+        from apps.common.broadcast import broadcast_match_update
+
+        broadcast_match_update(self)
+
     def advance_participant(self):
         """Переносить переможця в наступний матч дерева."""
         if not self.next_match or not self.winner:
@@ -193,6 +197,10 @@ class Match(models.Model):
         # Якщо обидва слоти зайняті — це означає помилку в структурі дерева
         else:
             raise ValidationError(f"Наступний матч {nxt.id} вже заповнено обома учасниками")
+
+        from apps.common.broadcast import broadcast_match_update
+
+        broadcast_match_update(nxt)
 
 
 class MatchEvent(models.Model):

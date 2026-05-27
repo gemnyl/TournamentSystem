@@ -42,6 +42,8 @@ class TournamentViewSet(viewsets.ModelViewSet):
             "open_registration",
             "start",
             "complete",
+            "generate_all_brackets",
+            "auto_distribute_tatamis",
         ):
             return [IsOrganizer()]
         from rest_framework.permissions import AllowAny
@@ -86,6 +88,95 @@ class TournamentViewSet(viewsets.ModelViewSet):
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(TournamentSerializer(tournament).data)
 
+    @action(detail=True, methods=["post"], url_path="generate_all_brackets")
+    def generate_all_brackets(self, request, pk=None):
+        """POST /api/tournaments/{id}/generate_all_brackets/"""
+        tournament = self.get_object()
+        categories = tournament.categories.all()
+
+        round_robin_min = int(request.data.get("round_robin_min", 2))
+        round_robin_max = int(request.data.get("round_robin_max", 5))
+        single_elimination_min = int(request.data.get("single_elimination_min", 6))
+        single_elimination_max = int(request.data.get("single_elimination_max", 32))
+
+        generated_count = 0
+        errors = []
+        for cat in categories:
+            if cat.matches.exists():
+                continue
+            confirmed_count = cat.registrations.filter(status=Registration.Status.CONFIRMED).count()
+            if confirmed_count < 2:
+                continue
+
+            if round_robin_min <= confirmed_count <= round_robin_max:
+                cat.bracket_format = Category.BracketFormat.ROUND_ROBIN
+                cat.save(update_fields=["bracket_format"])
+            elif single_elimination_min <= confirmed_count <= single_elimination_max:
+                cat.bracket_format = Category.BracketFormat.SINGLE_ELIMINATION
+                cat.save(update_fields=["bracket_format"])
+
+            try:
+                BracketGenerator(cat).generate()
+                generated_count += 1
+            except DjangoValidationError as exc:
+                errors.append(f"Категорія {cat.name}: {exc.message}")
+
+        return Response(
+            {"detail": f"Згенеровано сітки для {generated_count} категорій.", "errors": errors},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="auto_distribute_tatamis")
+    def auto_distribute_tatamis(self, request, pk=None):
+        """POST /api/tournaments/{id}/auto_distribute_tatamis/"""
+        tournament = self.get_object()
+        active_tatamis = list(tournament.tatamis.filter(is_active=True).order_by("number"))
+        if not active_tatamis:
+            return Response(
+                {"detail": "Немає активних татамі в цьому турнірі."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        categories = list(tournament.categories.all())
+        categories_with_matches = [c for c in categories if c.matches.exists()]
+        if not categories_with_matches:
+            return Response(
+                {"detail": "Немає категорій зі згенерованими сітками."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Greedy load-balancing sorting by match count descending
+        categories_with_matches.sort(key=lambda c: c.matches.count(), reverse=True)
+
+        tatami_loads = {t.id: 0 for t in active_tatamis}
+        assignments = []
+
+        for cat in categories_with_matches:
+            least_loaded_tatami = min(active_tatamis, key=lambda t: tatami_loads[t.id])
+            cat.matches.update(tatami=least_loaded_tatami)
+            match_count = cat.matches.count()
+            tatami_loads[least_loaded_tatami.id] += match_count
+            assignments.append(
+                {
+                    "category_id": cat.id,
+                    "category_name": cat.name,
+                    "tatami_id": least_loaded_tatami.id,
+                    "tatami_number": least_loaded_tatami.number,
+                    "matches_count": match_count,
+                }
+            )
+
+        return Response(
+            {
+                "detail": (
+                    f"Успішно розподілено {len(categories_with_matches)} "
+                    f"категорій по {len(active_tatamis)} татамі."
+                ),
+                "assignments": assignments,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class CategoryViewSet(viewsets.ModelViewSet):
     """Категорії турніру. Вкладені під турнір через query param tournament."""
@@ -100,7 +191,15 @@ class CategoryViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update", "destroy", "generate_bracket"):
+        if self.action in (
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+            "generate_bracket",
+            "delete_bracket",
+            "assign_tatami",
+        ):
             return [IsOrganizer()]
         from rest_framework.permissions import AllowAny
 
@@ -121,6 +220,16 @@ class CategoryViewSet(viewsets.ModelViewSet):
         Генерує турнірну сітку для категорії та повертає список матчів.
         """
         category = self.get_object()
+        bracket_format = request.data.get("bracket_format")
+        if bracket_format:
+            if bracket_format not in Category.BracketFormat.values:
+                return Response(
+                    {"detail": f"Некоректний формат сітки: {bracket_format}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            category.bracket_format = bracket_format
+            category.save(update_fields=["bracket_format"])
+
         try:
             matches = BracketGenerator(category).generate()
         except DjangoValidationError as exc:
@@ -131,6 +240,47 @@ class CategoryViewSet(viewsets.ModelViewSet):
         return Response(
             MatchSerializer(matches, many=True).data,
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="delete_bracket")
+    def delete_bracket(self, request, pk=None):
+        """POST /api/categories/{id}/delete_bracket/
+        Видаляє всі матчі для категорії.
+        """
+        category = self.get_object()
+        matches = category.matches.all()
+        count = matches.count()
+        matches.delete()
+        return Response(
+            {"detail": f"Успішно видалено {count} матчів сітки."}, status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=["post"], url_path="assign_tatami")
+    def assign_tatami(self, request, pk=None):
+        """POST /api/categories/{id}/assign_tatami/
+        Тіло: {"tatami_id": int}
+        """
+        category = self.get_object()
+        tatami_id = request.data.get("tatami_id")
+        if not tatami_id:
+            return Response(
+                {"detail": "Поле 'tatami_id' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            from apps.tatamis.models import Tatami
+
+            tatami = Tatami.objects.get(id=int(tatami_id), tournament=category.tournament)
+        except (Tatami.DoesNotExist, ValueError, TypeError):
+            return Response(
+                {"detail": "Вказано некоректний або неіснуючий ID татамі для цього турніру."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        category.matches.update(tatami=tatami)
+        return Response(
+            {"detail": f"Усі матчі категорії успішно призначено на татамі №{tatami.number}."},
+            status=status.HTTP_200_OK,
         )
 
 

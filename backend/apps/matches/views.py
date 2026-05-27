@@ -12,7 +12,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.accounts.permissions import IsJudge
+from apps.accounts.permissions import IsJudgeOrOrganizer
 from apps.common.broadcast import broadcast_match_event
 from apps.matches.models import Match
 from apps.matches.serializers import BracketNodeSerializer, MatchSerializer
@@ -56,7 +56,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             "timer_add_time",
         )
         if self.action in judge_actions:
-            return [IsJudge()]
+            return [IsJudgeOrOrganizer()]
         from rest_framework.permissions import AllowAny
 
         return [AllowAny()]

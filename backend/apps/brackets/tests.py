@@ -16,7 +16,26 @@ Unit-тести для підсистеми генерації турнірни�
 
 import random
 
-import pytest
+try:
+    import pytest
+except ImportError:
+
+    class MockPytest:
+        class raises:
+            def __init__(self, expected_exception, *args, **kwargs):
+                self.expected_exception = expected_exception
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                if exc_type is None:
+                    raise AssertionError(f"{self.expected_exception.__name__} not raised")
+                if issubclass(exc_type, self.expected_exception):
+                    return True
+                return False
+
+    pytest = MockPytest()
 
 from apps.brackets import utils
 from apps.brackets.utils import Participant

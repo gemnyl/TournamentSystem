@@ -30,6 +30,7 @@ from apps.matches.models import Match
 from apps.matches.serializers import MatchSerializer
 from apps.tatamis.models import Tatami
 from apps.tatamis.routing import websocket_urlpatterns
+from apps.tatamis.serializers import TatamiSerializer
 from apps.tatamis.services import TatamiService
 from apps.tournaments.models import Category, Registration, Tournament
 
@@ -122,6 +123,7 @@ class TatamiTestCase(TestCase):
             tournament=self.tournament,
             number=1,
             name="Tatami A",
+            assigned_judge=self.judge,
         )
 
     def _login(self, user):
@@ -167,6 +169,44 @@ class TestTatamiViewSet(TatamiTestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["number"], 3)
+
+    def test_update_requires_organizer(self):
+        self._login(self.judge)
+        response = self.client.put(
+            f"/api/tatamis/{self.tatami.pk}/",
+            {
+                "tournament": self.tournament.pk,
+                "number": 1,
+                "name": "Updated Name",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_organizer_can_update(self):
+        self._login(self.organizer)
+        response = self.client.put(
+            f"/api/tatamis/{self.tatami.pk}/",
+            {
+                "tournament": self.tournament.pk,
+                "number": 1,
+                "name": "Updated Name",
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["name"], "Updated Name")
+
+    def test_destroy_requires_organizer(self):
+        self._login(self.judge)
+        response = self.client.delete(f"/api/tatamis/{self.tatami.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_organizer_can_destroy(self):
+        self._login(self.organizer)
+        response = self.client.delete(f"/api/tatamis/{self.tatami.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_assign_match_requires_judge(self):
         response = self.client.post(
@@ -523,3 +563,25 @@ class TestBroadcast(TatamiTestCase):
         self.match.tatami = self.tatami
         self.match.save(update_fields=["tatami"])
         broadcast_timer_state(self.match)  # must not raise
+
+
+# ── 8. Serializer Fields ──────────────────────────────────────────────────────
+
+
+class TestTatamiSerializerFields(TatamiTestCase):
+    def test_tatami_serializer_fields(self):
+        # Test matches_count
+        self.match.tatami = self.tatami
+        self.match.save(update_fields=["tatami"])
+
+        serializer = TatamiSerializer(self.tatami)
+        self.assertEqual(serializer.data["matches_count"], 1)
+        self.assertIsNone(serializer.data["current_match"])
+
+        # Set current_match
+        self.tatami.current_match = self.match
+        self.tatami.save(update_fields=["current_match"])
+
+        serializer2 = TatamiSerializer(self.tatami)
+        self.assertIsNotNone(serializer2.data["current_match"])
+        self.assertEqual(serializer2.data["current_match"]["id"], self.match.pk)
