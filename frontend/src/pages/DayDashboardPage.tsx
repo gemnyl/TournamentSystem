@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  ArrowLeft, Loader2, RefreshCw, Layers, ShieldCheck, Wifi, WifiOff
+  ArrowLeft, Loader2, RefreshCw, Layers, ShieldCheck, Wifi, WifiOff, Info
 } from "lucide-react";
 import api from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";

@@ -120,8 +120,9 @@ export default function ScoreboardPage() {
         const list = Array.isArray(data) ? data : (data as { results: Tatami[] }).results;
         const matchingTatami = list.find(t => t.number === Number(n));
         if (matchingTatami && matchingTatami.current_match) {
-          setCurrentMatch(matchingTatami.current_match);
-          updateTimerIfNecessary(matchToTimerState(matchingTatami.current_match));
+          const matchObj = matchingTatami.current_match as any;
+          setCurrentMatch(matchObj);
+          updateTimerIfNecessary(matchToTimerState(matchObj));
         }
       } catch (err) {
         console.error("Error loading initial tatami state:", err);

@@ -303,7 +303,7 @@ export default function CategoryDetailPage() {
               <Plus className="w-4 h-4" /> Зареєструвати атлета
             </Button>
           )}
-          {isOrganizer && category.status === "active" && !category.has_bracket && registrations.some(r => r.status === "confirmed") && (
+          {canGenerateBracket && !category.has_bracket && (
             <Button variant="sport" size="sm" onClick={() => { setChosenFormat(category.bracket_format); setGenerateBracketDialogOpen(true); }}>
               <GitBranch className="w-4 h-4" />
               Згенерувати сітку

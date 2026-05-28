@@ -42,7 +42,7 @@ export default function TatamiAdminPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<Tatami | null>(null);
   const [judges, setJudges] = useState<any[]>([]);
 
-  const { register, handleSubmit, setValue, reset, formState: { errors }, watch } = useForm<TatamiForm>({
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<TatamiForm>({
     resolver: zodResolver(tatamiSchema),
     defaultValues: { number: 1, name: "", is_active: true, assigned_judge: "" as any }
   });

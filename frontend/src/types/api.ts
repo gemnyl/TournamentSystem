@@ -68,10 +68,14 @@ export interface Category {
   max_age: number;
   min_weight: number;
   max_weight: number;
+  allowed_skill_level: string;
+  ruleset_key: string;
+  match_duration_seconds: number;
   bracket_format: BracketFormat;
   bracket_format_display: string;
   status: CategoryStatus;
   confirmed_registrations_count: number;
+  has_bracket: boolean;
 }
 
 // ─── Реєстрація ─────────────────────────────────────────────────────────────
@@ -159,6 +163,7 @@ export interface Tatami {
   assigned_judge: number | null;
   assigned_judge_name?: string;
   is_active: boolean;
+  matches_count?: number;
 }
 
 export interface TatamiSnapshot {
