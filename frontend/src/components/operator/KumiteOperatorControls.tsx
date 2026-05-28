@@ -51,7 +51,7 @@ export default function KumiteOperatorControls({
     post(`/matches/${match.id}/set_senshu/`, { value });
 
   const timerAction = (path: string, body?: Record<string, unknown>) =>
-    post(`/matches/${match.id}/timer/${path}`, body);
+    post(`/matches/${match.id}/timer/${path}/`, body);
 
   const isCompleted = match.status === "completed";
   const { status } = timerState;

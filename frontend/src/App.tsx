@@ -14,6 +14,8 @@ import AthletesPage from "@/pages/AthletesPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import OperatorPanelPage from "@/pages/OperatorPanelPage";
 import ScoreboardPage from "@/pages/ScoreboardPage";
+import TatamiAdminPage from "@/pages/TatamiAdminPage";
+import DayDashboardPage from "@/pages/DayDashboardPage";
 
 export default function App() {
   return (
@@ -38,6 +40,11 @@ export default function App() {
           {/* Захищені маршрути — тільки для залогінених */}
           <Route element={<ProtectedRoute />}>
             <Route path="/athletes" element={<AthletesPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["organizer"]} />}>
+            <Route path="/tournaments/:tid/tatamis" element={<TatamiAdminPage />} />
+            <Route path="/tournaments/:tid/day" element={<DayDashboardPage />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["judge", "organizer"]} />}>

@@ -22,10 +22,24 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
-import type { Category, Registration, Athlete, PaginatedResponse } from "@/types/api";
+import type { Category, Registration, Athlete, PaginatedResponse, Tournament, Tatami, Match } from "@/types/api";
 
 const weighInSchema = z.object({ weight: z.coerce.number().min(20).max(300) });
 type WeighInForm = z.infer<typeof weighInSchema>;
+
+const editCategorySchema = z.object({
+  name:                   z.string().min(2, "Введіть назву"),
+  allowed_gender:         z.enum(["male", "female", "mixed"]),
+  min_age:                z.coerce.number().min(5).max(100),
+  max_age:                z.coerce.number().min(5).max(100),
+  min_weight:             z.coerce.number().min(20).max(300),
+  max_weight:             z.coerce.number().min(20).max(300),
+  bracket_format:         z.enum(["single_elimination", "round_robin"]),
+  ruleset_key:            z.string().min(1, "Оберіть правила"),
+  match_duration_seconds: z.string().optional().transform(v => v === "" || v === undefined ? undefined : Number(v)),
+  allowed_skill_level:    z.string().optional(),
+});
+type EditCategoryForm = z.infer<typeof editCategorySchema>;
 
 export default function CategoryDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -41,6 +55,26 @@ export default function CategoryDetailPage() {
   const [selectedAthlete, setSelectedAthlete] = useState<string>("");
   const [isRegistering, setIsRegistering] = useState(false);
 
+  // Edit / Delete category states
+  const [editCatDialogOpen, setEditCatDialogOpen] = useState(false);
+  const [deleteCatDialogOpen, setDeleteCatDialogOpen] = useState(false);
+  const [deleteBracketDialogOpen, setDeleteBracketDialogOpen] = useState(false);
+  const [generateBracketDialogOpen, setGenerateBracketDialogOpen] = useState(false);
+  const [chosenFormat, setChosenFormat] = useState<string>("single_elimination");
+  const [isEditingCat, setIsEditingCat] = useState(false);
+  const [isDeletingCat, setIsDeletingCat] = useState(false);
+  const [isDeletingBracket, setIsDeletingBracket] = useState(false);
+  const [tournament, setTournament] = useState<Tournament | null>(null);
+  const [tatamis, setTatamis] = useState<Tatami[]>([]);
+  const [selectedTatamiId, setSelectedTatamiId] = useState<string>("");
+  const [assigningTatami, setAssigningTatami] = useState(false);
+  // Re-use rulesets
+  const [rulesets, setRulesets] = useState<any[]>([]);
+
+  const editCategoryForm = useForm<EditCategoryForm>({
+    resolver: zodResolver(editCategorySchema),
+  });
+
   const { register, handleSubmit, reset, formState: { errors } } = useForm<WeighInForm>({
     resolver: zodResolver(weighInSchema),
   });
@@ -54,8 +88,38 @@ export default function CategoryDetailPage() {
       ]);
       setCategory(catRes.data);
       setRegistrations(Array.isArray(regRes.data) ? regRes.data : regRes.data.results);
+
+      const [tatamiRes, tournRes, matchRes] = await Promise.all([
+        api.get<Tatami[]>(`/tatamis/?tournament=${catRes.data.tournament}`),
+        api.get<Tournament>(`/tournaments/${catRes.data.tournament}/`),
+        api.get<Match[] | PaginatedResponse<Match>>(`/matches/?category=${id}`),
+      ]);
+      setTatamis(tatamiRes.data);
+      setTournament(tournRes.data);
+
+      const matches = Array.isArray(matchRes.data) ? matchRes.data : matchRes.data.results;
+      const firstMatchWithTatami = matches?.find((m: any) => m.tatami !== null);
+      if (firstMatchWithTatami) {
+        setSelectedTatamiId(String(firstMatchWithTatami.tatami));
+      } else {
+        setSelectedTatamiId("");
+      }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAssignTatami = async (tatamiIdStr: string) => {
+    if (!tatamiIdStr) return;
+    setAssigningTatami(true);
+    try {
+      await api.post(`/categories/${id}/assign_tatami/`, { tatami_id: Number(tatamiIdStr) });
+      toast({ title: "Татамі успішно призначено!" });
+      fetchAll();
+    } catch {
+      toast({ title: "Помилка призначення татамі", variant: "destructive" });
+    } finally {
+      setAssigningTatami(false);
     }
   };
 
@@ -72,11 +136,81 @@ export default function CategoryDetailPage() {
   const handleGenerateBracket = async () => {
     setGeneratingBracket(true);
     try {
-      await api.post(`/categories/${id}/generate_bracket/`);
+      await api.post(`/categories/${id}/generate_bracket/`, { bracket_format: chosenFormat });
       toast({ title: "Сітку згенеровано!" });
+      setGenerateBracketDialogOpen(false);
       fetchAll();
+    } catch {
+      // toast з interceptor
     } finally {
       setGeneratingBracket(false);
+    }
+  };
+
+  const handleOpenEditCat = async () => {
+    if (!category) return;
+    try {
+      const { data } = await api.get<any[]>("/rulesets/");
+      setRulesets(data);
+    } catch {}
+    editCategoryForm.reset({
+      name: category.name,
+      allowed_gender: category.allowed_gender as any,
+      min_age: category.min_age,
+      max_age: category.max_age,
+      min_weight: Number(category.min_weight),
+      max_weight: Number(category.max_weight),
+      bracket_format: category.bracket_format as any,
+      ruleset_key: category.ruleset_key,
+      match_duration_seconds: category.match_duration_seconds ? String(category.match_duration_seconds) as any : "",
+      allowed_skill_level: category.allowed_skill_level ?? "",
+    });
+    setEditCatDialogOpen(true);
+  };
+
+  const onEditCatSubmit = async (data: EditCategoryForm) => {
+    setIsEditingCat(true);
+    try {
+      const { data: updated } = await api.put<Category>(`/categories/${id}/`, {
+        tournament: category?.tournament,
+        ...data,
+      });
+      setCategory(updated);
+      toast({ title: "Категорію успішно оновлено!" });
+      setEditCatDialogOpen(false);
+      fetchAll();
+    } catch {
+      toast({ title: "Помилка оновлення категорії", variant: "destructive" });
+    } finally {
+      setIsEditingCat(false);
+    }
+  };
+
+  const onDeleteCat = async () => {
+    setIsDeletingCat(true);
+    try {
+      await api.delete(`/categories/${id}/`);
+      toast({ title: "Категорію вилучено!" });
+      setDeleteCatDialogOpen(false);
+      window.location.href = `/tournaments/${category?.tournament}`;
+    } catch {
+      toast({ title: "Помилка вилучення категорії", variant: "destructive" });
+    } finally {
+      setIsDeletingCat(false);
+    }
+  };
+
+  const handleDeleteBracket = async () => {
+    setIsDeletingBracket(true);
+    try {
+      await api.post(`/categories/${id}/delete_bracket/`);
+      toast({ title: "Сітку успішно вилучено!" });
+      setDeleteBracketDialogOpen(false);
+      fetchAll();
+    } catch {
+      toast({ title: "Помилка видалення сітки", variant: "destructive" });
+    } finally {
+      setIsDeletingBracket(false);
     }
   };
 
@@ -137,6 +271,30 @@ export default function CategoryDetailPage() {
           <p className="text-sm text-muted-foreground">
             {category.confirmed_registrations_count} учасників · {category.min_weight}–{category.max_weight} кг · {category.min_age}–{category.max_age} р.
           </p>
+          {isOrganizer && tatamis.length > 0 && category.has_bracket && (
+            <div className="flex items-center gap-2 mt-3 bg-zinc-50 dark:bg-zinc-900 border border-border rounded-lg px-3 py-1.5 w-fit">
+              <span className="text-xs font-bold text-muted-foreground">Призначений татамі:</span>
+              <Select
+                value={selectedTatamiId}
+                onValueChange={(v) => {
+                  setSelectedTatamiId(v);
+                  handleAssignTatami(v);
+                }}
+                disabled={assigningTatami}
+              >
+                <SelectTrigger className="h-7 w-36 text-xs">
+                  <SelectValue placeholder="Оберіть татамі" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tatamis.map((t) => (
+                    <SelectItem key={t.id} value={String(t.id)}>
+                      Татамі №{t.number} {t.name ? `(${t.name})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -145,19 +303,34 @@ export default function CategoryDetailPage() {
               <Plus className="w-4 h-4" /> Зареєструвати атлета
             </Button>
           )}
-          {canGenerateBracket && (
-            <Button variant="sport" size="sm" onClick={handleGenerateBracket} disabled={generatingBracket}>
-              {generatingBracket ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitBranch className="w-4 h-4" />}
+          {isOrganizer && category.status === "active" && !category.has_bracket && registrations.some(r => r.status === "confirmed") && (
+            <Button variant="sport" size="sm" onClick={() => { setChosenFormat(category.bracket_format); setGenerateBracketDialogOpen(true); }}>
+              <GitBranch className="w-4 h-4" />
               Згенерувати сітку
             </Button>
           )}
-          {category.status === "active" || category.status === "completed" ? (
+          {isOrganizer && category.has_bracket && (
+            <Button variant="destructive" size="sm" onClick={() => setDeleteBracketDialogOpen(true)}>
+              Вилучити сітку
+            </Button>
+          )}
+          {category.has_bracket ? (
             <Button asChild variant="outline" size="sm">
               <Link to={`/categories/${id}/bracket`}>
                 <GitBranch className="w-4 h-4" /> Переглянути сітку
               </Link>
             </Button>
           ) : null}
+          {isOrganizer && (
+            <>
+              <Button variant="outline" size="sm" onClick={handleOpenEditCat}>
+                Редагувати
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setDeleteCatDialogOpen(true)}>
+                Вилучити категорію
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -192,7 +365,7 @@ export default function CategoryDetailPage() {
                 </TableCell>
                 {isOrganizer && (
                   <TableCell>
-                    {reg.status === "pending" && (
+                    {reg.status === "pending" && tournament?.weigh_in_required !== false && (
                       <Button
                         variant="ghost" size="sm"
                         onClick={() => setWeighInDialog(reg)}
@@ -257,6 +430,180 @@ export default function CategoryDetailPage() {
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setWeighInDialog(null)}>Скасувати</Button>
               <Button type="submit" variant="sport">Підтвердити</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Діалог вибору формату сітки */}
+      <Dialog open={generateBracketDialogOpen} onOpenChange={setGenerateBracketDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Згенерувати сітку змагань</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Формат турнірної сітки</Label>
+              <Select value={chosenFormat} onValueChange={setChosenFormat}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single_elimination">Олімпійська (на вибування)</SelectItem>
+                  <SelectItem value="round_robin">Кругова (кожен з кожним)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Формат сітки визначить спосіб розподілу поєдинків та просування переможців. Переконайтеся, що всі спортсмени пройшли зважування перед генерацією.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGenerateBracketDialogOpen(false)}>Скасувати</Button>
+            <Button variant="sport" onClick={handleGenerateBracket} disabled={generatingBracket}>
+              {generatingBracket ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+              Згенерувати
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Діалог видалення сітки */}
+      <Dialog open={deleteBracketDialogOpen} onOpenChange={setDeleteBracketDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Вилучити турнірну сітку</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Ви впевнені, що хочете видалити згенеровану сітку поєдинків для категорії <span className="font-bold text-foreground">{category.name}</span>? Це видалить всі створені матчі. Ця дія є незворотною.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteBracketDialogOpen(false)}>Скасувати</Button>
+            <Button variant="destructive" onClick={handleDeleteBracket} disabled={isDeletingBracket}>
+              {isDeletingBracket ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+              Вилучити сітку
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Діалог видалення категорії */}
+      <Dialog open={deleteCatDialogOpen} onOpenChange={setDeleteCatDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Вилучити категорію</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Ви впевнені, що хочете вилучити категорію <span className="font-bold text-foreground">{category.name}</span>? Ця дія повністю видалить категорію та всі пов'язані з нею реєстрації та поєдинки.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteCatDialogOpen(false)}>Скасувати</Button>
+            <Button variant="destructive" onClick={onDeleteCat} disabled={isDeletingCat}>
+              {isDeletingCat ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+              Вилучити
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Діалог редагування категорії */}
+      <Dialog open={editCatDialogOpen} onOpenChange={setEditCatDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Редагувати категорію</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={editCategoryForm.handleSubmit(onEditCatSubmit)} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Назва категорії</Label>
+              <Input placeholder="Кадети до 50 кг..." {...editCategoryForm.register("name")} />
+              {editCategoryForm.formState.errors.name && (
+                <p className="text-xs text-destructive">{editCategoryForm.formState.errors.name.message}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Стать</Label>
+                <Select
+                  value={editCategoryForm.watch("allowed_gender") || "male"}
+                  onValueChange={(v) => editCategoryForm.setValue("allowed_gender", v as any)}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="male">Чоловіча</SelectItem>
+                    <SelectItem value="female">Жіноча</SelectItem>
+                    <SelectItem value="mixed">Змішана</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Вік від</Label>
+                <Input type="number" placeholder="14" {...editCategoryForm.register("min_age")} />
+                {editCategoryForm.formState.errors.min_age && (
+                  <p className="text-xs text-destructive">{editCategoryForm.formState.errors.min_age.message}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Вік до</Label>
+                <Input type="number" placeholder="17" {...editCategoryForm.register("max_age")} />
+                {editCategoryForm.formState.errors.max_age && (
+                  <p className="text-xs text-destructive">{editCategoryForm.formState.errors.max_age.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Вага від (кг)</Label>
+                <Input type="number" placeholder="45" {...editCategoryForm.register("min_weight")} />
+                {editCategoryForm.formState.errors.min_weight && (
+                  <p className="text-xs text-destructive">{editCategoryForm.formState.errors.min_weight.message}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Вага до (кг)</Label>
+                <Input type="number" placeholder="50" {...editCategoryForm.register("max_weight")} />
+                {editCategoryForm.formState.errors.max_weight && (
+                  <p className="text-xs text-destructive">{editCategoryForm.formState.errors.max_weight.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Правила (Рулсет)</Label>
+              <Select
+                value={editCategoryForm.watch("ruleset_key") || ""}
+                onValueChange={(v) => editCategoryForm.setValue("ruleset_key", v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Оберіть правила..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {rulesets.map((r) => (
+                    <SelectItem key={r.key} value={r.key}>
+                      {r.name} ({r.sport_type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Тривалість поєдинку (сек, опціонально)</Label>
+              <Input type="number" placeholder="180" {...editCategoryForm.register("match_duration_seconds")} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Допустимий рівень майстерності (опціонально)</Label>
+              <Input placeholder="напр. Чорний пояс" {...editCategoryForm.register("allowed_skill_level")} />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditCatDialogOpen(false)}>Скасувати</Button>
+              <Button type="submit" variant="sport" disabled={isEditingCat}>
+                {isEditingCat ? <Loader2 className="w-4 h-4 animate-spin" /> : "Зберегти"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

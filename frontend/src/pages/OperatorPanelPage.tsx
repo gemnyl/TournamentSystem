@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ExternalLink, Trophy, Wifi, WifiOff } from "lucide-react";
+import { ExternalLink, Trophy, Wifi, WifiOff, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -34,6 +35,7 @@ const DEFAULT_TIMER: TimerState = {
 
 export default function OperatorPanelPage() {
   const { tid, n } = useParams<{ tid: string; n: string }>();
+  const { user } = useAuth();
 
   const [connected, setConnected] = useState(false);
   const [tatami, setTatami] = useState<Tatami | null>(null);
@@ -153,6 +155,31 @@ export default function OperatorPanelPage() {
       ? a.match_order - b.match_order
       : a.round_index - b.round_index
   );
+
+  const isLocked = user?.role === "judge" && tatami && tatami.assigned_judge !== user.id;
+
+  if (isLocked) {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center select-none">
+        <div className="w-20 h-20 rounded-2xl bg-destructive/10 border border-destructive/20 flex items-center justify-center mb-6 animate-bounce">
+          <ShieldAlert className="w-10 h-10 text-destructive" />
+        </div>
+        <h1 className="text-3xl font-black tracking-tight text-foreground uppercase">Доступ обмежено!</h1>
+        <div className="w-12 h-1 bg-destructive/40 rounded my-4" />
+        <p className="text-muted-foreground max-w-md text-sm leading-relaxed">
+          Ви авторизовані як суддя, проте ви не закріплені за цим татамі (Татамі №{n}). Зверніться до організатора для призначення.
+        </p>
+        <div className="flex gap-3 mt-8">
+          <Button variant="outline" onClick={() => window.history.back()}>
+            Назад
+          </Button>
+          <Button variant="sport" onClick={() => window.location.reload()}>
+            Оновити сторінку
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
