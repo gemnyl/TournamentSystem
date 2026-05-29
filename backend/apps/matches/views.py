@@ -188,15 +188,18 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             MatchService(match).timer_start(judge=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        match.refresh_from_db()
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="timer/pause")
     def timer_pause(self, request, pk=None):
         match = self.get_object()
+        elapsed_ms = request.data.get("elapsed_ms")
         try:
-            MatchService(match).timer_pause(judge=request.user)
+            MatchService(match).timer_pause(elapsed_ms=elapsed_ms, judge=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        match.refresh_from_db()
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="timer/resume")
@@ -206,12 +209,14 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             MatchService(match).timer_resume(judge=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        match.refresh_from_db()
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="timer/reset")
     def timer_reset(self, request, pk=None):
         match = self.get_object()
         MatchService(match).timer_reset(judge=request.user)
+        match.refresh_from_db()
         return Response(MatchSerializer(match).data)
 
     @action(detail=True, methods=["post"], url_path="timer/set_duration")

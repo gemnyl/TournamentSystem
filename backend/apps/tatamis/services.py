@@ -36,6 +36,12 @@ class TatamiService:
         from apps.matches.models import Match
 
         match = Match.objects.get(pk=match_id)
+
+        # Встановлюємо двосторонній зв'язок: match.tatami потрібен для broadcast
+        # (broadcast_match_event використовує _tatami_group(match), яка читає match.tatami_id)
+        match.tatami = tatami
+        match.save(update_fields=["tatami"])
+
         tatami.current_match = match
         tatami.save(update_fields=["current_match"])
         broadcast_tatami_state(tatami)
@@ -44,6 +50,7 @@ class TatamiService:
     def release(tatami: Tatami) -> None:
         from apps.common.broadcast import broadcast_tatami_state
 
+        # match.tatami НЕ обнуляємо — зберігаємо інформацію де проходив матч
         tatami.current_match = None
         tatami.save(update_fields=["current_match"])
         broadcast_tatami_state(tatami)

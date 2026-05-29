@@ -37,6 +37,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
   );
 
   useTatamiSocket(tid, initialTatami.number, {
+    onClockOffsetUpdate: setServerOffset,
     onSnapshot(data) {
       setConnected(true);
       setTatami(data.tatami);
@@ -59,7 +60,6 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
       setCurrentMatch(match);
     },
     onTimerState(state, server_ts_ms) {
-      setServerOffset(server_ts_ms - Date.now());
       setTimerState({
         status: state.status,
         started_at_ms: state.started_at_ms,

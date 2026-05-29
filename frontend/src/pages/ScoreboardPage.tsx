@@ -97,21 +97,6 @@ export default function ScoreboardPage() {
     serverTimeOffset,
   );
 
-  // Helper to prevent the running client-side clock from jumping back and forth
-  // due to periodic database snapshots overriding the running elapsed time
-  const updateTimerIfNecessary = (newState: TimerState) => {
-    setTimerState(prev => {
-      // If currently running and stays running, keep local countdown uninterrupted
-      if (prev.status === "running" && newState.status === "running") {
-        if (prev.duration_ms !== newState.duration_ms) {
-          return newState; // update only if operator adjusted duration
-        }
-        return prev;
-      }
-      return newState;
-    });
-  };
-
   // ── Instant Load on Mount (REST fallback to bypass WS handshake delay) ──
   useEffect(() => {
     const loadInitialState = async () => {
@@ -122,7 +107,7 @@ export default function ScoreboardPage() {
         if (matchingTatami && matchingTatami.current_match) {
           const matchObj = matchingTatami.current_match as any;
           setCurrentMatch(matchObj);
-          updateTimerIfNecessary(matchToTimerState(matchObj));
+          setTimerState(matchToTimerState(matchObj));
         }
       } catch (err) {
         console.error("Error loading initial tatami state:", err);
@@ -132,28 +117,24 @@ export default function ScoreboardPage() {
   }, [tid, n]);
 
   useTatamiSocket(tid!, n!, {
+    onClockOffsetUpdate: setServerTimeOffset,
     onSnapshot(data) {
       if (data.current_match) {
         setCurrentMatch(data.current_match);
-        updateTimerIfNecessary(matchToTimerState(data.current_match));
+        setTimerState(matchToTimerState(data.current_match));
       } else {
         setCurrentMatch(null);
-        updateTimerIfNecessary(DEFAULT_TIMER);
+        setTimerState(DEFAULT_TIMER);
       }
     },
     onMatchEvent(_event, match) {
       setCurrentMatch(match);
+      // Таймер синхронізується виключно через onTimerState (timer.state WS-повідомлення).
+      // updateTimerIfNecessary тут не потрібен і може спричиняти стрибки
+      // через 1мс різницю у представленні started_at_ms між match та timer.state.
     },
     onTimerState(state, server_ts_ms) {
-      const newOffset = server_ts_ms - Date.now();
-      setServerTimeOffset(prev => {
-        // Only update if latency shift is >200ms to eliminate WebSocket message network jitter
-        if (Math.abs(newOffset - prev) > 200) {
-          return newOffset;
-        }
-        return prev;
-      });
-      updateTimerIfNecessary({
+      setTimerState({
         status: state.status,
         started_at_ms: state.started_at_ms,
         elapsed_ms: state.elapsed_ms,
@@ -163,10 +144,10 @@ export default function ScoreboardPage() {
     onTatamiState(data) {
       if (data.current_match) {
         setCurrentMatch(data.current_match);
-        updateTimerIfNecessary(matchToTimerState(data.current_match));
+        setTimerState(matchToTimerState(data.current_match));
       } else {
         setCurrentMatch(null);
-        updateTimerIfNecessary(DEFAULT_TIMER);
+        setTimerState(DEFAULT_TIMER);
       }
     },
   });

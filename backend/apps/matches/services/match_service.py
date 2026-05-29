@@ -9,7 +9,7 @@ from apps.rulesets.base import MatchState, ScoreEvent
 def _broadcast_timer(match: Match) -> None:
     from apps.common.broadcast import broadcast_timer_state
 
-    broadcast_timer_state(match)
+    transaction.on_commit(lambda: broadcast_timer_state(match))
 
 
 class MatchService:
@@ -132,12 +132,27 @@ class MatchService:
         return m
 
     @transaction.atomic
-    def timer_pause(self, judge=None) -> Match:
+    def timer_pause(self, elapsed_ms=None, judge=None) -> Match:
         m = self.match
         if m.timer_status != Match.TimerStatus.RUNNING:
             raise ValueError("Таймер не запущено.")
-        delta = int((timezone.now() - m.timer_started_at).total_seconds() * 1000)
-        m.timer_elapsed_ms += delta
+
+        server_delta = int((timezone.now() - m.timer_started_at).total_seconds() * 1000)
+        calculated_elapsed = m.timer_elapsed_ms + server_delta
+
+        if elapsed_ms is not None:
+            try:
+                client_elapsed = int(elapsed_ms)
+                # Безпекова перевірка: відхилення від сервера не має перевищувати 5 секунд
+                if abs(calculated_elapsed - client_elapsed) < 5000:
+                    m.timer_elapsed_ms = client_elapsed
+                else:
+                    m.timer_elapsed_ms = calculated_elapsed
+            except (ValueError, TypeError):
+                m.timer_elapsed_ms = calculated_elapsed
+        else:
+            m.timer_elapsed_ms = calculated_elapsed
+
         m.timer_started_at = None
         m.timer_status = Match.TimerStatus.PAUSED
         m.save(update_fields=["timer_elapsed_ms", "timer_started_at", "timer_status"])

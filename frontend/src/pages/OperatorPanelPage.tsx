@@ -74,6 +74,7 @@ export default function OperatorPanelPage() {
   }, [tid, fetchMatches]);
 
   useTatamiSocket(tid!, n!, {
+    onClockOffsetUpdate: setServerTimeOffset,
     onSnapshot(data) {
       setConnected(true);
       setTatami(data.tatami);
@@ -90,7 +91,6 @@ export default function OperatorPanelPage() {
       setMatches((prev) => prev.map((m) => m.id === match.id ? match : m));
     },
     onTimerState(state, server_ts_ms) {
-      setServerTimeOffset(server_ts_ms - Date.now());
       setTimerState({
         status: state.status,
         started_at_ms: state.started_at_ms,
@@ -288,9 +288,11 @@ export default function OperatorPanelPage() {
                   rulesetActions={rulesetActions}
                   timerState={timerState}
                   remainingMs={remainingMs}
+                  serverTimeOffset={serverTimeOffset}
                   onMatchUpdate={(m) => {
                     setCurrentMatch(m);
                     setMatches((prev) => prev.map((x) => x.id === m.id ? m : x));
+                    setTimerState(matchToTimerState(m));
                   }}
                 />
               ) : (
