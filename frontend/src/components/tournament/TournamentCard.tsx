@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "./StatusBadge";
 import type { Tournament } from "@/types/api";
 
+import { formatSportType } from "@/lib/utils";
+
 interface TournamentCardProps {
   tournament: Tournament;
 }
@@ -49,7 +51,7 @@ export function TournamentCard({ tournament }: TournamentCardProps) {
           </div>
           {tournament.sport_type && (
             <p className="text-xs text-muted-foreground/70 mt-3 line-clamp-2">
-              {tournament.sport_type}
+              {formatSportType(tournament.sport_type)}
             </p>
           )}
         </CardContent>

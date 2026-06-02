@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale
+  ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,6 +18,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { formatSportType } from "@/lib/utils";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -32,8 +33,14 @@ const editCategorySchema = z.object({
   allowed_gender:         z.enum(["male", "female", "mixed"]),
   min_age:                z.coerce.number().min(5).max(100),
   max_age:                z.coerce.number().min(5).max(100),
-  min_weight:             z.coerce.number().min(20).max(300),
-  max_weight:             z.coerce.number().min(20).max(300),
+  min_weight: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined) ? undefined : Number(val),
+    z.number().min(1, "Мін. 1 кг").max(500, "Макс. 500 кг").optional()
+  ),
+  max_weight: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined) ? undefined : Number(val),
+    z.number().min(1, "Мін. 1 кг").max(500, "Макс. 500 кг").optional()
+  ),
   bracket_format:         z.enum(["single_elimination", "round_robin"]),
   ruleset_key:            z.string().min(1, "Оберіть правила"),
   match_duration_seconds: z.string().optional().transform(v => v === "" || v === undefined ? undefined : Number(v)),
@@ -43,7 +50,7 @@ type EditCategoryForm = z.infer<typeof editCategorySchema>;
 
 export default function CategoryDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { isOrganizer, isCoach } = useAuth();
+  const { isOrganizer, isCoach, isJudge } = useAuth();
 
   const [category, setCategory] = useState<Category | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
@@ -70,6 +77,10 @@ export default function CategoryDetailPage() {
   const [assigningTatami, setAssigningTatami] = useState(false);
   // Re-use rulesets
   const [rulesets, setRulesets] = useState<any[]>([]);
+
+  // Delete registration state
+  const [deleteRegDialog, setDeleteRegDialog] = useState<Registration | null>(null);
+  const [isDeletingReg, setIsDeletingReg] = useState(false);
 
   const editCategoryForm = useForm<EditCategoryForm>({
     resolver: zodResolver(editCategorySchema),
@@ -158,8 +169,8 @@ export default function CategoryDetailPage() {
       allowed_gender: category.allowed_gender as any,
       min_age: category.min_age,
       max_age: category.max_age,
-      min_weight: Number(category.min_weight),
-      max_weight: Number(category.max_weight),
+      min_weight: category.min_weight ?? undefined,
+      max_weight: category.max_weight ?? undefined,
       bracket_format: category.bracket_format as any,
       ruleset_key: category.ruleset_key,
       match_duration_seconds: category.match_duration_seconds ? String(category.match_duration_seconds) as any : "",
@@ -171,10 +182,13 @@ export default function CategoryDetailPage() {
   const onEditCatSubmit = async (data: EditCategoryForm) => {
     setIsEditingCat(true);
     try {
-      const { data: updated } = await api.put<Category>(`/categories/${id}/`, {
-        tournament: category?.tournament,
+      const payload = {
         ...data,
-      });
+        tournament: category?.tournament,
+        min_weight: data.min_weight ?? null,
+        max_weight: data.max_weight ?? null,
+      };
+      const { data: updated } = await api.put<Category>(`/categories/${id}/`, payload);
       setCategory(updated);
       toast({ title: "Категорію успішно оновлено!" });
       setEditCatDialogOpen(false);
@@ -243,6 +257,22 @@ export default function CategoryDetailPage() {
     }
   };
 
+  // Видалення заявки
+  const handleDeleteRegistration = async () => {
+    if (!deleteRegDialog) return;
+    setIsDeletingReg(true);
+    try {
+      await api.delete(`/registrations/${deleteRegDialog.id}/`);
+      toast({ title: "Заявку успішно видалено!" });
+      setDeleteRegDialog(null);
+      fetchAll();
+    } catch {
+      toast({ title: "Помилка видалення заявки", variant: "destructive" });
+    } finally {
+      setIsDeletingReg(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="container py-8 flex justify-center">
@@ -269,7 +299,15 @@ export default function CategoryDetailPage() {
             <StatusBadge status={category.status} type="category" />
           </div>
           <p className="text-sm text-muted-foreground">
-            {category.confirmed_registrations_count} учасників · {category.min_weight}–{category.max_weight} кг · {category.min_age}–{category.max_age} р.
+            {category.confirmed_registrations_count} учасників · {
+              category.min_weight !== null && category.max_weight !== null
+                ? `${category.min_weight}–${category.max_weight} кг`
+                : category.min_weight !== null
+                ? `від ${category.min_weight} кг`
+                : category.max_weight !== null
+                ? `до ${category.max_weight} кг`
+                : "без обмежень за вагою"
+            } · {category.min_age}–{category.max_age} р.
           </p>
           {isOrganizer && tatamis.length > 0 && category.has_bracket && (
             <div className="flex items-center gap-2 mt-3 bg-zinc-50 dark:bg-zinc-900 border border-border rounded-lg px-3 py-1.5 w-fit">
@@ -341,15 +379,15 @@ export default function CategoryDetailPage() {
             <TableRow className="hover:bg-transparent">
               <TableHead>Атлет</TableHead>
               <TableHead>Клуб</TableHead>
-              <TableHead>Вага (факт.)</TableHead>
+              {(isOrganizer || isCoach || isJudge) && <TableHead>Вага (факт.)</TableHead>}
               <TableHead>Статус</TableHead>
-              {isOrganizer && <TableHead className="w-28">Дії</TableHead>}
+              {isOrganizer && <TableHead className="w-28 text-right">Дії</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {registrations.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={isOrganizer ? 5 : 4} className="text-center text-muted-foreground py-8">
                   Реєстрацій поки немає
                 </TableCell>
               </TableRow>
@@ -357,27 +395,37 @@ export default function CategoryDetailPage() {
               <TableRow key={reg.id}>
                 <TableCell className="font-medium">{reg.athlete.full_name}</TableCell>
                 <TableCell className="text-muted-foreground text-sm">{reg.athlete.club?.name}</TableCell>
-                <TableCell className="font-mono text-sm">
-                  {reg.recorded_weight != null ? `${reg.recorded_weight} кг` : "—"}
-                </TableCell>
+                {(isOrganizer || isCoach || isJudge) && (
+                  <TableCell className="font-mono text-sm">
+                    {reg.recorded_weight != null ? `${reg.recorded_weight} кг` : "—"}
+                  </TableCell>
+                )}
                 <TableCell>
                   <StatusBadge status={reg.status} type="registration" />
                 </TableCell>
                 {isOrganizer && (
-                  <TableCell>
-                    {reg.status === "pending" && tournament?.weigh_in_required !== false && (
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      {reg.status === "pending" && tournament?.weigh_in_required !== false && (
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => setWeighInDialog(reg)}
+                        >
+                          <Scale className="w-3.5 h-3.5 mr-1" /> Зважити
+                        </Button>
+                      )}
+                      {reg.status === "confirmed" && (
+                        <span className="flex items-center gap-1 text-xs text-green-500 mr-2">
+                          <CheckCircle className="w-3.5 h-3.5" /> OK
+                        </span>
+                      )}
                       <Button
-                        variant="ghost" size="sm"
-                        onClick={() => setWeighInDialog(reg)}
+                        variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeleteRegDialog(reg)}
                       >
-                        <Scale className="w-3.5 h-3.5" /> Зважити
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Видалити
                       </Button>
-                    )}
-                    {reg.status === "confirmed" && (
-                      <span className="flex items-center gap-1 text-xs text-green-500">
-                        <CheckCircle className="w-3.5 h-3.5" /> OK
-                      </span>
-                    )}
+                    </div>
                   </TableCell>
                 )}
               </TableRow>
@@ -555,14 +603,14 @@ export default function CategoryDetailPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Вага від (кг)</Label>
+                <Label>Вага від (кг, <span className="text-muted-foreground text-xs font-normal">необов'язково</span>)</Label>
                 <Input type="number" placeholder="45" {...editCategoryForm.register("min_weight")} />
                 {editCategoryForm.formState.errors.min_weight && (
                   <p className="text-xs text-destructive">{editCategoryForm.formState.errors.min_weight.message}</p>
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label>Вага до (кг)</Label>
+                <Label>Вага до (кг, <span className="text-muted-foreground text-xs font-normal">необов'язково</span>)</Label>
                 <Input type="number" placeholder="50" {...editCategoryForm.register("max_weight")} />
                 {editCategoryForm.formState.errors.max_weight && (
                   <p className="text-xs text-destructive">{editCategoryForm.formState.errors.max_weight.message}</p>
@@ -582,7 +630,7 @@ export default function CategoryDetailPage() {
                 <SelectContent>
                   {rulesets.map((r) => (
                     <SelectItem key={r.key} value={r.key}>
-                      {r.name} ({r.sport_type})
+                      {r.name} ({formatSportType(r.sport_type)})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -606,6 +654,29 @@ export default function CategoryDetailPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Діалог підтвердження видалення заявки */}
+      <Dialog open={deleteRegDialog !== null} onOpenChange={(open) => !open && setDeleteRegDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Вилучити заявку</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Ви впевнені, що хочете видалити заявку атлета{" "}
+            <span className="font-bold text-foreground">{deleteRegDialog?.athlete.full_name}</span>?
+            Ця дія незворотна.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteRegDialog(null)}>
+              Скасувати
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteRegistration} disabled={isDeletingReg}>
+              {isDeletingReg ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+              Вилучити
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

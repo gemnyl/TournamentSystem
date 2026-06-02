@@ -22,33 +22,73 @@ import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
 import { CategoryCard } from "@/components/tournament/CategoryCard";
 import type { Tournament, Category, PaginatedResponse, RulesetInfo } from "@/types/api";
+import { formatSportType } from "@/lib/utils";
 
 const categorySchema = z.object({
   name:                   z.string().min(2, "Введіть назву"),
   allowed_gender:         z.enum(["male", "female", "mixed"]),
   min_age:                z.coerce.number().min(5).max(100),
   max_age:                z.coerce.number().min(5).max(100),
-  min_weight:             z.coerce.number().min(20).max(300),
-  max_weight:             z.coerce.number().min(20).max(300),
+  min_weight:             z.string().optional().transform(v => v === "" || v === undefined || v === null ? null : Number(v)),
+  max_weight:             z.string().optional().transform(v => v === "" || v === undefined || v === null ? null : Number(v)),
   ruleset_key:            z.string().min(1, "Оберіть правила"),
   match_duration_seconds: z.string().optional().transform(v => v === "" || v === undefined ? undefined : Number(v)),
   allowed_skill_level:    z.string().optional(),
+}).refine((data) => {
+  if (data.min_weight !== null && data.max_weight !== null) {
+    return data.max_weight > data.min_weight;
+  }
+  return true;
+}, {
+  message: "Максимальна вага має бути більшою за мінімальну вагу",
+  path: ["max_weight"]
 });
 type CategoryForm = z.infer<typeof categorySchema>;
 
 const editTournamentSchema = z.object({
-  title:             z.string().min(3, "Мінімум 3 символи"),
-  sport_type:        z.string().min(2, "Введіть вид спорту"),
-  location:          z.string().min(2, "Введіть місце проведення"),
-  start_date:        z.string().min(1, "Оберіть дату початку"),
-  end_date:          z.string().min(1, "Оберіть дату кінця"),
-  weigh_in_required: z.boolean(),
+  title:              z.string().min(3, "Мінімум 3 символи"),
+  sport_type:         z.string().min(2, "Введіть вид спорту"),
+  location:           z.string().min(2, "Введіть місце проведення"),
+  start_date:         z.string().min(1, "Оберіть дату початку"),
+  end_date:           z.string().min(1, "Оберіть дату кінця"),
+  registration_start: z.string().optional().nullable(),
+  registration_end:   z.string().optional().nullable(),
+  weigh_in_required:  z.boolean(),
+}).refine((data) => {
+  const start = new Date(data.start_date).getTime();
+  const end = new Date(data.end_date).getTime();
+  return end > start;
+}, {
+  message: "Дата кінця має бути пізнішою за дату початку",
+  path: ["end_date"]
+}).refine((data) => {
+  if (data.registration_start && data.registration_end) {
+    const regStart = new Date(data.registration_start).getTime();
+    const regEnd = new Date(data.registration_end).getTime();
+    return regEnd > regStart;
+  }
+  return true;
+}, {
+  message: "Кінець реєстрації має бути пізнішим за початок реєстрації",
+  path: ["registration_end"]
 });
 type EditTournamentForm = z.infer<typeof editTournamentSchema>;
 
+const formatLocalDateTime = (dateStr: string | null) => {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hh}:${mm}`;
+};
+
 export default function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { isOrganizer } = useAuth();
+  const { isOrganizer, user } = useAuth();
+  const isCoach = user?.role === "coach";
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -74,6 +114,11 @@ export default function TournamentDetailPage() {
   const [seMin, setSeMin] = useState(6);
   const [seMax, setSeMax] = useState(32);
 
+  // Bulk import categories states
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+
   const editTournamentForm = useForm<EditTournamentForm>({
     resolver: zodResolver(editTournamentSchema),
   });
@@ -92,8 +137,10 @@ export default function TournamentDetailPage() {
       title: tournament.title,
       sport_type: tournament.sport_type,
       location: tournament.location,
-      start_date: tournament.start_date ? new Date(tournament.start_date).toISOString().split("T")[0] : "",
-      end_date: tournament.end_date ? new Date(tournament.end_date).toISOString().split("T")[0] : "",
+      start_date: formatLocalDateTime(tournament.start_date),
+      end_date: formatLocalDateTime(tournament.end_date),
+      registration_start: formatLocalDateTime(tournament.registration_start),
+      registration_end: formatLocalDateTime(tournament.registration_end),
       weigh_in_required: tournament.weigh_in_required,
     });
     setEditDialogOpen(true);
@@ -102,7 +149,12 @@ export default function TournamentDetailPage() {
   const onEditTournamentSubmit = async (data: EditTournamentForm) => {
     setIsEditing(true);
     try {
-      const res = await api.put<Tournament>(`/tournaments/${id}/`, data);
+      const payload = {
+        ...data,
+        registration_start: data.registration_start || null,
+        registration_end: data.registration_end || null,
+      };
+      const res = await api.put<Tournament>(`/tournaments/${id}/`, payload);
       setTournament(res.data);
       toast({ title: "Турнір успішно оновлено!" });
       setEditDialogOpen(false);
@@ -168,9 +220,10 @@ export default function TournamentDetailPage() {
       const { data } = await api.get<RulesetInfo[]>("/rulesets/");
       setRulesets(data);
       if (data.length > 0) {
-        // Якщо ruleset_key не обрано або порожній, ставимо перший
-        setValue("ruleset_key", data[0].key);
-        setSelectedRuleset(data[0]);
+        const filtered = data.filter(r => r.sport_type === tournament?.sport_type);
+        const defaultRuleset = filtered.length > 0 ? filtered[0] : data[0];
+        setValue("ruleset_key", defaultRuleset.key);
+        setSelectedRuleset(defaultRuleset);
       }
     } catch {
       // ігноруємо помилки
@@ -242,6 +295,25 @@ export default function TournamentDetailPage() {
   const canStart    = tournament.status === "registration";
   const canComplete = tournament.status === "active";
 
+  const getRegistrationStatus = () => {
+    if (!tournament.registration_start && !tournament.registration_end) {
+      return { status: "opened", label: "Реєстрація відкрита (без обмежень)" };
+    }
+    const now = new Date().getTime();
+    const start = tournament.registration_start ? new Date(tournament.registration_start).getTime() : null;
+    const end = tournament.registration_end ? new Date(tournament.registration_end).getTime() : null;
+
+    if (start && now < start) {
+      return { status: "not_started", label: `Реєстрація не розпочалась (відкриється ${new Date(start).toLocaleString("uk-UA")})` };
+    }
+    if (end && now > end) {
+      return { status: "closed", label: `Реєстрація закрита (завершилась ${new Date(end).toLocaleString("uk-UA")})` };
+    }
+    return { status: "opened", label: "Реєстрація відкрита" };
+  };
+
+  const regInfo = getRegistrationStatus();
+
   return (
     <div className="container py-8 space-y-6">
       {/* Назад */}
@@ -260,8 +332,17 @@ export default function TournamentDetailPage() {
             {tournament.location} · {new Date(tournament.start_date).toLocaleDateString("uk-UA")} — {new Date(tournament.end_date).toLocaleDateString("uk-UA")}
           </p>
           {tournament.sport_type && (
-            <p className="text-sm text-muted-foreground/80 max-w-2xl">{tournament.sport_type}</p>
+            <p className="text-sm text-muted-foreground/80 max-w-2xl">{formatSportType(tournament.sport_type)}</p>
           )}
+          {isOrganizer || isCoach ? (
+            <div className={`mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+              regInfo.status === "opened" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
+              regInfo.status === "not_started" ? "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20" :
+              "bg-red-500/10 text-red-400 border border-red-500/20"
+            }`}>
+              {regInfo.label}
+            </div>
+          ) : null}
         </div>
 
         {/* Кнопки управління (тільки організатор) */}
@@ -344,9 +425,14 @@ export default function TournamentDetailPage() {
             <span className="ml-2 text-base font-normal text-muted-foreground">({categories.length})</span>
           </h2>
           {isOrganizer && (
-            <Button variant="outline" size="sm" onClick={() => setCatDialogOpen(true)}>
-              <Plus className="w-4 h-4" /> Додати категорію
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
+                Імпорт категорій
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setCatDialogOpen(true)}>
+                <Plus className="w-4 h-4" /> Додати категорію
+              </Button>
+            </div>
           )}
         </div>
 
@@ -408,12 +494,14 @@ export default function TournamentDetailPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Вага від (кг)</Label>
+                <Label>Вага від (кг) <span className="text-muted-foreground text-xs">(необов'язково)</span></Label>
                 <Input type="number" placeholder="45" {...register("min_weight")} />
+                {errors.min_weight && <p className="text-xs text-destructive">{errors.min_weight.message}</p>}
               </div>
               <div className="space-y-1.5">
-                <Label>Вага до (кг)</Label>
+                <Label>Вага до (кг) <span className="text-muted-foreground text-xs">(необов'язково)</span></Label>
                 <Input type="number" placeholder="50" {...register("max_weight")} />
+                {errors.max_weight && <p className="text-xs text-destructive">{errors.max_weight.message}</p>}
               </div>
             </div>
 
@@ -431,9 +519,9 @@ export default function TournamentDetailPage() {
                   <SelectValue placeholder="Оберіть правила..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {rulesets.map((r) => (
+                  {rulesets.filter(r => r.sport_type === tournament.sport_type || !tournament.sport_type).map((r) => (
                     <SelectItem key={r.key} value={r.key}>
-                      {r.name} ({r.sport_type})
+                      {r.name} ({formatSportType(r.sport_type)})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -487,7 +575,21 @@ export default function TournamentDetailPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Вид спорту</Label>
-              <Input placeholder="Карате, Дзюдо..." {...editTournamentForm.register("sport_type")} />
+              <Select
+                value={editTournamentForm.watch("sport_type") || ""}
+                onValueChange={(v) => editTournamentForm.setValue("sport_type", v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Оберіть вид спорту..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from(new Set(rulesets.map(r => r.sport_type).filter(Boolean))).map((sport: any) => (
+                    <SelectItem key={sport} value={sport}>
+                      {formatSportType(sport)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {editTournamentForm.formState.errors.sport_type && (
                 <p className="text-xs text-destructive">{editTournamentForm.formState.errors.sport_type.message}</p>
               )}
@@ -501,17 +603,33 @@ export default function TournamentDetailPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Початок</Label>
-                <Input type="date" {...editTournamentForm.register("start_date")} />
+                <Label>Початок турніру</Label>
+                <Input type="datetime-local" {...editTournamentForm.register("start_date")} />
                 {editTournamentForm.formState.errors.start_date && (
                   <p className="text-xs text-destructive">{editTournamentForm.formState.errors.start_date.message}</p>
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label>Кінець</Label>
-                <Input type="date" {...editTournamentForm.register("end_date")} />
+                <Label>Кінець турніру</Label>
+                <Input type="datetime-local" {...editTournamentForm.register("end_date")} />
                 {editTournamentForm.formState.errors.end_date && (
                   <p className="text-xs text-destructive">{editTournamentForm.formState.errors.end_date.message}</p>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Початок реєстрації <span className="text-muted-foreground text-xs">(опціонально)</span></Label>
+                <Input type="datetime-local" {...editTournamentForm.register("registration_start")} />
+                {editTournamentForm.formState.errors.registration_start && (
+                  <p className="text-xs text-destructive">{editTournamentForm.formState.errors.registration_start.message}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Кінець реєстрації <span className="text-muted-foreground text-xs">(опціонально)</span></Label>
+                <Input type="datetime-local" {...editTournamentForm.register("registration_end")} />
+                {editTournamentForm.formState.errors.registration_end && (
+                  <p className="text-xs text-destructive">{editTournamentForm.formState.errors.registration_end.message}</p>
                 )}
               </div>
             </div>
@@ -570,7 +688,7 @@ export default function TournamentDetailPage() {
               Вкажіть межі кількості учасників для кожного типу сітки. Система автоматично розподілить формат та згенерує сітки для всіх нестворених категорій.
             </p>
 
-            <div className="border border-border rounded-lg p-3 bg-zinc-50 dark:bg-zinc-900 space-y-3">
+            <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
               <span className="text-xs font-bold text-amber-500 uppercase tracking-widest block">Кругова сітка (Round Robin)</span>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
@@ -584,7 +702,7 @@ export default function TournamentDetailPage() {
               </div>
             </div>
 
-            <div className="border border-border rounded-lg p-3 bg-zinc-50 dark:bg-zinc-900 space-y-3">
+            <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
               <span className="text-xs font-bold text-blue-500 uppercase tracking-widest block">Олімпійська сітка (Single Elimination)</span>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
@@ -605,6 +723,74 @@ export default function TournamentDetailPage() {
             <Button variant="sport" onClick={handleGenerateAllBracketsWithThresholds} disabled={generatingAllBrackets}>
               {generatingAllBrackets ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
               Згенерувати сітки
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Діалог імпорту категорій */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Імпорт категорій</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-muted-foreground">
+              Введіть назви категорій (кожна з нового рядка). Наша система автоматично визначить стать, вік та вагові межі на основі тексту!
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-[10px] h-7"
+                onClick={() => setImportText(
+                  "12-13 років, хлопці, до 40 кг\n12-13 років, дівчата, до 45 кг\n14-15 років, хлопці, понад 60 кг\n16-17 років, хлопці, 55-60 кг"
+                )}
+              >
+                Шаблон WKF (Хлопці / Дівчата)
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-[10px] h-7"
+                onClick={() => setImportText(
+                  "U10, -30kg, Male\nU12, -35kg, Female\nU14, +45kg, Mixed"
+                )}
+              >
+                Шаблон English (U10 / U12)
+              </Button>
+            </div>
+            <textarea
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="Введіть категорії..."
+              rows={8}
+              className="w-full text-sm p-3 border border-input rounded bg-zinc-950 text-white font-mono focus-visible:outline-none"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>Скасувати</Button>
+            <Button
+              variant="sport"
+              disabled={isImporting || !importText.trim()}
+              onClick={async () => {
+                setIsImporting(true);
+                try {
+                  const names = importText.split("\n").map(n => n.trim()).filter(Boolean);
+                  await api.post(`/tournaments/${id}/import_categories/`, { names });
+                  toast({ title: "Категорії успішно імпортовано!" });
+                  setImportDialogOpen(false);
+                  setImportText("");
+                  fetchAll();
+                } catch {
+                  toast({ title: "Помилка імпорту категорій", variant: "destructive" });
+                } finally {
+                  setIsImporting(false);
+                }
+              }}
+            >
+              {isImporting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+              Імпортувати
             </Button>
           </DialogFooter>
         </DialogContent>
