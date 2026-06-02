@@ -23,7 +23,7 @@ class TatamiViewSet(viewsets.ModelViewSet):
     serializer_class = TatamiSerializer
 
     def get_queryset(self):
-        qs = Tatami.objects.select_related("tournament", "current_match")
+        qs = Tatami.objects.select_related("tournament", "current_match__category")
         tournament_id = self.request.query_params.get("tournament")
         if tournament_id:
             qs = qs.filter(tournament_id=tournament_id)

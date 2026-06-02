@@ -9,7 +9,7 @@ class TatamiService:
         from apps.matches.serializers import MatchSerializer
         from apps.tatamis.serializers import TatamiSerializer
 
-        tatami = Tatami.objects.select_related("tournament", "current_match").get(
+        tatami = Tatami.objects.select_related("tournament", "current_match__category").get(
             tournament_id=tournament_id, number=tatami_number
         )
 
@@ -23,7 +23,7 @@ class TatamiService:
     @staticmethod
     def get_current_match(tournament_id: int, tatami_number: int):
         try:
-            tatami = Tatami.objects.select_related("current_match").get(
+            tatami = Tatami.objects.select_related("current_match__category").get(
                 tournament_id=tournament_id, number=tatami_number
             )
             return tatami.current_match
@@ -35,7 +35,7 @@ class TatamiService:
         from apps.common.broadcast import broadcast_tatami_state
         from apps.matches.models import Match
 
-        match = Match.objects.get(pk=match_id)
+        match = Match.objects.select_related("category").get(pk=match_id)
 
         # Встановлюємо двосторонній зв'язок: match.tatami потрібен для broadcast
         # (broadcast_match_event використовує _tatami_group(match), яка читає match.tatami_id)

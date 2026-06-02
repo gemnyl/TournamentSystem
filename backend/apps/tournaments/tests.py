@@ -300,3 +300,72 @@ class TestBracketGeneration(TournamentAPITestCase):
             "Реєстрація можлива лише тоді",
             response.data[0] if isinstance(response.data, list) else str(response.data),
         )
+
+
+class TestCategoryNLPImport(TournamentAPITestCase):
+    """Тести для розумного bulk NLP-імпорту категорій."""
+
+    def test_bulk_import_categories_success(self):
+        self._login(self.organizer)
+        payload = {
+            "names": [
+                "12-13 років, хлопці, до 40 кг",
+                "12-13 років, дівчата, до 45 кг",
+                "14-15 років, хлопці, понад 60 кг",
+                "16-17 років, хлопці, 55-60 кг",
+                "U10, -30kg, Male",
+            ]
+        }
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/import_categories/", payload, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.data), 5)
+
+        # 1. Check "12-13 років, хлопці, до 40 кг"
+        cat1 = Category.objects.get(
+            name="12-13 років, хлопці, до 40 кг", tournament=self.tournament
+        )
+        self.assertEqual(cat1.allowed_gender, Category.AllowedGender.MALE)
+        self.assertEqual(cat1.min_age, 12)
+        self.assertEqual(cat1.max_age, 13)
+        self.assertIsNone(cat1.min_weight)
+        self.assertEqual(float(cat1.max_weight), 40.0)
+
+        # 2. Check "12-13 років, дівчата, до 45 кг"
+        cat2 = Category.objects.get(
+            name="12-13 років, дівчата, до 45 кг", tournament=self.tournament
+        )
+        self.assertEqual(cat2.allowed_gender, Category.AllowedGender.FEMALE)
+        self.assertEqual(cat2.min_age, 12)
+        self.assertEqual(cat2.max_age, 13)
+        self.assertIsNone(cat2.min_weight)
+        self.assertEqual(float(cat2.max_weight), 45.0)
+
+        # 3. Check "14-15 років, хлопці, понад 60 кг"
+        cat3 = Category.objects.get(
+            name="14-15 років, хлопці, понад 60 кг", tournament=self.tournament
+        )
+        self.assertEqual(cat3.allowed_gender, Category.AllowedGender.MALE)
+        self.assertEqual(cat3.min_age, 14)
+        self.assertEqual(cat3.max_age, 15)
+        self.assertEqual(float(cat3.min_weight), 60.0)
+        self.assertIsNone(cat3.max_weight)
+
+        # 4. Check "16-17 років, хлопці, 55-60 кг"
+        cat4 = Category.objects.get(
+            name="16-17 років, хлопці, 55-60 кг", tournament=self.tournament
+        )
+        self.assertEqual(cat4.allowed_gender, Category.AllowedGender.MALE)
+        self.assertEqual(cat4.min_age, 16)
+        self.assertEqual(cat4.max_age, 17)
+        self.assertEqual(float(cat4.min_weight), 55.0)
+        self.assertEqual(float(cat4.max_weight), 60.0)
+
+        # 5. Check "U10, -30kg, Male"
+        cat5 = Category.objects.get(name="U10, -30kg, Male", tournament=self.tournament)
+        self.assertEqual(cat5.allowed_gender, Category.AllowedGender.MALE)
+        self.assertEqual(cat5.min_age, 0)
+        self.assertEqual(cat5.max_age, 10)
+        self.assertIsNone(cat5.min_weight)
+        self.assertEqual(float(cat5.max_weight), 30.0)

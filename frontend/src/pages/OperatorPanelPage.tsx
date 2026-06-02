@@ -15,6 +15,7 @@ import { useTatamiSocket } from "@/hooks/useTatamiSocket";
 import { useTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
 import KumiteOperatorControls from "@/components/operator/KumiteOperatorControls";
+import KumiteWKFOperatorPanel from "@/components/operator/KumiteWKFOperatorPanel";
 import type { Match, RulesetInfo, Tatami, Tournament } from "@/types/api";
 
 function matchToTimerState(m: Match): TimerState {
@@ -89,8 +90,9 @@ export default function OperatorPanelPage() {
     onMatchEvent(_event, match) {
       setCurrentMatch(match);
       setMatches((prev) => prev.map((m) => m.id === match.id ? match : m));
+      setTimerState(matchToTimerState(match));
     },
-    onTimerState(state, server_ts_ms) {
+    onTimerState(state, _server_ts_ms) {
       setTimerState({
         status: state.status,
         started_at_ms: state.started_at_ms,
@@ -237,7 +239,7 @@ export default function OperatorPanelPage() {
               return (
                 <button
                   key={m.id}
-                  disabled={m.status !== "scheduled" || isCurrent}
+                  disabled={isCurrent}
                   onClick={() => handleAssignMatch(m.id)}
                   className={cn(
                     "w-full text-left rounded-lg border px-3 py-2 text-xs transition-all",
@@ -271,18 +273,29 @@ export default function OperatorPanelPage() {
         {/* ── Current Match (right) ── */}
         <div className="flex-1 overflow-y-auto p-4">
           {currentMatch ? (
-            <div className="space-y-4 max-w-4xl mx-auto">
-
-              {/* Match info */}
-              <div className="text-xs text-muted-foreground">
-                R{currentMatch.round_index}.{currentMatch.match_order}
-                {currentMatch.status === "completed" && (
-                  <span className="ml-2 text-green-400 font-bold uppercase">Завершено</span>
-                )}
-              </div>
-
-              {/* Controls */}
-              {currentMatch.judging_mode === "points" ? (
+            currentMatch.ruleset_key === "karate_wkf" ? (
+              <KumiteWKFOperatorPanel
+                match={currentMatch}
+                timerState={timerState}
+                remainingMs={remainingMs}
+                rulesetActions={rulesetActions}
+                winMethods={winMethods}
+                serverTimeOffset={serverTimeOffset}
+                onMatchUpdate={(m) => {
+                  setCurrentMatch(m);
+                  setMatches((prev) => prev.map((x) => x.id === m.id ? m : x));
+                  setTimerState(matchToTimerState(m));
+                }}
+                onRelease={handleRelease}
+              />
+            ) : currentMatch.judging_mode === "points" ? (
+              <div className="space-y-4 max-w-4xl mx-auto">
+                <div className="text-xs text-muted-foreground">
+                  R{currentMatch.round_index}.{currentMatch.match_order}
+                  {currentMatch.status === "completed" && (
+                    <span className="ml-2 text-green-400 font-bold uppercase">Завершено</span>
+                  )}
+                </div>
                 <KumiteOperatorControls
                   match={currentMatch}
                   rulesetActions={rulesetActions}
@@ -295,31 +308,27 @@ export default function OperatorPanelPage() {
                     setTimerState(matchToTimerState(m));
                   }}
                 />
-              ) : (
-                <div className="flex items-center justify-center py-16 border border-dashed rounded-xl text-muted-foreground text-sm">
-                  Kata UI — coming soon
-                </div>
-              )}
-
-              {/* Bottom actions */}
-              {currentMatch.status !== "completed" && (
                 <div className="flex flex-wrap gap-2 pt-2 border-t">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
-                    onClick={() => { setWinMethod(winMethods[0]?.key ?? "points"); setWinnerDialog("ao"); }}
-                  >
-                    <Trophy className="w-3 h-3 mr-1" /> Winner: AO
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-red-500/50 text-red-400 hover:bg-red-500/10"
-                    onClick={() => { setWinMethod(winMethods[0]?.key ?? "points"); setWinnerDialog("aka"); }}
-                  >
-                    <Trophy className="w-3 h-3 mr-1" /> Winner: AKA
-                  </Button>
+                  {currentMatch.status !== "completed" && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
+                        onClick={() => { setWinMethod(winMethods[0]?.key ?? "points"); setWinnerDialog("ao"); }}
+                      >
+                        <Trophy className="w-3 h-3 mr-1" /> Winner: AO
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-red-500/50 text-red-400 hover:bg-red-500/10"
+                        onClick={() => { setWinMethod(winMethods[0]?.key ?? "points"); setWinnerDialog("aka"); }}
+                      >
+                        <Trophy className="w-3 h-3 mr-1" /> Winner: AKA
+                      </Button>
+                    </>
+                  )}
                   <div className="ml-auto flex gap-2">
                     <Button variant="outline" size="sm" onClick={handleRelease}>
                       Release Tatami
@@ -329,15 +338,12 @@ export default function OperatorPanelPage() {
                     </Button>
                   </div>
                 </div>
-              )}
-              {currentMatch.status === "completed" && (
-                <div className="flex gap-2 pt-2 border-t">
-                  <Button variant="outline" size="sm" onClick={handleRelease}>
-                    Release Tatami
-                  </Button>
-                </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center py-16 border border-dashed rounded-xl text-muted-foreground text-sm">
+                Kata UI — coming soon
+              </div>
+            )
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
               <p className="text-muted-foreground">
@@ -348,7 +354,7 @@ export default function OperatorPanelPage() {
         </div>
       </div>
 
-      {/* ── Winner dialog ── */}
+      {/* ── Winner dialog for legacy rulesets ── */}
       <Dialog open={!!winnerDialog} onOpenChange={(o) => !o && setWinnerDialog(null)}>
         <DialogContent>
           <DialogHeader>
