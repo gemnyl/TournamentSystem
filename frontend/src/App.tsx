@@ -29,11 +29,12 @@ export default function App() {
           element={<ScoreboardPage />}
         />
 
-        {/* Публічні маршрути З лейаутом (перегляд без логіну — як Uventex) */}
+        {/* Публічні маршрути З лейаутом (перегляд без логіну) */}
         <Route element={<AppLayout />}>
           <Route path="/" element={<Navigate to="/tournaments" replace />} />
           <Route path="/tournaments" element={<TournamentListPage />} />
           <Route path="/tournaments/:id" element={<TournamentDetailPage />} />
+          <Route path="/tournaments/:tid/day" element={<DayDashboardPage />} />
           <Route path="/categories/:id" element={<CategoryDetailPage />} />
           <Route path="/categories/:id/bracket" element={<BracketPage />} />
 
@@ -44,7 +45,6 @@ export default function App() {
 
           <Route element={<ProtectedRoute allowedRoles={["organizer"]} />}>
             <Route path="/tournaments/:tid/tatamis" element={<TatamiAdminPage />} />
-            <Route path="/tournaments/:tid/day" element={<DayDashboardPage />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["judge", "organizer"]} />}>

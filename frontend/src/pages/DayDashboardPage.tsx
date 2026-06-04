@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { Tatami, Match } from "@/types/api";
+import { useAuth } from "@/hooks/useAuth";
 
 const DEFAULT_TIMER = {
   status: "not_started" as const,
@@ -26,6 +27,7 @@ interface TatamiCardProps {
 }
 
 function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
+  const { isOrganizer } = useAuth();
   const [tatami, setTatami] = useState<Tatami>(initialTatami);
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
   const [connected, setConnected] = useState(false);
@@ -178,13 +180,22 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
               )}
             </div>
 
-            {/* Open operator panel link */}
-            <Link
-              to={`/operator/tournament/${tid}/tatami/${tatami.number}`}
-              className="block mt-auto text-center text-xs font-semibold text-amber-500 hover:text-amber-400 hover:underline pt-2"
-            >
-              Панель оператора →
-            </Link>
+            {/* Open operator panel link for organizer, scoreboard for spectator */}
+            {isOrganizer ? (
+              <Link
+                to={`/operator/tournament/${tid}/tatami/${tatami.number}`}
+                className="block mt-auto text-center text-xs font-semibold text-amber-500 hover:text-amber-400 hover:underline pt-2"
+              >
+                Панель оператора →
+              </Link>
+            ) : (
+              <Link
+                to={`/scoreboard/tournament/${tid}/tatami/${tatami.number}?spectator=true`}
+                className="block mt-auto text-center text-xs font-semibold text-amber-500 hover:text-amber-400 hover:underline pt-2"
+              >
+                Дивитись табло (Live) →
+              </Link>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-center flex-1">
@@ -202,6 +213,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
 export default function DayDashboardPage() {
   const { tid } = useParams<{ tid: string }>();
   const { toast } = useToast();
+  const { isOrganizer } = useAuth();
 
   const [tatamis, setTatamis] = useState<Tatami[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -252,11 +264,13 @@ export default function DayDashboardPage() {
           <Button variant="outline" size="sm" onClick={fetchTatamis}>
             <RefreshCw className="w-4 h-4 mr-1" /> Оновити
           </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/tournaments/${tid}/tatamis`}>
-              <Layers className="w-4 h-4 mr-1" /> Керування татамі
-            </Link>
-          </Button>
+          {isOrganizer && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/tournaments/${tid}/tatamis`}>
+                <Layers className="w-4 h-4 mr-1" /> Керування татамі
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -273,12 +287,16 @@ export default function DayDashboardPage() {
           <div>
             <p className="font-medium text-foreground">Татамі не знайдено</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Перейдіть до панелі керування, щоб додати татамі для цього турніру
+              {isOrganizer
+                ? "Перейдіть до панелі керування, щоб додати татамі для цього турніру"
+                : "Організатор ще не додав жодного татамі для цього турніру"}
             </p>
           </div>
-          <Button variant="sport" size="sm" asChild>
-            <Link to={`/tournaments/${tid}/tatamis`}>Додати татамі</Link>
-          </Button>
+          {isOrganizer && (
+            <Button variant="sport" size="sm" asChild>
+              <Link to={`/tournaments/${tid}/tatamis`}>Додати татамі</Link>
+            </Button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
