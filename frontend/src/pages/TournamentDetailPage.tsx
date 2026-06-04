@@ -21,8 +21,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
 import { CategoryCard } from "@/components/tournament/CategoryCard";
-import type { Tournament, Category, PaginatedResponse, RulesetInfo } from "@/types/api";
+import type { Tournament, Category, PaginatedResponse, RulesetInfo, Tatami, Match } from "@/types/api";
 import { formatSportType } from "@/lib/utils";
+import { estimateSchedule } from "@/lib/scheduler";
 
 const categorySchema = z.object({
   name:                   z.string().min(2, "Введіть назву"),
@@ -92,6 +93,8 @@ export default function TournamentDetailPage() {
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [tatamis, setTatamis] = useState<Tatami[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [catDialogOpen, setCatDialogOpen] = useState(false);
@@ -240,12 +243,16 @@ export default function TournamentDetailPage() {
   const fetchAll = async () => {
     setIsLoading(true);
     try {
-      const [tRes, cRes] = await Promise.all([
+      const [tRes, cRes, tatamiRes, matchRes] = await Promise.all([
         api.get<Tournament>(`/tournaments/${id}/`),
         api.get<PaginatedResponse<Category> | Category[]>(`/categories/?tournament=${id}`),
+        api.get<Tatami[] | { results: Tatami[] }>(`/tatamis/?tournament=${id}`),
+        api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${id}`),
       ]);
       setTournament(tRes.data);
       setCategories(Array.isArray(cRes.data) ? cRes.data : cRes.data.results);
+      setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as any).results || []);
+      setMatches(Array.isArray(matchRes.data) ? matchRes.data : (matchRes.data as any).results || []);
     } finally {
       setIsLoading(false);
     }
@@ -345,74 +352,87 @@ export default function TournamentDetailPage() {
           ) : null}
         </div>
 
-        {/* Кнопки управління (тільки організатор) */}
-        {isOrganizer && (
-          <div className="flex flex-wrap gap-2">
-            {canOpenReg && (
-              <Button
-                variant="outline" size="sm"
-                disabled={actionLoading === "open_registration"}
-                onClick={() => handleAction("open_registration")}
-              >
-                {actionLoading === "open_registration" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
-                Відкрити реєстрацію
-              </Button>
-            )}
-            {canStart && (
-              <Button
-                variant="sport" size="sm"
-                disabled={actionLoading === "start"}
-                onClick={() => handleAction("start")}
-              >
-                {actionLoading === "start" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                Розпочати
-              </Button>
-            )}
-            {canComplete && (
-              <Button
-                variant="outline" size="sm"
-                disabled={actionLoading === "complete"}
-                onClick={() => handleAction("complete")}
-              >
-                {actionLoading === "complete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                Завершити
-              </Button>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link to={`/tournaments/${id}/tatamis`}>Керування татамі</Link>
+        {/* Кнопки дій */}
+        <div className="flex flex-wrap gap-2">
+          {tournament.status !== "draft" && (
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+              className="border-green-500/30 text-green-500 hover:bg-green-500/5 hover:text-green-400 relative"
+            >
+              <Link to={`/tournaments/${id}/day`} className="flex items-center gap-1.5 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />
+                Live-табло татамі
+              </Link>
             </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link to={`/tournaments/${id}/day`}>Дашборд змагань</Link>
-            </Button>
-            {tournament.status === "active" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleAutoDistributeTatamis}
-                disabled={distributingTatamis}
-              >
-                {distributingTatamis ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
-                Авто-розподіл по татамі
+          )}
+
+          {isOrganizer && (
+            <>
+              {canOpenReg && (
+                <Button
+                  variant="outline" size="sm"
+                  disabled={actionLoading === "open_registration"}
+                  onClick={() => handleAction("open_registration")}
+                >
+                  {actionLoading === "open_registration" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
+                  Відкрити реєстрацію
+                </Button>
+              )}
+              {canStart && (
+                <Button
+                  variant="sport" size="sm"
+                  disabled={actionLoading === "start"}
+                  onClick={() => handleAction("start")}
+                >
+                  {actionLoading === "start" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  Розпочати
+                </Button>
+              )}
+              {canComplete && (
+                <Button
+                  variant="outline" size="sm"
+                  disabled={actionLoading === "complete"}
+                  onClick={() => handleAction("complete")}
+                >
+                  {actionLoading === "complete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Завершити
+                </Button>
+              )}
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/tournaments/${id}/tatamis`}>Керування татамі</Link>
               </Button>
-            )}
-            {tournament.status !== "completed" && categories.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkDialogOpen(true)}
-                disabled={generatingAllBrackets}
-              >
-                Згенерувати всі сітки
+              {tournament.status === "active" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAutoDistributeTatamis}
+                  disabled={distributingTatamis}
+                >
+                  {distributingTatamis ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+                  Авто-розподіл по татамі
+                </Button>
+              )}
+              {tournament.status !== "completed" && categories.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkDialogOpen(true)}
+                  disabled={generatingAllBrackets}
+                >
+                  Згенерувати всі сітки
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={handleOpenEditDialog}>
+                Редагувати
               </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={handleOpenEditDialog}>
-              Редагувати
-            </Button>
-            <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)}>
-              Вилучити турнір
-            </Button>
-          </div>
-        )}
+              <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+                Вилучити турнір
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <Separator />
@@ -448,7 +468,12 @@ export default function TournamentDetailPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {categories.map((c) => <CategoryCard key={c.id} category={c} />)}
+            {(() => {
+              const { categoryEstimates } = estimateSchedule(tatamis, matches, categories);
+              return categories.map((c) => (
+                <CategoryCard key={c.id} category={c} estimate={categoryEstimates[c.id]} />
+              ));
+            })()}
           </div>
         )}
       </div>

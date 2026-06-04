@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2
+  ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2, Clock
 } from "lucide-react";
+import { estimateSchedule } from "@/lib/scheduler";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -73,6 +74,7 @@ export default function CategoryDetailPage() {
   const [isDeletingBracket, setIsDeletingBracket] = useState(false);
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [tatamis, setTatamis] = useState<Tatami[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
   const [selectedTatamiId, setSelectedTatamiId] = useState<string>("");
   const [assigningTatami, setAssigningTatami] = useState(false);
   // Re-use rulesets
@@ -103,13 +105,16 @@ export default function CategoryDetailPage() {
       const [tatamiRes, tournRes, matchRes] = await Promise.all([
         api.get<Tatami[]>(`/tatamis/?tournament=${catRes.data.tournament}`),
         api.get<Tournament>(`/tournaments/${catRes.data.tournament}/`),
-        api.get<Match[] | PaginatedResponse<Match>>(`/matches/?category=${id}`),
+        api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${catRes.data.tournament}`),
       ]);
       setTatamis(tatamiRes.data);
       setTournament(tournRes.data);
 
-      const matches = Array.isArray(matchRes.data) ? matchRes.data : matchRes.data.results;
-      const firstMatchWithTatami = matches?.find((m: any) => m.tatami !== null);
+      const allMatches = Array.isArray(matchRes.data) ? matchRes.data : (matchRes.data as any).results || [];
+      setMatches(allMatches);
+
+      const categoryMatches = allMatches.filter((m: any) => m.category === Number(id));
+      const firstMatchWithTatami = categoryMatches?.find((m: any) => m.tatami !== null);
       if (firstMatchWithTatami) {
         setSelectedTatamiId(String(firstMatchWithTatami.tatami));
       } else {
@@ -285,6 +290,30 @@ export default function CategoryDetailPage() {
   const canGenerateBracket = isOrganizer && category.status === "active" && registrations.some(r => r.status === "confirmed");
   const canRegister = (isOrganizer || isCoach) && category.status === "registration";
 
+  // Обчислюємо оцінку розкладу для поточної категорії
+  let estimateBanner = null;
+  if (category && tatamis.length > 0 && matches.length > 0) {
+    const { categoryEstimates } = estimateSchedule(tatamis, matches, [category]);
+    const estimate = categoryEstimates[category.id];
+    if (estimate) {
+      const timeStr = new Date(estimate.startTime).toLocaleTimeString("uk-UA", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      estimateBanner = estimate.isLive ? (
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-400 border border-green-500/20 mt-3 w-fit animate-pulse">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+          ТРИВАЄ ЗАРАЗ НА ТАТАМІ №{estimate.tatamiNumber}
+        </div>
+      ) : (
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 mt-3 w-fit">
+          <Clock className="w-3.5 h-3.5" />
+          Очікуваний час початку: {timeStr} {estimate.tatamiNumber ? `(Татамі №${estimate.tatamiNumber})` : ""}
+        </div>
+      );
+    }
+  }
+
   return (
     <div className="container py-8 space-y-6">
       <Link to={`/tournaments/${category.tournament}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -298,17 +327,20 @@ export default function CategoryDetailPage() {
             <h1 className="font-display text-3xl font-bold tracking-tight">{category.name}</h1>
             <StatusBadge status={category.status} type="category" />
           </div>
-          <p className="text-sm text-muted-foreground">
-            {category.confirmed_registrations_count} учасників · {
-              category.min_weight !== null && category.max_weight !== null
-                ? `${category.min_weight}–${category.max_weight} кг`
-                : category.min_weight !== null
-                ? `від ${category.min_weight} кг`
-                : category.max_weight !== null
-                ? `до ${category.max_weight} кг`
-                : "без обмежень за вагою"
-            } · {category.min_age}–{category.max_age} р.
-          </p>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">
+              {category.confirmed_registrations_count} учасників · {
+                category.min_weight !== null && category.max_weight !== null
+                  ? `${category.min_weight}–${category.max_weight} кг`
+                  : category.min_weight !== null
+                  ? `від ${category.min_weight} кг`
+                  : category.max_weight !== null
+                  ? `до ${category.max_weight} кг`
+                  : "без обмежень за вагою"
+              } · {category.min_age}–{category.max_age} р.
+            </p>
+            {estimateBanner}
+          </div>
           {isOrganizer && tatamis.length > 0 && category.has_bracket && (
             <div className="flex items-center gap-2 mt-3 bg-zinc-50 dark:bg-zinc-900 border border-border rounded-lg px-3 py-1.5 w-fit">
               <span className="text-xs font-bold text-muted-foreground">Призначений татамі:</span>
