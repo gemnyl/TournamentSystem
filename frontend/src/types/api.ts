@@ -32,6 +32,7 @@ export interface Athlete {
   base_weight: number;       // кг, float
   club?: { id: number; name: string; region: string } | null;
   club_id?: number;
+  skill_level: string;
 }
 
 // ─── Турнір ─────────────────────────────────────────────────────────────────
@@ -50,6 +51,9 @@ export interface Tournament {
   organizer: number;
   organizer_name: string;
   weigh_in_required: boolean;
+  registration_start: string | null;
+  registration_end: string | null;
+  completed_at: string | null;
   created_at: string;
 }
 
@@ -66,8 +70,8 @@ export interface Category {
   allowed_gender_display: string;
   min_age: number;
   max_age: number;
-  min_weight: number;
-  max_weight: number;
+  min_weight: number | null;
+  max_weight: number | null;
   allowed_skill_level: string;
   ruleset_key: string;
   match_duration_seconds: number;
@@ -97,7 +101,7 @@ export interface Registration {
 // ─── Матч ───────────────────────────────────────────────────────────────────
 
 export type MatchStatus = "scheduled" | "ongoing" | "completed";
-export type WinMethod = "decision" | "disqualification" | "walkover" | "withdrawal" | "points" | "hantei" | "hansoku" | "kiken" | "ippon" | "wazaari";
+export type WinMethod = "decision" | "disqualification" | "walkover" | "withdrawal" | "points" | "hantei" | "hansoku" | "kiken" | "ippon" | "wazaari" | "draw";
 export type TimerStatus = "not_started" | "running" | "paused" | "finished";
 
 export interface Match {
@@ -164,6 +168,7 @@ export interface Tatami {
   assigned_judge_name?: string;
   is_active: boolean;
   matches_count?: number;
+  upcoming_matches?: Match[];
 }
 
 export interface TatamiSnapshot {
@@ -213,8 +218,8 @@ export interface CreateCategoryData {
   allowed_gender: "male" | "female" | "mixed";
   min_age: number;
   max_age: number;
-  min_weight: number;
-  max_weight: number;
+  min_weight: number | null;
+  max_weight: number | null;
   bracket_format: BracketFormat;
 }
 
