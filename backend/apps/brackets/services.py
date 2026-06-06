@@ -45,6 +45,21 @@ class BracketGenerator:
         registrations = self._get_confirmed_registrations()
         self._assign_seeds_if_missing(registrations)
 
+        # Визначаємо тривалість таймера з категорії або рулсету
+        duration_sec = self.category.match_duration_seconds
+        if not duration_sec:
+            try:
+                from apps.rulesets.registry import get_ruleset
+
+                ruleset = get_ruleset(self.category.ruleset_key)
+                from apps.rulesets.base import PointsRuleSet
+
+                if isinstance(ruleset, PointsRuleSet):
+                    duration_sec = ruleset.get_default_duration_seconds()
+            except Exception:
+                pass
+        duration_ms = (duration_sec * 1000) if duration_sec else 180000
+
         participants = [self._to_participant(r) for r in registrations]
         reg_by_id = {r.id: r for r in registrations}
 
@@ -69,6 +84,7 @@ class BracketGenerator:
                     match_order=m["match_order"],
                     next_match=next_match,
                     status=Match.Status.SCHEDULED,
+                    timer_duration_ms=duration_ms,
                 )
                 row.append(match_obj)
             created_by_round.append(row)
@@ -88,6 +104,22 @@ class BracketGenerator:
         """Створює розклад кругового турніру."""
         self._validate_preconditions()
         registrations = self._get_confirmed_registrations()
+
+        # Визначаємо тривалість таймера з категорії або рулсету
+        duration_sec = self.category.match_duration_seconds
+        if not duration_sec:
+            try:
+                from apps.rulesets.registry import get_ruleset
+
+                ruleset = get_ruleset(self.category.ruleset_key)
+                from apps.rulesets.base import PointsRuleSet
+
+                if isinstance(ruleset, PointsRuleSet):
+                    duration_sec = ruleset.get_default_duration_seconds()
+            except Exception:
+                pass
+        duration_ms = (duration_sec * 1000) if duration_sec else 180000
+
         participants = [self._to_participant(r) for r in registrations]
         reg_by_id = {r.id: r for r in registrations}
 
@@ -95,7 +127,8 @@ class BracketGenerator:
 
         created: list[Match] = []
         for round_idx, round_pairs in enumerate(schedule, start=1):
-            for order_idx, (a, b) in enumerate(round_pairs, start=1):
+            order_idx = 1
+            for a, b in round_pairs:
                 if a is None or b is None:
                     continue
                 match_obj = Match.objects.create(
@@ -106,8 +139,10 @@ class BracketGenerator:
                     match_order=order_idx,
                     next_match=None,
                     status=Match.Status.SCHEDULED,
+                    timer_duration_ms=duration_ms,
                 )
                 created.append(match_obj)
+                order_idx += 1
         return created
 
     # ------------------------------------------------------------------

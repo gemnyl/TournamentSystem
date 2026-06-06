@@ -34,7 +34,7 @@ class TatamiViewSet(viewsets.ModelViewSet):
             from apps.accounts.permissions import IsOrganizer
 
             return [IsOrganizer()]
-        if self.action in ("assign_match", "release"):
+        if self.action in ("assign_match", "release", "set_active_results_category"):
             from apps.accounts.permissions import IsJudgeOrOrganizer
 
             return [IsJudgeOrOrganizer()]
@@ -72,6 +72,25 @@ class TatamiViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
         TatamiService.release(tatami)
+        tatami.refresh_from_db()
+        return Response(TatamiSerializer(tatami).data)
+
+    @action(detail=True, methods=["post"], url_path="set_active_results_category")
+    def set_active_results_category(self, request, pk=None):
+        tatami = self.get_object()
+        if request.user.is_authenticated and request.user.role == "judge":
+            if tatami.assigned_judge_id != request.user.id:
+                return Response(
+                    {"detail": "Ви не закріплені за цим татамі!"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        category_id = request.data.get("category_id")
+        try:
+            TatamiService.set_active_results_category(
+                tatami, int(category_id) if category_id is not None else None
+            )
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         tatami.refresh_from_db()
         return Response(TatamiSerializer(tatami).data)
 

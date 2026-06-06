@@ -16,11 +16,13 @@ from apps.brackets.services import BracketGenerator
 from apps.matches.serializers import MatchSerializer
 from apps.tournaments.models import Category, Registration, Tournament
 from apps.tournaments.serializers import (
+    CategoryResultSerializer,
     CategorySerializer,
     RegistrationSerializer,
     TournamentDetailSerializer,
     TournamentSerializer,
 )
+from apps.tournaments.services import calculate_category_standings
 
 
 class TournamentViewSet(viewsets.ModelViewSet):
@@ -144,6 +146,15 @@ class TournamentViewSet(viewsets.ModelViewSet):
                 {"detail": "Немає категорій зі згенерованими сітками."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Clear current_match for all tatamis in this tournament since the schedule is reshuffled
+        from apps.common.broadcast import broadcast_tatami_state
+
+        for t in tournament.tatamis.all():
+            if t.current_match:
+                t.current_match = None
+                t.save(update_fields=["current_match"])
+                broadcast_tatami_state(t)
 
         # Greedy load-balancing sorting by match count descending
         categories_with_matches.sort(key=lambda c: c.matches.count(), reverse=True)
@@ -363,6 +374,10 @@ class CategoryViewSet(viewsets.ModelViewSet):
             "assign_tatami",
         ):
             return [IsOrganizer()]
+        if self.action in ("save_results", "unlock_results", "set_judges_count"):
+            from apps.accounts.permissions import IsJudgeOrOrganizer
+
+            return [IsJudgeOrOrganizer()]
         from rest_framework.permissions import AllowAny
 
         return [AllowAny()]
@@ -440,10 +455,185 @@ class CategoryViewSet(viewsets.ModelViewSet):
             )
 
         category.matches.update(tatami=tatami)
+
+        # Clear current_match on other tatamis for matches of this category
+        from apps.common.broadcast import broadcast_tatami_state
+
+        affected_tatamis = Tatami.objects.filter(
+            tournament=category.tournament, current_match__category=category
+        ).exclude(id=tatami.id)
+        for t in affected_tatamis:
+            t.current_match = None
+            t.save(update_fields=["current_match"])
+            broadcast_tatami_state(t)
+
         return Response(
             {"detail": f"Усі матчі категорії успішно призначено на татамі №{tatami.number}."},
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["get"], url_path="results")
+    def results(self, request, pk=None):
+        """GET /api/categories/{id}/results/
+        Розраховує та повертає поточні результати категорії.
+        """
+        category = self.get_object()
+        results_data = calculate_category_standings(category, persist=False)
+        serializer = CategoryResultSerializer(results_data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def _verify_judge_permission(self, category, user):
+        if user.is_authenticated and user.role == "judge":
+            match = category.matches.first()
+            if match and match.tatami:
+                if match.tatami.assigned_judge_id != user.id:
+                    from rest_framework.exceptions import PermissionDenied
+
+                    raise PermissionDenied("Ви не є призначеним суддею на татамі цієї категорії.")
+            else:
+                from rest_framework.exceptions import PermissionDenied
+
+                raise PermissionDenied("Категорія не призначена на жодне татамі.")
+
+    @action(detail=True, methods=["post"], url_path="save_results")
+    def save_results(self, request, pk=None):
+        """POST /api/categories/{id}/save_results/
+        Розраховує та фіксує результати категорії у базу даних з підтримкою ручних перевизначень.
+        """
+        category = self.get_object()
+        self._verify_judge_permission(category, request.user)
+
+        overrides = request.data.get("overrides")
+        if overrides is not None and isinstance(overrides, dict):
+            from django.db import transaction
+
+            with transaction.atomic():
+                # Очищаємо старі місця в цій категорії
+                Registration.objects.filter(category=category).update(place=None)
+                # Записуємо нові призові місця з перевизначень
+                for reg_id_str, place_val in overrides.items():
+                    if place_val is not None:
+                        try:
+                            place_int = int(place_val)
+                            Registration.objects.filter(
+                                id=int(reg_id_str), category=category
+                            ).update(place=place_int)
+                        except (ValueError, TypeError):
+                            pass
+            results_data = calculate_category_standings(category, persist=False)
+        else:
+            # Використовуємо автоматичний розрахунок
+            results_data = calculate_category_standings(category, persist=True)
+
+        # Broadcast state to all relevant tatami WS channels
+        from django.db.models import Q
+
+        from apps.common.broadcast import broadcast_tatami_state
+        from apps.tatamis.models import Tatami
+
+        matching_tatamis = Tatami.objects.filter(
+            Q(current_match__category=category) | Q(active_results_category=category)
+        )
+        for tatami in matching_tatamis:
+            broadcast_tatami_state(tatami)
+
+        # Broadcast to category channel to trigger spectator page updates
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"category_{category.id}",
+            {
+                "type": "match.event",
+                "match_id": 0,
+                "event": {
+                    "sequence": 0,
+                    "event_type": "results_update",
+                    "payload": {},
+                },
+                "match": None,
+            },
+        )
+
+        serializer = CategoryResultSerializer(results_data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unlock_results")
+    def unlock_results(self, request, pk=None):
+        """POST /api/categories/{id}/unlock_results/
+        Скидає зафіксовані результати категорії.
+        """
+        category = self.get_object()
+        self._verify_judge_permission(category, request.user)
+
+        Registration.objects.filter(category=category).update(place=None)
+
+        # Broadcast state to all relevant tatami WS channels
+        from django.db.models import Q
+
+        from apps.common.broadcast import broadcast_tatami_state
+        from apps.tatamis.models import Tatami
+
+        matching_tatamis = Tatami.objects.filter(
+            Q(current_match__category=category) | Q(active_results_category=category)
+        )
+        for tatami in matching_tatamis:
+            broadcast_tatami_state(tatami)
+
+        # Broadcast to category channel to trigger spectator page updates
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"category_{category.id}",
+            {
+                "type": "match.event",
+                "match_id": 0,
+                "event": {
+                    "sequence": 0,
+                    "event_type": "results_update",
+                    "payload": {},
+                },
+                "match": None,
+            },
+        )
+
+        return Response({"detail": "Фіксацію результатів скасовано."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="set_judges_count")
+    def set_judges_count(self, request, pk=None):
+        """POST /api/categories/{id}/set_judges_count/
+        Встановлює кількість суддів для Ката (3 або 5).
+        """
+        category = self.get_object()
+        judges_count = request.data.get("judges_count")
+        if judges_count not in (3, 5, "3", "5"):
+            return Response(
+                {"detail": "Кількість суддів повинна бути 3 або 5."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from django.db import transaction
+
+        from apps.matches.services.match_service import MatchService
+
+        try:
+            with transaction.atomic():
+                category.judges_count = int(judges_count)
+                category.save(update_fields=["judges_count"])
+
+                # Оновлюємо кожен матч за допомогою MatchService для скидання та валідації
+                for match in category.matches.all():
+                    svc = MatchService(match)
+                    svc.set_judges_count(int(judges_count), judge=request.user)
+        except (ValueError, DjangoValidationError) as exc:
+            msg = exc.message if hasattr(exc, "message") else str(exc)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(CategorySerializer(category).data, status=status.HTTP_200_OK)
 
 
 class RegistrationViewSet(viewsets.ModelViewSet):

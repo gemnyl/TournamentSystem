@@ -229,6 +229,8 @@ class TestTatamiViewSet(TatamiTestCase):
 
     def test_release(self):
         self._login(self.judge)
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         response = self.client.post(f"/api/tatamis/{self.tatami.pk}/release/")
@@ -237,6 +239,8 @@ class TestTatamiViewSet(TatamiTestCase):
         self.assertIsNone(self.tatami.current_match)
 
     def test_state_endpoint(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         response = self.client.get(f"/api/tatamis/{self.tatami.pk}/state/")
@@ -284,6 +288,8 @@ class TestTatamiService(TatamiTestCase):
         self.assertEqual(self.tatami.current_match_id, self.match.pk)
 
     def test_release_clears_current(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         TatamiService.release(self.tatami)
@@ -291,6 +297,8 @@ class TestTatamiService(TatamiTestCase):
         self.assertIsNone(self.tatami.current_match)
 
     def test_get_current_match_returns_match(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         result = TatamiService.get_current_match(self.tournament.pk, 1)
@@ -301,6 +309,8 @@ class TestTatamiService(TatamiTestCase):
         self.assertIsNone(result)
 
     def test_get_snapshot_structure(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         snapshot = TatamiService.get_snapshot(self.tournament.pk, 1)
@@ -479,6 +489,8 @@ class TestTatamiConsumer(TatamiTestCase):
 
     def setUp(self):
         super().setUp()
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save(update_fields=["current_match"])
 

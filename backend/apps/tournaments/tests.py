@@ -369,3 +369,171 @@ class TestCategoryNLPImport(TournamentAPITestCase):
         self.assertEqual(cat5.max_age, 10)
         self.assertIsNone(cat5.min_weight)
         self.assertEqual(float(cat5.max_weight), 30.0)
+
+
+class CategoryResultsTestCase(TournamentAPITestCase):
+    """Тести для розрахунку результатів категорії (Results Engine)."""
+
+    def test_single_elimination_results(self):
+        from apps.brackets.services import BracketGenerator
+        from apps.matches.models import Match
+        from apps.tournaments.services import calculate_category_standings
+
+        # Створюємо 4 атлетів (вони автоматично реєструються у self.category)
+        a1, r1 = self._create_athlete(1)
+        a2, r2 = self._create_athlete(2)
+        a3, r3 = self._create_athlete(3)
+        a4, r4 = self._create_athlete(4)
+
+        # Генерація сітки
+        matches = BracketGenerator(self.category).generate()
+        self.assertEqual(len(matches), 3)  # 2 півфінали + 1 фінал
+
+        # Знаходимо півфінали та фінал
+        semi_1 = [m for m in matches if m.round_index == 1 and m.match_order == 1][0]
+        semi_2 = [m for m in matches if m.round_index == 1 and m.match_order == 2][0]
+        final = [m for m in matches if m.round_index == 2][0]
+
+        # Завершуємо півфінали
+        # semi_1: r1 vs r2 -> winner r1
+        semi_1.winner = r1
+        semi_1.status = Match.Status.COMPLETED
+        semi_1.save()
+
+        # semi_2: r3 vs r4 -> winner r3
+        semi_2.winner = r3
+        semi_2.status = Match.Status.COMPLETED
+        semi_2.save()
+
+        # Оновлюємо фіналістів
+        final.reg_first = r1
+        final.reg_second = r3
+        final.save()
+
+        # Завершуємо фінал: r1 vs r3 -> winner r1
+        final.winner = r1
+        final.status = Match.Status.COMPLETED
+        final.save()
+
+        # Розраховуємо результати
+        calculate_category_standings(self.category, persist=True)
+
+        # Перевіряємо місця
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+        r3.refresh_from_db()
+        r4.refresh_from_db()
+
+        self.assertEqual(r1.place, 1)  # переможець фіналу
+        self.assertEqual(r3.place, 2)  # той, хто програв у фіналі
+        self.assertEqual(r2.place, 3)  # програв у півфіналі 1
+        self.assertEqual(r4.place, 3)  # програв у півфіналі 2
+
+    def test_round_robin_results(self):
+        from apps.brackets.services import BracketGenerator
+        from apps.matches.models import Match
+        from apps.tournaments.services import calculate_category_standings
+
+        # Змінюємо формат категорії на круговий
+        self.category.bracket_format = Category.BracketFormat.ROUND_ROBIN
+        self.category.save()
+
+        # Створюємо 3 атлетів
+        a1, r1 = self._create_athlete(1)
+        a2, r2 = self._create_athlete(2)
+        a3, r3 = self._create_athlete(3)
+
+        matches = BracketGenerator(self.category).generate()
+        self.assertEqual(len(matches), 3)  # кожен з кожним = 3 матчі
+
+        # Зіграємо сутички:
+        # Match 1: r1 vs r2. Winner r1, score 3:0
+        m1 = [
+            m
+            for m in matches
+            if (m.reg_first_id == r1.id and m.reg_second_id == r2.id)
+            or (m.reg_first_id == r2.id and m.reg_second_id == r1.id)
+        ][0]
+        m1.status = Match.Status.COMPLETED
+        if m1.reg_first_id == r1.id:
+            m1.winner = r1
+            m1.score_first = 3
+            m1.score_second = 0
+        else:
+            m1.winner = r1
+            m1.score_first = 0
+            m1.score_second = 3
+        m1.save()
+
+        # Match 2: r2 vs r3. Winner r2, score 2:1
+        m2 = [
+            m
+            for m in matches
+            if (m.reg_first_id == r2.id and m.reg_second_id == r3.id)
+            or (m.reg_first_id == r3.id and m.reg_second_id == r2.id)
+        ][0]
+        m2.status = Match.Status.COMPLETED
+        if m2.reg_first_id == r2.id:
+            m2.winner = r2
+            m2.score_first = 2
+            m2.score_second = 1
+        else:
+            m2.winner = r2
+            m2.score_first = 1
+            m2.score_second = 2
+        m2.save()
+
+        # Match 3: r3 vs r1. Winner r3, score 1:0
+        m3 = [
+            m
+            for m in matches
+            if (m.reg_first_id == r3.id and m.reg_second_id == r1.id)
+            or (m.reg_first_id == r1.id and m.reg_second_id == r3.id)
+        ][0]
+        m3.status = Match.Status.COMPLETED
+        if m3.reg_first_id == r3.id:
+            m3.winner = r3
+            m3.score_first = 1
+            m3.score_second = 0
+        else:
+            m3.winner = r3
+            m3.score_first = 0
+            m3.score_second = 1
+        m3.save()
+
+        # Розраховуємо та зберігаємо результати
+        calculate_category_standings(self.category, persist=True)
+
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+        r3.refresh_from_db()
+
+        # Перевіримо tie-breakers:
+        # Всі мають по 1 перемозі, 3 очки.
+        # Різниця балів:
+        # r1: 3 набрав, 1 пропустив (+2)
+        # r2: 2 набрав, 4 пропустив (-2)
+        # r3: 2 набрав, 2 пропустив (0)
+        # Тому: r1 (1 місце), r3 (2 місце), r2 (3 місце)
+        self.assertEqual(r1.place, 1)
+        self.assertEqual(r3.place, 2)
+        self.assertEqual(r2.place, 3)
+
+    def test_category_results_endpoints(self):
+        # 1. GET /api/categories/{id}/results/ without login is allowed (AllowAny)
+        response = self.client.get(f"/api/categories/{self.category.pk}/results/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # 2. POST /api/categories/{id}/save_results/ without login is 403 (IsOrganizer required)
+        response = self.client.post(f"/api/categories/{self.category.pk}/save_results/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. POST /api/categories/{id}/save_results/ with coach login is 403 (IsOrganizer required)
+        self._login(self.coach)
+        response = self.client.post(f"/api/categories/{self.category.pk}/save_results/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 4. POST /api/categories/{id}/save_results/ with organizer login should succeed (200 OK)
+        self._login(self.organizer)
+        response = self.client.post(f"/api/categories/{self.category.pk}/save_results/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)

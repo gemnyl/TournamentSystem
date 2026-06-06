@@ -21,6 +21,7 @@ class CategorySerializer(serializers.ModelSerializer):
     status = serializers.CharField(source="tournament.status", read_only=True)
     confirmed_registrations_count = serializers.SerializerMethodField()
     has_bracket = serializers.SerializerMethodField()
+    results_finalized = serializers.SerializerMethodField()
 
     class Meta:
         model = Category
@@ -42,6 +43,10 @@ class CategorySerializer(serializers.ModelSerializer):
             "confirmed_registrations_count",
             "has_bracket",
             "status",
+            "schedule_order",
+            "two_third_places",
+            "results_finalized",
+            "judges_count",
         ]
 
     def get_confirmed_registrations_count(self, obj):
@@ -49,6 +54,9 @@ class CategorySerializer(serializers.ModelSerializer):
 
     def get_has_bracket(self, obj):
         return obj.matches.exists()
+
+    def get_results_finalized(self, obj):
+        return obj.registrations.filter(place__isnull=False).exists()
 
 
 class TournamentSerializer(serializers.ModelSerializer):
@@ -66,6 +74,9 @@ class TournamentSerializer(serializers.ModelSerializer):
             "location",
             "start_date",
             "end_date",
+            "registration_start",
+            "registration_end",
+            "completed_at",
             "status",
             "status_display",
             "organizer",
@@ -73,7 +84,7 @@ class TournamentSerializer(serializers.ModelSerializer):
             "weigh_in_required",
             "created_at",
         ]
-        read_only_fields = ["organizer", "created_at", "status"]
+        read_only_fields = ["organizer", "created_at", "status", "completed_at"]
 
 
 class TournamentDetailSerializer(TournamentSerializer):
@@ -110,16 +121,27 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "recorded_weight",
             "status",
             "status_display",
+            "place",
             "created_at",
         ]
-        read_only_fields = ["seed_number", "recorded_weight", "status", "created_at"]
+        read_only_fields = ["seed_number", "recorded_weight", "status", "place", "created_at"]
 
     def validate(self, attrs):
         category = attrs.get("category")
-        if category and category.tournament.status != category.tournament.Status.REGISTRATION:
-            raise serializers.ValidationError(
-                "Реєстрація можлива лише тоді, коли турнір знаходиться у статусі 'Реєстрація'."
-            )
+        if category:
+            tournament = category.tournament
+            if tournament.status != tournament.Status.REGISTRATION:
+                raise serializers.ValidationError(
+                    "Реєстрація можлива лише тоді, коли турнір знаходиться у статусі 'Реєстрація'."
+                )
+
+            from django.utils import timezone
+
+            now = timezone.now()
+            if tournament.registration_start and now < tournament.registration_start:
+                raise serializers.ValidationError("Реєстрація на цей турнір ще не розпочалася.")
+            if tournament.registration_end and now > tournament.registration_end:
+                raise serializers.ValidationError("Реєстрація на цей турнір вже завершилася.")
         return attrs
 
     def create(self, validated_data):
@@ -127,3 +149,16 @@ class RegistrationSerializer(serializers.ModelSerializer):
         if category and not category.tournament.weigh_in_required:
             validated_data["status"] = "confirmed"
         return super().create(validated_data)
+
+
+class CategoryResultSerializer(serializers.Serializer):
+    """Результат розрахунку заліку для учасника в категорії."""
+
+    place = serializers.IntegerField(allow_null=True)
+    registration = RegistrationSerializer()
+    wins = serializers.IntegerField()
+    draws = serializers.IntegerField()
+    losses = serializers.IntegerField()
+    points = serializers.IntegerField()
+    scores_scored = serializers.IntegerField()
+    scores_conceded = serializers.IntegerField()

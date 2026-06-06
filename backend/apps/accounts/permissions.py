@@ -93,3 +93,16 @@ class IsJudgeOrOrganizer(BasePermission):
             and request.user.is_authenticated
             and request.user.role in ("judge", "organizer", "admin")
         )
+
+
+class IsCoachOrOrganizer(BasePermission):
+    """Дозволяє доступ тренерам, організаторам та адміністраторам."""
+
+    message = "Доступ лише для тренерів та організаторів."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ("coach", "organizer", "admin")
+        )

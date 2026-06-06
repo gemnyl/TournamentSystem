@@ -27,6 +27,14 @@ class Tatami(models.Model):
         related_name="+",
         verbose_name="Поточний матч",
     )
+    active_results_category = models.ForeignKey(
+        "tournaments.Category",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="Категорія для відображення результатів на табло",
+    )
     is_active = models.BooleanField(default=True, verbose_name="Активне")
 
     class Meta:
