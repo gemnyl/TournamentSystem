@@ -80,6 +80,10 @@ export interface Category {
   status: CategoryStatus;
   confirmed_registrations_count: number;
   has_bracket: boolean;
+  schedule_order: number;
+  two_third_places?: boolean;
+  results_finalized?: boolean;
+  judges_count?: number | null;
 }
 
 // ─── Реєстрація ─────────────────────────────────────────────────────────────
@@ -95,6 +99,7 @@ export interface Registration {
   status: RegistrationStatus;
   status_display: string;
   seed_number: number | null;
+  place?: number | null;
   created_at: string;
 }
 
@@ -129,7 +134,12 @@ export interface Match {
   timer_duration_ms: number;
   ruleset_key: string;
   category_name?: string;
+  category_order?: number;
   judging_mode: "points" | "flags";
+  judges_count?: number | null;
+  flags_aka?: number | null;
+  flags_ao?: number | null;
+  show_timer: boolean;
 }
 
 // ─── Рулсет ─────────────────────────────────────────────────────────────────
@@ -169,6 +179,8 @@ export interface Tatami {
   is_active: boolean;
   matches_count?: number;
   upcoming_matches?: Match[];
+  active_results_category?: number | null;
+  active_results_category_name?: string | null;
 }
 
 export interface TatamiSnapshot {

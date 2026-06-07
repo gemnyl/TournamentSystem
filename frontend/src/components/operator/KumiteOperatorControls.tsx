@@ -138,7 +138,12 @@ export default function KumiteOperatorControls({
         </div>
 
         <div className="text-center">
-          <span className="font-mono text-7xl font-black text-blue-300 leading-none">
+          <span className={cn(
+            "font-mono text-7xl font-black leading-none transition-all duration-300",
+            match.status === "completed" && match.winner === match.reg_second?.id
+              ? "animate-pulse text-green-400"
+              : "text-blue-300"
+          )}>
             {match.score_second}
           </span>
         </div>
@@ -151,18 +156,20 @@ export default function KumiteOperatorControls({
         </div>
 
         {/* Senshu */}
-        <button
-          disabled={isCompleted || busy}
-          onClick={() => setSenshu(aoSenshu ? "none" : "ao")}
-          className={cn(
-            "w-full text-xs py-1 rounded border transition-colors",
-            aoSenshu
-              ? "border-blue-400 bg-blue-500/20 text-blue-300"
-              : "border-border text-muted-foreground hover:border-blue-400/50"
-          )}
-        >
-          {aoSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AO"}
-        </button>
+        {match.ruleset_key === "karate_wkf" && (
+          <button
+            disabled={isCompleted || busy}
+            onClick={() => setSenshu(aoSenshu ? "none" : "ao")}
+            className={cn(
+              "w-full text-xs py-1 rounded border transition-colors",
+              aoSenshu
+                ? "border-blue-400 bg-blue-500/20 text-blue-300"
+                : "border-border text-muted-foreground hover:border-blue-400/50"
+            )}
+          >
+            {aoSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AO"}
+          </button>
+        )}
 
         {/* Score actions */}
         <div className="grid grid-cols-2 gap-1.5">
@@ -363,7 +370,12 @@ export default function KumiteOperatorControls({
         </div>
 
         <div className="text-center">
-          <span className="font-mono text-7xl font-black text-red-300 leading-none">
+          <span className={cn(
+            "font-mono text-7xl font-black leading-none transition-all duration-300",
+            match.status === "completed" && match.winner === match.reg_first?.id
+              ? "animate-pulse text-green-400"
+              : "text-red-300"
+          )}>
             {match.score_first}
           </span>
         </div>
@@ -376,18 +388,20 @@ export default function KumiteOperatorControls({
         </div>
 
         {/* Senshu */}
-        <button
-          disabled={isCompleted || busy}
-          onClick={() => setSenshu(akaSenshu ? "none" : "aka")}
-          className={cn(
-            "w-full text-xs py-1 rounded border transition-colors",
-            akaSenshu
-              ? "border-red-400 bg-red-500/20 text-red-300"
-              : "border-border text-muted-foreground hover:border-red-400/50"
-          )}
-        >
-          {akaSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AKA"}
-        </button>
+        {match.ruleset_key === "karate_wkf" && (
+          <button
+            disabled={isCompleted || busy}
+            onClick={() => setSenshu(akaSenshu ? "none" : "aka")}
+            className={cn(
+              "w-full text-xs py-1 rounded border transition-colors",
+              akaSenshu
+                ? "border-red-400 bg-red-500/20 text-red-300"
+                : "border-border text-muted-foreground hover:border-red-400/50"
+            )}
+          >
+            {akaSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AKA"}
+          </button>
+        )}
 
         {/* Score actions */}
         <div className="grid grid-cols-2 gap-1.5">

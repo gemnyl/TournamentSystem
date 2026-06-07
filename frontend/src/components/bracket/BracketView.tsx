@@ -21,7 +21,7 @@ export function BracketView({ bracket, onMatchClick }: BracketViewProps) {
   // single_elimination / double_elimination
   return (
     <div className="overflow-x-auto pb-4">
-      <div className="flex items-start gap-8 min-w-max px-2 py-2">
+      <div className="flex items-start gap-12 min-w-max px-2 py-2">
         {bracket.rounds.map((roundMatches, idx) => (
           <BracketRound
             key={idx}

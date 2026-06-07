@@ -13,6 +13,7 @@ interface CategoryCardProps {
     startTime: number;
     tatamiNumber: number | null;
     isLive: boolean;
+    isTatamiActive: boolean;
   };
 }
 
@@ -38,7 +39,11 @@ export function CategoryCard({ category, estimate }: CategoryCardProps) {
             </CardTitle>
             <div className="flex items-center gap-2 shrink-0">
               {estimate && (
-                estimate.isLive ? (
+                !estimate.isTatamiActive ? (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                    ⏱️ Призупинено {estimate.tatamiNumber ? `(Татамі №${estimate.tatamiNumber})` : ""}
+                  </span>
+                ) : estimate.isLive ? (
                   <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 animate-pulse">
                     <span className="w-1 h-1 rounded-full bg-green-400 shrink-0" />
                     Live (Татамі №{estimate.tatamiNumber})

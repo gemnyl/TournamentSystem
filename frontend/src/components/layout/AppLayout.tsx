@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -41,7 +42,7 @@ export default function AppLayout() {
   const { user, logout, isAuthenticated, isInitialized, isOrganizer, fetchMe } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [judgeTatami, setJudgeTatami] = useState<any | null>(null);
+  const [judgeTatamis, setJudgeTatamis] = useState<any[]>([]);
 
   // Перевіряємо сесію один раз при старті
   useEffect(() => {
@@ -53,15 +54,19 @@ export default function AppLayout() {
     if (isAuthenticated && user?.role === "judge") {
       api.get<any[]>("/tatamis/")
         .then((res) => {
-          const list = Array.isArray(res.data) ? res.data : (res.data as any).results;
-          const assigned = list.find((t: any) => t.assigned_judge === user.id);
-          if (assigned) {
-            setJudgeTatami(assigned);
-          }
+          const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+          const assigned = list.filter((t: any) => t.assigned_judge === user.id);
+          // Сортуємо активні турніри спочатку
+          const sorted = [...assigned].sort((a, b) => {
+            if (a.tournament_status === "active" && b.tournament_status !== "active") return -1;
+            if (b.tournament_status === "active" && a.tournament_status !== "active") return 1;
+            return 0;
+          });
+          setJudgeTatamis(sorted);
         })
         .catch(() => {});
     } else {
-      setJudgeTatami(null);
+      setJudgeTatamis([]);
     }
   }, [isAuthenticated, user]);
 
@@ -110,10 +115,33 @@ export default function AppLayout() {
           <nav className="hidden md:flex items-center gap-6">
             <NavItem to="/tournaments">Турніри</NavItem>
             {isAuthenticated && <NavItem to="/athletes">Атлети</NavItem>}
-            {judgeTatami && (
-              <NavItem to={`/operator/tournament/${judgeTatami.tournament}/tatami/${judgeTatami.number}`}>
-                Мій татамі
+            {judgeTatamis.length === 1 && (
+              <NavItem to={`/operator/tournament/${judgeTatamis[0].tournament}/tatami/${judgeTatamis[0].number}`}>
+                Мій татамі ({judgeTatamis[0].number})
               </NavItem>
+            )}
+            {judgeTatamis.length > 1 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger className="relative px-1 py-0.5 text-sm font-medium transition-colors text-muted-foreground hover:text-foreground flex items-center gap-1 focus-visible:outline-none">
+                  Мої татамі <ChevronDown className="w-3.5 h-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56" align="start">
+                  <DropdownMenuLabel>Ваші призначення</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {judgeTatamis.map((t) => (
+                    <DropdownMenuItem key={t.id} asChild>
+                      <Link to={`/operator/tournament/${t.tournament}/tatami/${t.number}`} className="flex items-center justify-between w-full">
+                        <span className="truncate max-w-[160px] font-medium">
+                          {t.tournament_title ?? `Турнір ${t.tournament}`}
+                        </span>
+                        <Badge variant="outline" className="ml-1 font-mono text-[10px] shrink-0">
+                          Т. {t.number}
+                        </Badge>
+                      </Link>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </nav>
 
@@ -191,14 +219,29 @@ export default function AppLayout() {
                 Атлети
               </NavLink>
             )}
-            {judgeTatami && (
+            {judgeTatamis.length === 1 && (
               <NavLink
-                to={`/operator/tournament/${judgeTatami.tournament}/tatami/${judgeTatami.number}`}
+                to={`/operator/tournament/${judgeTatamis[0].tournament}/tatami/${judgeTatamis[0].number}`}
                 className="text-sm font-medium py-1 text-amber-500 font-bold"
                 onClick={() => setMobileOpen(false)}
               >
-                Мій татамі
+                Мій татамі ({judgeTatamis[0].number})
               </NavLink>
+            )}
+            {judgeTatamis.length > 1 && (
+              <div className="flex flex-col gap-1.5 pl-3 border-l border-amber-500/20 py-1">
+                <span className="text-xs text-muted-foreground font-semibold">Мої татамі:</span>
+                {judgeTatamis.map((t) => (
+                  <NavLink
+                    key={t.id}
+                    to={`/operator/tournament/${t.tournament}/tatami/${t.number}`}
+                    className="text-sm font-medium text-amber-500/80 hover:text-amber-500 truncate"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    {t.tournament_title ?? `Турнір ${t.tournament}`} (Т. {t.number})
+                  </NavLink>
+                ))}
+              </div>
             )}
             {!isAuthenticated && (
               <Link to="/login" className="text-sm font-medium py-1 text-amber-500" onClick={() => setMobileOpen(false)}>
