@@ -38,7 +38,10 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         tournament_id = self.request.query_params.get("tournament")
         if tournament_id:
             qs = qs.filter(category__tournament_id=tournament_id)
-        return qs.order_by("round_index", "match_order")
+        tatami_number = self.request.query_params.get("tatami_number")
+        if tatami_number:
+            qs = qs.filter(tatami__number=tatami_number)
+        return qs.order_by("category__schedule_order", "round_index", "match_order")
 
     def get_serializer_class(self):
         return MatchSerializer
@@ -48,12 +51,17 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             "update_score",
             "set_senshu",
             "set_winner",
+            "set_draw",
+            "reset_match",
             "timer_start",
             "timer_pause",
             "timer_resume",
             "timer_reset",
             "timer_set_duration",
             "timer_add_time",
+            "submit_flags",
+            "toggle_timer",
+            "set_judges_count",
         )
         if self.action in judge_actions:
             return [IsJudgeOrOrganizer()]
@@ -68,11 +76,12 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"], url_path="update_score")
     def update_score(self, request, pk=None):
         """POST /api/matches/{id}/update_score/
-        Тіло: {"corner": "aka"|"ao", "action_key": "yuko"|"wazaari"|"ippon"|"penalty"|...}
+        Тіло: {"corner": "aka"|"ao", "action_key": "yuko"|..., "is_undo": bool}
         """
         match = self.get_object()
         corner = request.data.get("corner")
         action_key = request.data.get("action_key")
+        is_undo = bool(request.data.get("is_undo", False))
 
         if not corner or not action_key:
             return Response(
@@ -82,7 +91,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
 
         try:
             svc = MatchService(match)
-            svc.apply_score(corner, action_key, judge=request.user)
+            svc.apply_score(corner, action_key, judge=request.user, is_undo=is_undo)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -137,6 +146,37 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
 
         last_event = match.events.order_by("-sequence").first()
         broadcast_match_event(match, last_event)
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="set_draw")
+    def set_draw(self, request, pk=None):
+        """POST /api/matches/{id}/set_draw/
+        Тіло: {"win_method": "draw"}
+        """
+        match = self.get_object()
+        win_method = request.data.get("win_method", Match.WinMethod.DRAW)
+        try:
+            from django.core.exceptions import ValidationError
+
+            svc = MatchService(match)
+            svc.set_draw(win_method, judge=request.user)
+        except (ValueError, ValidationError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="reset_match")
+    def reset_match(self, request, pk=None):
+        """POST /api/matches/{id}/reset_match/"""
+        match = self.get_object()
+        try:
+            from django.core.exceptions import ValidationError
+
+            svc = MatchService(match)
+            svc.reset_match(judge=request.user)
+        except (ValueError, ValidationError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         return Response(MatchSerializer(match).data)
 
     # ------------------------------------------------------------------
@@ -247,4 +287,77 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             MatchService(match).timer_add_time(int(delta_ms), judge=request.user)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="submit_flags")
+    def submit_flags(self, request, pk=None):
+        """POST /api/matches/{id}/submit_flags/
+        Тіло: {"flags_aka": int, "flags_ao": int}
+        """
+        match = self.get_object()
+        flags_aka = request.data.get("flags_aka")
+        flags_ao = request.data.get("flags_ao")
+        if flags_aka is None or flags_ao is None:
+            return Response(
+                {"detail": "Поля 'flags_aka' та 'flags_ao' є обов'язковими."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+
+            svc = MatchService(match)
+            svc.submit_flags_decision(int(flags_aka), int(flags_ao), judge=request.user)
+        except (ValueError, TypeError, DjangoValidationError) as exc:
+            msg = exc.message if hasattr(exc, "message") else str(exc)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        match.refresh_from_db()
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="toggle_timer")
+    def toggle_timer(self, request, pk=None):
+        """POST /api/matches/{id}/toggle_timer/
+        Тіло: {"show_timer": bool}
+        """
+        match = self.get_object()
+        show_timer = request.data.get("show_timer")
+        if show_timer is None:
+            return Response(
+                {"detail": "Поле 'show_timer' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            svc = MatchService(match)
+            svc.toggle_timer(bool(show_timer), judge=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        match.refresh_from_db()
+        return Response(MatchSerializer(match).data)
+
+    @action(detail=True, methods=["post"], url_path="set_judges_count")
+    def set_judges_count(self, request, pk=None):
+        """POST /api/matches/{id}/set_judges_count/
+        Тіло: {"judges_count": int}
+        """
+        match = self.get_object()
+        judges_count = request.data.get("judges_count")
+        if judges_count is None:
+            return Response(
+                {"detail": "Поле 'judges_count' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+
+            svc = MatchService(match)
+            svc.set_judges_count(int(judges_count), judge=request.user)
+        except (ValueError, TypeError, DjangoValidationError) as exc:
+            msg = exc.message if hasattr(exc, "message") else str(exc)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        match.refresh_from_db()
         return Response(MatchSerializer(match).data)

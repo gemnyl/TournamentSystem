@@ -545,3 +545,162 @@ class TestMatchConsumer(SimpleTestCase):
         self.assertEqual(response["match_id"], 7)
         self.assertEqual(response["event"]["event_type"], "score")
         await comm.disconnect()
+
+
+class TestKarateKataMatches(MatchAPITestCase):
+    def setUp(self):
+        super().setUp()
+        # Змінимо рулсет нашої категорії на karate_kata
+        self.category.ruleset_key = "karate_kata"
+        self.category.save()
+        # Оновимо рулсет-ключ першого матчу
+        self.first_round_match.refresh_from_db()
+
+    def test_set_judges_count(self):
+        self._login(self.judge)
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/",
+            {"judges_count": 5},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.category.refresh_from_db()
+        self.assertEqual(self.category.judges_count, 5)
+
+        # Перевіримо, що у поєдинку також оновилося
+        self.first_round_match.refresh_from_db()
+        self.assertEqual(self.first_round_match.judges_count, 5)
+
+    def test_set_judges_count_invalid(self):
+        self._login(self.judge)
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/",
+            {"judges_count": 4},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_submit_flags_decision(self):
+        self._login(self.judge)
+        # Спочатку задамо кількість суддів
+        self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/",
+            {"judges_count": 3},
+            format="json",
+        )
+
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/submit_flags/", {"flags_aka": 2, "flags_ao": 1}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+        self.assertEqual(match.winner, match.reg_first)
+        self.assertEqual(match.flags_aka, 2)
+        self.assertEqual(match.flags_ao, 1)
+        self.assertEqual(match.win_method, Match.WinMethod.DECISION)
+
+    def test_submit_flags_invalid_sum(self):
+        self._login(self.judge)
+        self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/",
+            {"judges_count": 3},
+            format="json",
+        )
+
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/submit_flags/",
+            {"flags_aka": 2, "flags_ao": 2},  # Сума 4 замість 3
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_toggle_timer(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        self.assertFalse(match.show_timer)
+
+        response = self.client.post(
+            f"/api/matches/{match.pk}/toggle_timer/", {"show_timer": True}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        match.refresh_from_db()
+        self.assertTrue(match.show_timer)
+
+    def test_match_set_judges_count_success(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_judges_count/", {"judges_count": 5}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        match.refresh_from_db()
+        self.assertEqual(match.judges_count, 5)
+
+    def test_match_set_judges_count_invalid(self):
+        self._login(self.judge)
+        match = self.first_round_match
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_judges_count/", {"judges_count": 4}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_match_set_judges_count_resets_completed(self):
+        self._login(self.judge)
+        self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/",
+            {"judges_count": 3},
+            format="json",
+        )
+        match = self.first_round_match
+        # Зафіксуємо результат спочатку
+        self.client.post(
+            f"/api/matches/{match.pk}/submit_flags/", {"flags_aka": 2, "flags_ao": 1}, format="json"
+        )
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+        self.assertIsNotNone(match.winner)
+
+        # Тепер змінимо кількість суддів для цього матчу
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_judges_count/", {"judges_count": 5}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        match.refresh_from_db()
+        self.assertEqual(match.judges_count, 5)
+        self.assertEqual(match.status, Match.Status.SCHEDULED)
+        self.assertIsNone(match.winner)
+        self.assertIsNone(match.flags_aka)
+        self.assertIsNone(match.flags_ao)
+
+    def test_category_set_judges_count_resets_completed(self):
+        self._login(self.judge)
+        self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/",
+            {"judges_count": 3},
+            format="json",
+        )
+        match = self.first_round_match
+        # Зафіксуємо результат спочатку
+        self.client.post(
+            f"/api/matches/{match.pk}/submit_flags/", {"flags_aka": 2, "flags_ao": 1}, format="json"
+        )
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+        self.assertIsNotNone(match.winner)
+
+        # Тепер змінимо кількість суддів для ВСІЄЇ категорії
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/",
+            {"judges_count": 5},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        match.refresh_from_db()
+        self.assertEqual(match.judges_count, 5)
+        self.assertEqual(match.status, Match.Status.SCHEDULED)
+        self.assertIsNone(match.winner)
+        self.assertIsNone(match.flags_aka)
+        self.assertIsNone(match.flags_ao)

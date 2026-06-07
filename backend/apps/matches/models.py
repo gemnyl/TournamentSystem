@@ -30,6 +30,7 @@ class Match(models.Model):
         KIKEN = "kiken", "Kiken (відмова від участі)"
         IPPON = "ippon", "Ippon"
         WAZAARI = "wazaari", "Waza-ari"
+        DRAW = "draw", "Нічия"
 
     class Senshu(models.TextChoices):
         NONE = "none", "None"
@@ -143,6 +144,7 @@ class Match(models.Model):
     timer_started_at = models.DateTimeField(null=True, blank=True, verbose_name="Таймер запущено о")
     timer_elapsed_ms = models.PositiveIntegerField(default=0, verbose_name="Накопичено мс")
     timer_duration_ms = models.PositiveIntegerField(default=180000, verbose_name="Тривалість мс")
+    show_timer = models.BooleanField(default=False, verbose_name="Показувати таймер")
 
     class Meta:
         db_table = "match"
@@ -219,6 +221,8 @@ class MatchEvent(models.Model):
         TIMER_RESUME = "timer_resume", "Продовження таймера"
         TIMER_RESET = "timer_reset", "Скидання таймера"
         TIMER_SET_DUR = "timer_set_dur", "Зміна тривалості"
+        TIMER_TOGGLE = "timer_toggle", "Відображення таймера"
+        JUDGES_COUNT_CHANGE = "judges_count_change", "Зміна кількості суддів"
 
     match = models.ForeignKey(
         Match,

@@ -134,8 +134,8 @@ if _use_redis_channel_layer:
                             f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:"
                             f"{int(os.environ.get('REDIS_PORT', 6379))}"
                         ),
-                        "socket_timeout": 5.0,
-                        "socket_connect_timeout": 5.0,
+                        "socket_timeout": 30.0,
+                        "socket_connect_timeout": 30.0,
                     }
                 ],
             },
