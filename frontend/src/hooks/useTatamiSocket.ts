@@ -90,10 +90,18 @@ export function useTatamiSocket(
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
+    let pongTimeout: ReturnType<typeof setTimeout> | null = null;
+
     const sendPing = () => {
       if (ws.readyState === WebSocket.OPEN) {
         lastPingSentAtRef.current = Date.now();
         ws.send(JSON.stringify({ type: "ping" }));
+
+        if (pongTimeout) clearTimeout(pongTimeout);
+        pongTimeout = setTimeout(() => {
+          console.warn("WebSocket ping timeout, closing connection...");
+          ws.close();
+        }, 5000);
       }
     };
 
@@ -107,6 +115,10 @@ export function useTatamiSocket(
     };
 
     ws.onmessage = (e) => {
+      if (pongTimeout) {
+        clearTimeout(pongTimeout);
+        pongTimeout = null;
+      }
       let msg: { type: string; [k: string]: unknown };
       try {
         msg = JSON.parse(e.data as string);
@@ -206,6 +218,10 @@ export function useTatamiSocket(
     };
 
     ws.onclose = () => {
+      if (pongTimeout) {
+        clearTimeout(pongTimeout);
+        pongTimeout = null;
+      }
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;

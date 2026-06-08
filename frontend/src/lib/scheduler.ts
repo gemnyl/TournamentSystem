@@ -7,6 +7,7 @@ export interface ScheduleEstimates {
     startTime: number;
     tatamiNumber: number | null;
     isLive: boolean;
+    isTatamiActive: boolean;
   }>;
 }
 
@@ -24,7 +25,7 @@ export function estimateSchedule(
 ): ScheduleEstimates {
   const now = Date.now();
   const matchStarts: Record<number, number> = {};
-  const categoryEstimates: Record<number, { startTime: number; tatamiNumber: number | null; isLive: boolean }> = {};
+  const categoryEstimates: Record<number, { startTime: number; tatamiNumber: number | null; isLive: boolean; isTatamiActive: boolean }> = {};
 
   // 1. Прораховуємо час початку поєдинків на кожному активному татамі
   tatamis.forEach(tatami => {
@@ -40,6 +41,14 @@ export function estimateSchedule(
       if (b.id === currentId) return 1;
       if (a.status === "ongoing" && b.status !== "ongoing") return -1;
       if (b.status === "ongoing" && a.status !== "ongoing") return 1;
+      if (a.category !== b.category) {
+        const catA = categories.find(c => c.id === a.category);
+        const catB = categories.find(c => c.id === b.category);
+        const orderA = catA?.schedule_order ?? 0;
+        const orderB = catB?.schedule_order ?? 0;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.category - b.category;
+      }
       return a.round_index === b.round_index
         ? a.match_order - b.match_order
         : a.round_index - b.round_index;
@@ -84,7 +93,10 @@ export function estimateSchedule(
     const tatamiId = firstRemaining?.tatami;
     const tatami = tatamis.find(t => t.id === tatamiId);
 
-    const isLive = !!catMatches.find(m => m.status === "ongoing") || (tatami?.current_match === firstRemaining?.id && tatami?.current_match !== null);
+    const currentMatchId = tatami?.current_match && typeof tatami.current_match === "object"
+      ? (tatami.current_match as any).id
+      : tatami?.current_match;
+    const isLive = !!catMatches.find(m => m.status === "ongoing") || (currentMatchId === firstRemaining?.id && currentMatchId !== null && currentMatchId !== undefined);
 
     // Шукаємо найменший час початку серед незіграних матчів
     let minStart = Infinity;
@@ -96,7 +108,8 @@ export function estimateSchedule(
     categoryEstimates[cat.id] = {
       startTime: minStart === Infinity ? now : minStart,
       tatamiNumber: tatami ? tatami.number : null,
-      isLive: !!isLive
+      isLive: !!isLive,
+      isTatamiActive: tatami ? tatami.is_active : true
     };
   });
 

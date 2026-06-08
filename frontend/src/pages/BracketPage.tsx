@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, Wifi, WifiOff, Trophy } from "lucide-react";
 import api from "@/lib/api";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { BracketView } from "@/components/bracket/BracketView";
@@ -13,9 +13,10 @@ export default function BracketPage() {
   const [category, setCategory] = useState<Category | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
+  const [standings, setStandings] = useState<any[]>([]);
 
-  const fetchBracket = useCallback(async () => {
-    setIsLoading(true);
+  const fetchBracket = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       const [bracketRes, catRes] = await Promise.all([
         api.get<unknown>(`/matches/bracket/?category=${id}`),
@@ -30,8 +31,15 @@ export default function BracketPage() {
         rounds: rounds
       });
       setCategory(catRes.data);
+
+      try {
+        const res = await api.get<any[]>(`/categories/${id}/results/`);
+        setStandings(res.data.filter(r => r.place != null && r.place > 0).sort((a, b) => a.place - b.place));
+      } catch {
+        setStandings([]);
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [id]);
 
@@ -39,6 +47,11 @@ export default function BracketPage() {
 
   // WebSocket: оновлення конкретного матчу в сітці без перезавантаження
   const handleMatchUpdate = useCallback((updatedMatch: Match) => {
+    if (!updatedMatch) {
+      // General results update event
+      fetchBracket(true);
+      return;
+    }
     setBracket((prev) => {
       if (!prev) return prev;
       return {
@@ -48,10 +61,17 @@ export default function BracketPage() {
         ),
       };
     });
-  }, []);
+    // Silently re-fetch standings to keep standings updated in real-time
+    api.get<any[]>(`/categories/${id}/results/`).then((res) => {
+      setStandings(res.data.filter(r => r.place != null && r.place > 0).sort((a, b) => a.place - b.place));
+    }).catch(() => {});
+  }, [id, fetchBracket]);
 
   useMatchUpdates(Number(id), handleMatchUpdate, {
-    onConnect:    () => setWsConnected(true),
+    onConnect: () => {
+      setWsConnected(true);
+      fetchBracket(true);
+    },
     onDisconnect: () => setWsConnected(false),
   });
 
@@ -105,11 +125,41 @@ export default function BracketPage() {
               : <><WifiOff className="w-3 h-3" /> Offline</>}
           </div>
 
-          <Button variant="outline" size="sm" onClick={fetchBracket}>
+          <Button variant="outline" size="sm" onClick={() => fetchBracket()}>
             <RefreshCw className="w-4 h-4" /> Оновити
           </Button>
         </div>
       </div>
+
+      {/* Призери категорії */}
+      {standings && standings.length > 0 && (
+        <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-xl p-4 space-y-3 max-w-3xl">
+          <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 select-none">
+            <Trophy className="w-4 h-4 text-yellow-500" /> Переможці та призери
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+            {standings.map((res: any) => {
+              const place = res.place;
+              const name = res.registration?.athlete?.full_name ?? res.name;
+              const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
+              let badge = "🥇";
+              if (place === 2) badge = "🥈";
+              else if (place === 3) badge = "🥉";
+              else if (place > 3) badge = "🎖️";
+
+              return (
+                <div key={res.registration?.id || res.id} className="flex items-center gap-2 p-2 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
+                  <span className="text-xl select-none shrink-0">{badge}</span>
+                  <div className="flex flex-col min-w-0 text-left">
+                    <span className="font-bold text-xs text-white truncate leading-tight">{name}</span>
+                    <span className="text-[10px] text-zinc-400 truncate leading-normal">{club}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Сітка */}
       {bracket && bracket.rounds.length > 0 ? (

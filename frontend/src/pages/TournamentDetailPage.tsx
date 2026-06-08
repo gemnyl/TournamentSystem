@@ -22,7 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
 import { CategoryCard } from "@/components/tournament/CategoryCard";
 import type { Tournament, Category, PaginatedResponse, RulesetInfo, Tatami, Match } from "@/types/api";
-import { formatSportType } from "@/lib/utils";
+import { formatSportType, cn } from "@/lib/utils";
 import { estimateSchedule } from "@/lib/scheduler";
 
 const categorySchema = z.object({
@@ -35,6 +35,7 @@ const categorySchema = z.object({
   ruleset_key:            z.string().min(1, "Оберіть правила"),
   match_duration_seconds: z.string().optional().transform(v => v === "" || v === undefined ? undefined : Number(v)),
   allowed_skill_level:    z.string().optional(),
+  two_third_places:       z.boolean().default(true),
 }).refine((data) => {
   if (data.min_weight !== null && data.max_weight !== null) {
     return data.max_weight > data.min_weight;
@@ -116,6 +117,8 @@ export default function TournamentDetailPage() {
   const [rrMax, setRrMax] = useState(5);
   const [seMin, setSeMin] = useState(6);
   const [seMax, setSeMax] = useState(32);
+  const [bulkGenMode, setBulkGenMode] = useState<"threshold" | "custom">("threshold");
+  const [thresholdVal, setThresholdVal] = useState(5);
 
   // Bulk import categories states
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -131,6 +134,7 @@ export default function TournamentDetailPage() {
     defaultValues: {
       allowed_gender: "male",
       ruleset_key: "karate_wkf",
+      two_third_places: true,
     },
   });
 
@@ -198,13 +202,21 @@ export default function TournamentDetailPage() {
 
   const handleGenerateAllBracketsWithThresholds = async () => {
     setGeneratingAllBrackets(true);
+    const payload = bulkGenMode === "threshold"
+      ? {
+          round_robin_min: 2,
+          round_robin_max: thresholdVal,
+          single_elimination_min: thresholdVal + 1,
+          single_elimination_max: 64,
+        }
+      : {
+          round_robin_min: rrMin,
+          round_robin_max: rrMax,
+          single_elimination_min: seMin,
+          single_elimination_max: seMax,
+        };
     try {
-      const res = await api.post<{ detail: string }>(`/tournaments/${id}/generate_all_brackets/`, {
-        round_robin_min: rrMin,
-        round_robin_max: rrMax,
-        single_elimination_min: seMin,
-        single_elimination_max: seMax,
-      });
+      const res = await api.post<{ detail: string }>(`/tournaments/${id}/generate_all_brackets/`, payload);
       toast({ title: "Генерація завершена!", description: res.data.detail });
       setBulkDialogOpen(false);
       fetchAll();
@@ -574,6 +586,18 @@ export default function TournamentDetailPage() {
               {errors.allowed_skill_level && <p className="text-xs text-destructive">{errors.allowed_skill_level.message}</p>}
             </div>
 
+            <div className="flex items-center space-x-2 py-2">
+              <input
+                type="checkbox"
+                id="two_third_places"
+                className="w-4 h-4 rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                {...register("two_third_places")}
+              />
+              <Label htmlFor="two_third_places" className="cursor-pointer">
+                Два третіх місця (обидва півфіналісти отримують бронзу)
+              </Label>
+            </div>
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setCatDialogOpen(false)}>Скасувати</Button>
               <Button type="submit" variant="sport" disabled={isCreatingCat}>
@@ -710,42 +734,128 @@ export default function TournamentDetailPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-xs text-muted-foreground">
-              Вкажіть межі кількості учасників для кожного типу сітки. Система автоматично розподілить формат та згенерує сітки для всіх нестворених категорій.
+              Виберіть спосіб автоматичного вибору формату сітки (Кругова або Олімпійська) для нестворених категорій.
             </p>
 
-            <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
-              <span className="text-xs font-bold text-amber-500 uppercase tracking-widest block">Кругова сітка (Round Robin)</span>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Мінімум людей</Label>
-                  <Input type="number" value={rrMin} onChange={(e) => setRrMin(Number(e.target.value))} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Максимум людей</Label>
-                  <Input type="number" value={rrMax} onChange={(e) => setRrMax(Number(e.target.value))} />
-                </div>
-              </div>
+            {/* Вкладки вибору режиму */}
+            <div className="flex rounded-lg border border-border p-0.5 bg-muted/30">
+              <button
+                type="button"
+                onClick={() => setBulkGenMode("threshold")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs font-semibold rounded-md transition-all",
+                  bulkGenMode === "threshold"
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Пороговий режим
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkGenMode("custom")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs font-semibold rounded-md transition-all",
+                  bulkGenMode === "custom"
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Власний режим (діапазони)
+              </button>
             </div>
 
-            <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
-              <span className="text-xs font-bold text-blue-500 uppercase tracking-widest block">Олімпійська сітка (Single Elimination)</span>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Мінімум людей</Label>
-                  <Input type="number" value={seMin} onChange={(e) => setSeMin(Number(e.target.value))} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Максимум людей</Label>
-                  <Input type="number" value={seMax} onChange={(e) => setSeMax(Number(e.target.value))} />
+            {bulkGenMode === "threshold" ? (
+              <div className="space-y-3 pt-1">
+                <div className="border border-border rounded-lg p-4 bg-muted/20 space-y-3">
+                  <Label className="text-xs font-bold text-foreground">
+                    Гранична кількість учасників для Кругової сітки
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      type="number"
+                      min={2}
+                      max={20}
+                      value={thresholdVal}
+                      onChange={(e) => setThresholdVal(Math.max(2, Number(e.target.value)))}
+                      className="w-24 font-mono font-bold text-base"
+                    />
+                    <span className="text-xs text-muted-foreground">учасників</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed pt-3 border-t border-border/40">
+                    ℹ️ Категорії з <strong className="text-amber-500">2–{thresholdVal}</strong> підтвердженими учасниками отримають <strong>Кругову сітку</strong>.<br />
+                    Категорії з <strong className="text-blue-500">{thresholdVal + 1} або більше</strong> учасниками отримають <strong>Олімпійську сітку (на вибування)</strong>.
+                  </p>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
+                  <span className="text-xs font-bold text-amber-500 uppercase tracking-widest block">Кругова сітка (Round Robin)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Мінімум людей</Label>
+                      <Input type="number" value={rrMin} onChange={(e) => setRrMin(Number(e.target.value))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Максимум людей</Label>
+                      <Input type="number" value={rrMax} onChange={(e) => setRrMax(Number(e.target.value))} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
+                  <span className="text-xs font-bold text-blue-500 uppercase tracking-widest block">Олімпійська сітка (Single Elimination)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Мінімум людей</Label>
+                      <Input type="number" value={seMin} onChange={(e) => setSeMin(Number(e.target.value))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Максимум людей</Label>
+                      <Input type="number" value={seMax} onChange={(e) => setSeMax(Number(e.target.value))} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Блоки валідації */}
+                {(() => {
+                  const hasMinMaxError = rrMin > rrMax || seMin > seMax;
+                  const hasOverlap = !hasMinMaxError && rrMax >= seMin;
+                  const hasGap = !hasMinMaxError && rrMax + 1 < seMin;
+
+                  return (
+                    <div className="space-y-2">
+                      {hasMinMaxError && (
+                        <div className="p-2.5 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400 text-[11px] font-medium leading-relaxed">
+                          ⚠️ Помилка: мінімальна межа не може бути більшою за максимальну!
+                        </div>
+                      )}
+                      {hasOverlap && (
+                        <div className="p-2.5 rounded-lg border border-yellow-500/20 bg-yellow-500/5 text-yellow-500 text-[11px] font-medium leading-relaxed">
+                          ⚠️ Увага: діапазони перекриваються! Категорії з {seMin} до {rrMax} учасниками отримають Кругову сітку (вона має вищий пріоритет).
+                        </div>
+                      )}
+                      {hasGap && (
+                        <div className="p-2.5 rounded-lg border border-blue-500/20 bg-blue-500/5 text-blue-400 text-[11px] font-medium leading-relaxed">
+                          ⚠️ Увага: виявлено прогалину! Категорії з {rrMax + 1} до {seMin - 1} учасниками не отримають жодної сітки.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkDialogOpen(false)}>
               Скасувати
             </Button>
-            <Button variant="sport" onClick={handleGenerateAllBracketsWithThresholds} disabled={generatingAllBrackets}>
+            <Button
+              variant="sport"
+              onClick={handleGenerateAllBracketsWithThresholds}
+              disabled={generatingAllBrackets || (bulkGenMode === "custom" && (rrMin > rrMax || seMin > seMax))}
+            >
               {generatingAllBrackets ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
               Згенерувати сітки
             </Button>

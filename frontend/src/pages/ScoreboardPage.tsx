@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import api from "@/lib/api";
 import { useTatamiSocket } from "@/hooks/useTatamiSocket";
@@ -29,10 +29,44 @@ export default function ScoreboardPage() {
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
+  const [categoryResults, setCategoryResults] = useState<any[]>([]);
+  const [resultsCategoryName, setResultsCategoryName] = useState<string>("");
+  const [tatami, setTatami] = useState<any | null>(null);
+
   const { state: timerState, setState: setTimerState, remainingMs } = useTimer(
     DEFAULT_TIMER,
     serverTimeOffset,
   );
+
+  const tatamiRef = useRef<any>(null);
+  useEffect(() => {
+    tatamiRef.current = tatami;
+  }, [tatami]);
+
+  const fetchTatamiMatches = useCallback(async (currentTatami?: any) => {
+    const targetTatami = currentTatami !== undefined ? currentTatami : tatamiRef.current;
+    const activeResultsCatId = targetTatami?.active_results_category;
+    const activeResultsCatName = targetTatami?.active_results_category_name;
+
+    if (activeResultsCatId) {
+      try {
+        const res = await api.get<any[]>(`/categories/${activeResultsCatId}/results/`);
+        setCategoryResults(res.data);
+        if (activeResultsCatName) {
+          setResultsCategoryName(activeResultsCatName);
+        } else {
+          const catRes = await api.get(`/categories/${activeResultsCatId}/`);
+          setResultsCategoryName(catRes.data.name);
+        }
+      } catch {
+        setCategoryResults([]);
+      }
+      return;
+    }
+
+    setCategoryResults([]);
+    setResultsCategoryName("");
+  }, [tid, n]);
 
   // ── Instant Load on Mount (REST fallback to bypass WS handshake delay) ──
   useEffect(() => {
@@ -41,17 +75,31 @@ export default function ScoreboardPage() {
         const { data } = await api.get<Tatami[] | { results: Tatami[] }>(`/tatamis/?tournament=${tid}`);
         const list = Array.isArray(data) ? data : (data as { results: Tatami[] }).results;
         const matchingTatami = list.find(t => t.number === Number(n));
-        if (matchingTatami && matchingTatami.current_match) {
-          const matchObj = matchingTatami.current_match as any;
-          setCurrentMatch(matchObj);
-          setTimerState(matchToTimerState(matchObj));
+        if (matchingTatami) {
+          setTatami(matchingTatami);
+          fetchTatamiMatches(matchingTatami);
+          if (matchingTatami.current_match) {
+            const matchObj = matchingTatami.current_match as any;
+            setCurrentMatch(matchObj);
+            setTimerState(matchToTimerState(matchObj));
+          }
+        } else {
+          fetchTatamiMatches();
         }
       } catch (err) {
         console.error("Error loading initial tatami state:", err);
+        fetchTatamiMatches();
       }
     };
     loadInitialState();
-  }, [tid, n]);
+  }, [tid, n, fetchTatamiMatches]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchTatamiMatches();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchTatamiMatches]);
 
   useTatamiSocket(tid!, n!, {
     onClockOffsetUpdate: setServerTimeOffset,
@@ -63,10 +111,13 @@ export default function ScoreboardPage() {
         setCurrentMatch(null);
         setTimerState(DEFAULT_TIMER);
       }
+      setTatami(data.tatami);
+      fetchTatamiMatches(data.tatami);
     },
     onMatchEvent(_event, match) {
       setCurrentMatch(match);
       setTimerState(matchToTimerState(match));
+      fetchTatamiMatches();
     },
     onTimerState(state, _server_ts_ms) {
       setTimerState({
@@ -84,6 +135,8 @@ export default function ScoreboardPage() {
         setCurrentMatch(null);
         setTimerState(DEFAULT_TIMER);
       }
+      setTatami(data.tatami);
+      fetchTatamiMatches(data.tatami);
     },
   });
 
@@ -95,6 +148,8 @@ export default function ScoreboardPage() {
       timerState={timerState}
       remainingMs={remainingMs}
       tatamiNumber={n!}
+      categoryResults={categoryResults}
+      resultsCategoryName={resultsCategoryName}
     />
   );
 }

@@ -27,7 +27,7 @@ interface TatamiCardProps {
 }
 
 function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
-  const { isOrganizer } = useAuth();
+  const { isOrganizer, user } = useAuth();
   const [tatami, setTatami] = useState<Tatami>(initialTatami);
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
   const [connected, setConnected] = useState(false);
@@ -235,8 +235,8 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
               })()}
             </div>
 
-            {/* Open operator panel link for organizer, scoreboard for spectator */}
-            {isOrganizer ? (
+            {/* Open operator panel link for organizer/judge, scoreboard for spectator */}
+            {isOrganizer || (user?.role === "judge" && tatami.assigned_judge === user.id) ? (
               <Link
                 to={`/operator/tournament/${tid}/tatami/${tatami.number}`}
                 className="block mt-auto text-center text-xs font-semibold text-amber-500 hover:text-amber-400 hover:underline pt-2"
