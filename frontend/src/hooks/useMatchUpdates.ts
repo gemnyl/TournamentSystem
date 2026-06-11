@@ -52,7 +52,7 @@ export function useMatchUpdates(
       oldWs.onclose = null;
       try {
         oldWs.close();
-      } catch (e) {
+      } catch {
         // ігноруємо помилки
       }
       wsRef.current = null;
@@ -142,7 +142,7 @@ export function useMatchUpdates(
         oldWs.onclose = null;
         try {
           oldWs.close();
-        } catch (e) {
+        } catch {
           // ігноруємо помилки
         }
         wsRef.current = null;

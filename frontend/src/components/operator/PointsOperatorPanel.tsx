@@ -52,7 +52,7 @@ export default function PointsOperatorPanel({
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   const isCompleted = match.status === "completed";
-  const isRoundRobin = (match.category as any)?.bracket_format === "round_robin";
+  const isRoundRobin = (match.category as unknown as { bracket_format?: string })?.bracket_format === "round_robin";
 
   const handleDeclareWinner = async () => {
     if (!winnerDialog) return;
@@ -79,8 +79,8 @@ export default function PointsOperatorPanel({
       onMatchUpdate(data);
       toast({ title: "Зафіксовано нічию!" });
       setDrawDialogOpen(false);
-    } catch (exc: any) {
-      const msg = exc.response?.data?.detail ?? "Помилка встановлення нічиєї";
+    } catch (exc: unknown) {
+      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення нічиєї";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -94,8 +94,8 @@ export default function PointsOperatorPanel({
       onMatchUpdate(data);
       toast({ title: "Поєдинок успішно скинуто!" });
       setResetDialogOpen(false);
-    } catch (exc: any) {
-      const msg = exc.response?.data?.detail ?? "Помилка скидання поєдинку";
+    } catch (exc: unknown) {
+      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
       toast({
         title: "Не вдалося скинути поєдинок",
         description: msg,
@@ -177,7 +177,7 @@ export default function PointsOperatorPanel({
       {/* Match info */}
       <div className="flex items-center justify-between text-xs text-muted-foreground bg-zinc-950/20 px-3 py-1.5 rounded-lg border border-border/20">
         <div>
-          Раунд {match.round_index}, Поєдинок {match.match_order} · Категорія: <span className="font-bold text-foreground">{match.category_name || (match.category as any)?.name}</span>
+          Раунд {match.round_index}, Поєдинок {match.match_order} · Категорія: <span className="font-bold text-foreground">{match.category_name || (match.category as unknown as { name?: string })?.name}</span>
         </div>
         {match.status === "completed" && (
           <span className="text-green-400 font-bold uppercase tracking-wider">Завершено</span>

@@ -94,7 +94,7 @@ export function estimateSchedule(
     const tatami = tatamis.find(t => t.id === tatamiId);
 
     const currentMatchId = tatami?.current_match && typeof tatami.current_match === "object"
-      ? (tatami.current_match as any).id
+      ? (tatami.current_match as { id: number }).id
       : tatami?.current_match;
     const isLive = !!catMatches.find(m => m.status === "ongoing") || (currentMatchId === firstRemaining?.id && currentMatchId !== null && currentMatchId !== undefined);
 

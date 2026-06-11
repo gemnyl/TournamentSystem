@@ -45,7 +45,7 @@ export default function TatamiAdminPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingTatami, setEditingTatami] = useState<Tatami | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Tatami | null>(null);
-  const [judges, setJudges] = useState<any[]>([]);
+  const [judges, setJudges] = useState<Record<string, unknown>[]>([]);
   const [isReassigning, setIsReassigning] = useState<number | null>(null);
 
   // Helper for formatting finish time
@@ -144,7 +144,7 @@ export default function TatamiAdminPage() {
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<TatamiForm>({
     resolver: zodResolver(tatamiSchema),
-    defaultValues: { number: 1, name: "", is_active: true, assigned_judge: "" as any }
+    defaultValues: { number: 1, name: "", is_active: true, assigned_judge: "" }
   });
 
   const fetchData = useCallback(async (silent = false) => {
@@ -153,7 +153,7 @@ export default function TatamiAdminPage() {
       const [tRes, tatamiRes, judgeRes, catRes, matchRes] = await Promise.all([
         api.get<Tournament>(`/tournaments/${tid}/`),
         api.get<Tatami[] | { results: Tatami[] }>(`/tatamis/?tournament=${tid}`),
-        api.get<any[] | { results: any[] }>("/auth/users/?role=judge"),
+        api.get<Record<string, unknown>[] | { results: Record<string, unknown>[] }>("/auth/users/?role=judge"),
         api.get<Category[] | { results: Category[] }>(`/categories/?tournament=${tid}`),
         api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${tid}`),
       ]);
@@ -164,8 +164,8 @@ export default function TatamiAdminPage() {
       setTatamis(list);
 
       const judgeList = Array.isArray(judgeRes.data)
-        ? judgeRes.data
-        : (judgeRes.data as { results: any[] }).results;
+          ? judgeRes.data
+          : (judgeRes.data as { results: Record<string, unknown>[] }).results;
       setJudges(judgeList);
 
       const catList = Array.isArray(catRes.data)
@@ -203,10 +203,10 @@ export default function TatamiAdminPage() {
       // Наш бекенд очікує POST /api/categories/{id}/assign_tatami/ з body { tatami_id: ID | null }
       await api.post(`/categories/${catId}/assign_tatami/`, { tatami_id: newTatamiId });
       toast({ title: "Категорію успішно перепризначено!" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Відкат змін при помилці
       setMatches(backupMatches);
-      const detail = err.response?.data?.detail ?? "Не вдалося перепризначити татамі";
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Не вдалося перепризначити татамі";
       toast({ title: detail, variant: "destructive" });
     } finally {
       setIsReassigning(null);
@@ -258,7 +258,7 @@ export default function TatamiAdminPage() {
   const handleOpenCreate = () => {
     setEditingTatami(null);
     const nextNum = tatamis.length > 0 ? Math.max(...tatamis.map(t => t.number)) + 1 : 1;
-    reset({ number: nextNum, name: "", is_active: true, assigned_judge: "" as any });
+    reset({ number: nextNum, name: "", is_active: true, assigned_judge: "" });
     setDialogOpen(true);
   };
 
@@ -268,7 +268,7 @@ export default function TatamiAdminPage() {
       number: t.number,
       name: t.name ?? "",
       is_active: t.is_active,
-      assigned_judge: t.assigned_judge ? String(t.assigned_judge) as any : "",
+      assigned_judge: t.assigned_judge ? String(t.assigned_judge) : "",
     });
     setDialogOpen(true);
   };
@@ -306,8 +306,8 @@ export default function TatamiAdminPage() {
         toast({ title: "Татамі успішно створено!" });
       }
       setDialogOpen(false);
-    } catch (err: any) {
-      const detail = err.response?.data?.detail ?? err.response?.data?.non_field_errors?.[0] ?? "Помилка при збереженні татамі";
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string; non_field_errors?: string[] } } }).response?.data?.detail ?? (err as { response?: { data?: { non_field_errors?: string[] } } }).response?.data?.non_field_errors?.[0] ?? "Помилка при збереженні татамі";
       toast({ title: detail, variant: "destructive" });
     } finally {
       setIsSubmitting(false);
@@ -396,7 +396,7 @@ export default function TatamiAdminPage() {
             </TableHeader>
             <TableBody>
               {tatamis.map((t) => {
-                const currentMatchObj = t.current_match as any;
+                const currentMatchObj = t.current_match as Match | number | null;
                 const hasMatch = currentMatchObj && typeof currentMatchObj === "object";
                 const matchText = hasMatch
                   ? `R${currentMatchObj.round_index}.${currentMatchObj.match_order}: ${

@@ -192,8 +192,8 @@ export default function TournamentDetailPage() {
       const res = await api.post<{ detail: string }>(`/tournaments/${id}/auto_distribute_tatamis/`);
       toast({ title: "Розподіл завершено!", description: res.data.detail });
       fetchAll();
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || "Помилка розподілу по татамі";
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Помилка розподілу по татамі";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setDistributingTatamis(false);
@@ -263,8 +263,8 @@ export default function TournamentDetailPage() {
       ]);
       setTournament(tRes.data);
       setCategories(Array.isArray(cRes.data) ? cRes.data : cRes.data.results);
-      setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as any).results || []);
-      setMatches(Array.isArray(matchRes.data) ? matchRes.data : (matchRes.data as any).results || []);
+      setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as { results: Tatami[] }).results || []);
+      setMatches(Array.isArray(matchRes.data) ? matchRes.data : (matchRes.data as { results: Match[] }).results || []);
     } finally {
       setIsLoading(false);
     }
@@ -632,7 +632,7 @@ export default function TournamentDetailPage() {
                   <SelectValue placeholder="Оберіть вид спорту..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {Array.from(new Set(rulesets.map(r => r.sport_type).filter(Boolean))).map((sport: any) => (
+                  {Array.from(new Set(rulesets.map(r => r.sport_type).filter(Boolean))).map((sport: string) => (
                     <SelectItem key={sport} value={sport}>
                       {formatSportType(sport)}
                     </SelectItem>

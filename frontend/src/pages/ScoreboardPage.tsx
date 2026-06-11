@@ -29,28 +29,28 @@ export default function ScoreboardPage() {
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
-  const [categoryResults, setCategoryResults] = useState<any[]>([]);
+  const [categoryResults, setCategoryResults] = useState<Record<string, unknown>[]>([]);
   const [resultsCategoryName, setResultsCategoryName] = useState<string>("");
-  const [tatami, setTatami] = useState<any | null>(null);
+  const [tatami, setTatami] = useState<Tatami | null>(null);
 
   const { state: timerState, setState: setTimerState, remainingMs } = useTimer(
     DEFAULT_TIMER,
     serverTimeOffset,
   );
 
-  const tatamiRef = useRef<any>(null);
+  const tatamiRef = useRef<Tatami | null>(null);
   useEffect(() => {
     tatamiRef.current = tatami;
   }, [tatami]);
 
-  const fetchTatamiMatches = useCallback(async (currentTatami?: any) => {
+  const fetchTatamiMatches = useCallback(async (currentTatami?: Tatami) => {
     const targetTatami = currentTatami !== undefined ? currentTatami : tatamiRef.current;
     const activeResultsCatId = targetTatami?.active_results_category;
     const activeResultsCatName = targetTatami?.active_results_category_name;
 
     if (activeResultsCatId) {
       try {
-        const res = await api.get<any[]>(`/categories/${activeResultsCatId}/results/`);
+        const res = await api.get<Record<string, unknown>[]>(`/categories/${activeResultsCatId}/results/`);
         setCategoryResults(res.data);
         if (activeResultsCatName) {
           setResultsCategoryName(activeResultsCatName);
@@ -66,6 +66,7 @@ export default function ScoreboardPage() {
 
     setCategoryResults([]);
     setResultsCategoryName("");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tid, n]);
 
   // ── Instant Load on Mount (REST fallback to bypass WS handshake delay) ──
@@ -79,7 +80,7 @@ export default function ScoreboardPage() {
           setTatami(matchingTatami);
           fetchTatamiMatches(matchingTatami);
           if (matchingTatami.current_match) {
-            const matchObj = matchingTatami.current_match as any;
+            const matchObj = matchingTatami.current_match as Match;
             setCurrentMatch(matchObj);
             setTimerState(matchToTimerState(matchObj));
           }
@@ -92,6 +93,7 @@ export default function ScoreboardPage() {
       }
     };
     loadInitialState();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tid, n, fetchTatamiMatches]);
 
   useEffect(() => {
@@ -119,7 +121,7 @@ export default function ScoreboardPage() {
       setTimerState(matchToTimerState(match));
       fetchTatamiMatches();
     },
-    onTimerState(state, _server_ts_ms) {
+    onTimerState(state) {
       setTimerState({
         status: state.status,
         started_at_ms: state.started_at_ms,

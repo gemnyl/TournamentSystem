@@ -68,7 +68,7 @@ type CreateForm = z.infer<typeof createSchema>;
 export default function TournamentListPage() {
   const { isOrganizer } = useAuth();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
-  const [rulesets, setRulesets] = useState<any[]>([]);
+  const [rulesets, setRulesets] = useState<Record<string, unknown>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -216,7 +216,7 @@ export default function TournamentListPage() {
                   <SelectValue placeholder="Оберіть вид спорту..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {Array.from(new Set(rulesets.map(r => r.sport_type).filter(Boolean))).map((sport: any) => (
+                  {Array.from(new Set(rulesets.map(r => r.sport_type as string).filter(Boolean))).map((sport) => (
                     <SelectItem key={sport} value={sport}>
                       {formatSportType(sport)}
                     </SelectItem>

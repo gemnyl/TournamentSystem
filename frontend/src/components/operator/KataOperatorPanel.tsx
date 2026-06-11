@@ -64,8 +64,8 @@ export default function KataOperatorPanel({
       setSelectedAka(null);
       setSelectedAo(null);
       toast({ title: `Категорію налаштовано на ${count} суддів.` });
-    } catch (exc: any) {
-      const msg = exc.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+    } catch (exc: unknown) {
+      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -83,8 +83,8 @@ export default function KataOperatorPanel({
       setSelectedAo(null);
       toast({ title: `Поєдинок налаштовано на ${count} суддів.` });
       setChangeJudgesOpen(false);
-    } catch (exc: any) {
-      const msg = exc.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+    } catch (exc: unknown) {
+      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -103,8 +103,8 @@ export default function KataOperatorPanel({
       setSelectedAo(null);
       toast({ title: `Категорію налаштовано на ${count} суддів.` });
       setChangeJudgesOpen(false);
-    } catch (exc: any) {
-      const msg = exc.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+    } catch (exc: unknown) {
+      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -183,8 +183,8 @@ export default function KataOperatorPanel({
       });
       onMatchUpdate(data);
       toast({ title: "Результат Ката зафіксовано!" });
-    } catch (exc: any) {
-      const msg = exc.response?.data?.detail ?? "Помилка фіксації результату";
+    } catch (exc: unknown) {
+      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка фіксації результату";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -200,8 +200,8 @@ export default function KataOperatorPanel({
       setSelectedAo(null);
       toast({ title: "Поєдинок успішно скинуто!" });
       setResetDialogOpen(false);
-    } catch (exc: any) {
-      const msg = exc.response?.data?.detail ?? "Помилка скидання поєдинку";
+    } catch (exc: unknown) {
+      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
       toast({
         title: "Не вдалося скинути поєдинок",
         description: msg,
@@ -231,7 +231,7 @@ export default function KataOperatorPanel({
         <div>
           Раунд {match.round_index}, Поєдинок {match.match_order} · Категорія:{" "}
           <span className="font-bold text-foreground">
-            {match.category_name || (match.category as any)?.name}
+            {match.category_name || (match.category as unknown as { name?: string })?.name}
           </span>
         </div>
         {isCompleted && (

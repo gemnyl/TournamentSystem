@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState} from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2, Clock, Trophy, Award, Unlock
@@ -81,12 +81,12 @@ export default function CategoryDetailPage() {
   const [selectedTatamiId, setSelectedTatamiId] = useState<string>("");
   const [assigningTatami, setAssigningTatami] = useState(false);
   // Re-use rulesets
-  const [rulesets, setRulesets] = useState<any[]>([]);
+  const [rulesets, setRulesets] = useState<Record<string, unknown>[]>([]);
 
-  const categoryMatches = matches.filter((m: any) => m.category === Number(id));
-  const firstMatchWithTatami = categoryMatches?.find((m: any) => m.tatami !== null);
+  const categoryMatches = matches.filter((m: Match) => m.category === Number(id));
+  const firstMatchWithTatami = categoryMatches?.find((m: Match) => m.tatami !== null);
   const categoryTatami = (firstMatchWithTatami && Array.isArray(tatamis))
-    ? tatamis.find((t: any) => t.id === firstMatchWithTatami.tatami)
+    ? tatamis.find((t: Tatami) => t.id === firstMatchWithTatami.tatami)
     : undefined;
   const canFinalizeOrUnlock = isOrganizer || (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id);
 
@@ -96,7 +96,7 @@ export default function CategoryDetailPage() {
 
   // Tab states and results engine states
   const [activeTab, setActiveTab] = useState<"registrations" | "results">("registrations");
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<Record<string, unknown>[]>([]);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
   const [isSavingResults, setIsSavingResults] = useState(false);
   const [placeOverrides, setPlaceOverrides] = useState<Record<number, number | null>>({});
@@ -124,14 +124,14 @@ export default function CategoryDetailPage() {
         api.get<Tournament>(`/tournaments/${catRes.data.tournament}/`),
         api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${catRes.data.tournament}`),
       ]);
-      setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as any).results || []);
+      setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as { results: Tatami[] }).results || []);
       setTournament(tournRes.data);
 
-      const allMatches = Array.isArray(matchRes.data) ? matchRes.data : (matchRes.data as any).results || [];
+      const allMatches = Array.isArray(matchRes.data) ? matchRes.data : (matchRes.data as { results: Match[] }).results || [];
       setMatches(allMatches);
 
-      const categoryMatches = allMatches.filter((m: any) => m.category === Number(id));
-      const firstMatchWithTatami = categoryMatches?.find((m: any) => m.tatami !== null);
+      const categoryMatches = allMatches.filter((m: Match) => m.category === Number(id));
+      const firstMatchWithTatami = categoryMatches?.find((m: Match) => m.tatami !== null);
       if (firstMatchWithTatami) {
         setSelectedTatamiId(String(firstMatchWithTatami.tatami));
       } else {
@@ -194,19 +194,21 @@ export default function CategoryDetailPage() {
   const handleOpenEditCat = async () => {
     if (!category) return;
     try {
-      const { data } = await api.get<any[]>("/rulesets/");
+      const { data } = await api.get<Record<string, unknown>[]>("/rulesets/");
       setRulesets(data);
-    } catch {}
+    } catch {
+      // intentionally empty
+    }
     editCategoryForm.reset({
       name: category.name,
-      allowed_gender: category.allowed_gender as any,
+      allowed_gender: category.allowed_gender as "male" | "female" | "mixed",
       min_age: category.min_age,
       max_age: category.max_age,
       min_weight: category.min_weight ?? undefined,
       max_weight: category.max_weight ?? undefined,
-      bracket_format: category.bracket_format as any,
+      bracket_format: category.bracket_format as "single_elimination" | "round_robin",
       ruleset_key: category.ruleset_key,
-      match_duration_seconds: category.match_duration_seconds ? String(category.match_duration_seconds) as any : "",
+      match_duration_seconds: category.match_duration_seconds ? String(category.match_duration_seconds) : "",
       allowed_skill_level: category.allowed_skill_level ?? "",
       two_third_places: category.two_third_places ?? true,
     });
@@ -311,7 +313,7 @@ export default function CategoryDetailPage() {
     if (!silent) setIsLoadingResults(true);
     try {
       const [resultsRes, regRes] = await Promise.all([
-        api.get<any[]>(`/categories/${id}/results/`),
+        api.get<Record<string, unknown>[]>(`/categories/${id}/results/`),
         api.get<PaginatedResponse<Registration> | Registration[]>(`/registrations/?category=${id}`),
       ]);
       setResults(resultsRes.data);
@@ -356,6 +358,7 @@ export default function CategoryDetailPage() {
       setIsSavingResults(false);
     }
   };
+
 
   useEffect(() => {
     if (activeTab === "results") {
@@ -598,7 +601,7 @@ export default function CategoryDetailPage() {
           ) : (
             (() => {
               const hasMatches = categoryMatches.length > 0;
-              const allMatchesCompleted = hasMatches && categoryMatches.every((m: any) => m.status === "completed");
+              const allMatchesCompleted = hasMatches && categoryMatches.every((m: Match) => m.status === "completed");
               const resultsPersisted = category.results_finalized ?? false;
 
               if (!hasMatches) {
@@ -690,7 +693,7 @@ export default function CategoryDetailPage() {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          results.map((res: any) => {
+                          results.map((res: Record<string, unknown>) => {
                             const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
                             const medal =
                               placeVal === 1
@@ -921,7 +924,7 @@ export default function CategoryDetailPage() {
                 <Label>Стать</Label>
                 <Select
                   value={editCategoryForm.watch("allowed_gender") || "male"}
-                  onValueChange={(v) => editCategoryForm.setValue("allowed_gender", v as any)}
+                  onValueChange={(v) => editCategoryForm.setValue("allowed_gender", v as "male" | "female" | "mixed")}
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>

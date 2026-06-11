@@ -71,7 +71,7 @@ interface KumiteWKFScoreboardProps {
   timerState: TimerState;
   remainingMs: number;
   tatamiNumber: string;
-  categoryResults?: any[];
+  categoryResults?: { place?: number | null; id?: number; name?: string; club?: string; registration?: { id?: number; athlete?: { full_name?: string; club?: { name?: string; region?: string } } } }[];
   resultsCategoryName?: string;
 }
 
@@ -344,7 +344,7 @@ export default function KumiteWKFScoreboard({
 
               {/* Standings List */}
               <div className="w-full max-w-3xl bg-zinc-950/60 border border-zinc-800/60 rounded-2xl p-6 shadow-2xl backdrop-blur-md space-y-3">
-                {finalStandings.map((res: any) => {
+                {finalStandings.map((res) => {
                   const place = res.place;
                   const name = res.registration?.athlete?.full_name ?? res.name ?? "—";
                   const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";

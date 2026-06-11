@@ -13,7 +13,7 @@ export default function BracketPage() {
   const [category, setCategory] = useState<Category | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
-  const [standings, setStandings] = useState<any[]>([]);
+  const [standings, setStandings] = useState<Record<string, unknown>[]>([]);
 
   const fetchBracket = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -33,7 +33,7 @@ export default function BracketPage() {
       setCategory(catRes.data);
 
       try {
-        const res = await api.get<any[]>(`/categories/${id}/results/`);
+        const res = await api.get<Record<string, unknown>[]>(`/categories/${id}/results/`);
         setStandings(res.data.filter(r => r.place != null && r.place > 0).sort((a, b) => a.place - b.place));
       } catch {
         setStandings([]);
@@ -62,7 +62,7 @@ export default function BracketPage() {
       };
     });
     // Silently re-fetch standings to keep standings updated in real-time
-    api.get<any[]>(`/categories/${id}/results/`).then((res) => {
+    api.get<Record<string, unknown>[]>(`/categories/${id}/results/`).then((res) => {
       setStandings(res.data.filter(r => r.place != null && r.place > 0).sort((a, b) => a.place - b.place));
     }).catch(() => {});
   }, [id, fetchBracket]);
@@ -138,7 +138,7 @@ export default function BracketPage() {
             <Trophy className="w-4 h-4 text-yellow-500" /> Переможці та призери
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
-            {standings.map((res: any) => {
+            {standings.map((res: Record<string, unknown>) => {
               const place = res.place;
               const name = res.registration?.athlete?.full_name ?? res.name;
               const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";

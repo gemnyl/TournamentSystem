@@ -32,7 +32,7 @@ function matchToTimerState(m: Match): TimerState {
   };
 }
 
-function getTatamiMatchId(currentMatch: any): number | null {
+function getTatamiMatchId(currentMatch: Match | null | number | Record<string, unknown>): number | null {
   if (!currentMatch) return null;
   if (typeof currentMatch === "object") return currentMatch.id;
   return currentMatch;
@@ -74,6 +74,7 @@ export default function OperatorPanelPage() {
     setSelectedCategoryId(null);
     setIsBracketModalOpen(false);
     setSelectedCategoryBracket(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tid, n]);
 
 
@@ -85,7 +86,7 @@ export default function OperatorPanelPage() {
   const [savingResultsCategoryId, setSavingResultsCategoryId] = useState<number | null>(null);
 
   const [middleTab, setMiddleTab] = useState<"matches" | "results">("matches");
-  const [categoryResults, setCategoryResults] = useState<any[]>([]);
+  const [categoryResults, setCategoryResults] = useState<Record<string, unknown>[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [placeOverrides, setPlaceOverrides] = useState<Record<number, number | null>>({});
 
@@ -95,7 +96,7 @@ export default function OperatorPanelPage() {
       const { data } = await api.get<Category[]>(`/categories/?tournament=${tid}`);
       const list = Array.isArray(data) ? data : (data as { results: Category[] }).results || [];
       setCategories(list);
-    } catch {}
+    } catch { /* no-op */ }
   }, [tid]);
 
   useEffect(() => {
@@ -108,7 +109,7 @@ export default function OperatorPanelPage() {
       return;
     }
     try {
-      const { data } = await api.get<any[]>(`/categories/${selectedCategoryId}/results/`);
+      const { data } = await api.get<Record<string, unknown>[]>(`/categories/${selectedCategoryId}/results/`);
       setCategoryResults(data);
     } catch {
       setCategoryResults([]);
@@ -203,7 +204,7 @@ export default function OperatorPanelPage() {
     setLoadingBracket(true);
     try {
       const [bracketRes, catRes] = await Promise.all([
-        api.get<any[]>(`/matches/bracket/?category=${selectedCategoryId}`),
+        api.get<Record<string, unknown>[]>(`/matches/bracket/?category=${selectedCategoryId}`),
         api.get<Category>(`/categories/${selectedCategoryId}/`),
       ]);
       const rounds = bracketRes.data.map(r => r.matches);
@@ -291,7 +292,7 @@ export default function OperatorPanelPage() {
       fetchCategories();
       fetchCategoryResults();
     },
-    onTimerState(state, _server_ts_ms) {
+    onTimerState(state) {
       setTimerState({
         status: state.status,
         started_at_ms: state.started_at_ms,
@@ -372,8 +373,8 @@ export default function OperatorPanelPage() {
       fetchMatches();
       fetchCategories();
       fetchCategoryResults();
-    } catch (err: any) {
-      const msg = err.response?.data?.detail ?? "Помилка при призначенні поєдинку";
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка при призначенні поєдинку";
       toast({ title: msg, variant: "destructive" });
     }
   };
@@ -390,8 +391,8 @@ export default function OperatorPanelPage() {
       fetchMatches();
       fetchCategories();
       fetchCategoryResults();
-    } catch (err: any) {
-      const msg = err.response?.data?.detail ?? "Помилка при звільненні татамі";
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка при звільненні татамі";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -445,8 +446,8 @@ export default function OperatorPanelPage() {
       fetchMatches();
       fetchCategories();
       fetchCategoryResults();
-    } catch (err: any) {
-      const msg = err.response?.data?.detail ?? "Помилка переходу до наступного бою";
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка переходу до наступного бою";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -494,8 +495,8 @@ export default function OperatorPanelPage() {
       fetchMatches();
       fetchCategories();
       fetchCategoryResults();
-    } catch (err: any) {
-      const msg = err.response?.data?.detail ?? "Помилка фіксації результату";
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка фіксації результату";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -1067,7 +1068,7 @@ export default function OperatorPanelPage() {
                         const dbCat = categories.find(c => c.id === selectedCategoryId);
                         const resultsPersisted = dbCat?.results_finalized ?? false;
 
-                        return categoryResults.map((res: any) => {
+                        return categoryResults.map((res: Record<string, unknown>) => {
                           const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
 
                           const medal =
@@ -1230,7 +1231,7 @@ export default function OperatorPanelPage() {
                           {categoryResults
                             .filter((r) => r.place != null && r.place > 0)
                             .sort((a, b) => a.place - b.place)
-                            .map((res: any) => {
+                            .map((res: Record<string, unknown>) => {
                               const place = res.place;
                               const name = res.registration?.athlete?.full_name ?? res.name ?? "—";
                               const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
@@ -1349,7 +1350,7 @@ export default function OperatorPanelPage() {
                         <Trophy className="w-3.5 h-3.5 text-yellow-500" /> Переможці та призери
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                        {standings.map((res: any) => {
+                        {standings.map((res: Record<string, unknown>) => {
                           const place = res.place;
                           const name = res.registration?.athlete?.full_name ?? res.name;
                           const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";

@@ -148,7 +148,7 @@ class Category(models.Model):
         default=True,
         verbose_name="Два третіх місця",
         help_text=(
-            "Якщо увімкнено, обидва спортсмени, які програли в " "півфіналах, отримують 3-є місце."
+            "Якщо увімкнено, обидва спортсмени, які програли в півфіналах, отримують 3-є місце."
         ),
     )
     judges_count = models.PositiveSmallIntegerField(

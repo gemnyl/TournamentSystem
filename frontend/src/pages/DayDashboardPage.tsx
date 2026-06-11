@@ -69,7 +69,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
         duration_ms: match.timer_duration_ms,
       });
     },
-    onTimerState(state, _server_ts_ms) {
+    onTimerState(state) {
       setTimerState({
         status: state.status,
         started_at_ms: state.started_at_ms,

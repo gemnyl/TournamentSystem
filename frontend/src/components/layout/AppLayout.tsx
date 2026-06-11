@@ -10,6 +10,7 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import type { Tatami } from "@/types/api";
 
 const ROLE_LABELS: Record<string, string> = {
   organizer: "Організатор",
@@ -42,7 +43,7 @@ export default function AppLayout() {
   const { user, logout, isAuthenticated, isInitialized, isOrganizer, fetchMe } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [judgeTatamis, setJudgeTatamis] = useState<any[]>([]);
+  const [judgeTatamis, setJudgeTatamis] = useState<Tatami[]>([]);
 
   // Перевіряємо сесію один раз при старті
   useEffect(() => {
@@ -52,10 +53,10 @@ export default function AppLayout() {
 
   useEffect(() => {
     if (isAuthenticated && user?.role === "judge") {
-      api.get<any[]>("/tatamis/")
+      api.get<Tatami[]>("/tatamis/")
         .then((res) => {
-          const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
-          const assigned = list.filter((t: any) => t.assigned_judge === user.id);
+          const list = Array.isArray(res.data) ? res.data : (res.data as { results: Tatami[] }).results || [];
+          const assigned = list.filter((t: Tatami) => t.assigned_judge === user.id);
           // Сортуємо активні турніри спочатку
           const sorted = [...assigned].sort((a, b) => {
             if (a.tournament_status === "active" && b.tournament_status !== "active") return -1;
