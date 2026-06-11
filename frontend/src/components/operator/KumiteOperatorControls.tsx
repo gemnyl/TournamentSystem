@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Play, Pause, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, getOptimisticTimerUpdate } from "@/lib/utils";
 import api from "@/lib/api";
 import type { Match, ScoreAction } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
@@ -64,32 +64,19 @@ export default function KumiteOperatorControls({
     post(`/matches/${match.id}/set_senshu/`, { value });
 
   const timerAction = (path: string, body?: Record<string, unknown>) => {
-    let reqBody = body;
-    if (path === "pause") {
-      const serverNow = Date.now() + serverTimeOffset;
-      const currentElapsed = timerState.started_at_ms === null
-        ? timerState.elapsed_ms
-        : timerState.elapsed_ms + (serverNow - timerState.started_at_ms);
-      const elapsed_ms = Math.round(Math.max(0, currentElapsed));
-      reqBody = { ...body, elapsed_ms };
-
-      // Optimistic update to freeze local timer instantly on click
-      onMatchUpdate({
-        ...match,
-        timer_status: "paused",
-        timer_started_at: null,
-        timer_elapsed_ms: elapsed_ms,
-      });
-    } else if (path === "resume" || path === "start") {
-      const estimatedStart = Date.now() + serverTimeOffset;
-      // Optimistic update to start local ticking instantly on click
-      onMatchUpdate({
-        ...match,
-        timer_status: "running",
-        timer_started_at: new Date(estimatedStart).toISOString(),
-      });
+    const { updatedMatch, reqBody } = getOptimisticTimerUpdate(
+      path,
+      timerState,
+      serverTimeOffset,
+      match
+    );
+    if (updatedMatch) {
+      onMatchUpdate(updatedMatch);
     }
-    return post(`/matches/${match.id}/timer/${path}/`, reqBody);
+    return post(`/matches/${match.id}/timer/${path}/`, {
+      ...body,
+      ...reqBody,
+    });
   };
 
   const isCompleted = match.status === "completed";

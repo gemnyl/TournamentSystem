@@ -11,7 +11,7 @@ import {
 import { toast } from "@/hooks/use-toast";
 import api from "@/lib/api";
 import KumiteOperatorControls from "./KumiteOperatorControls";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import type { Match, ScoreAction } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
 
@@ -130,15 +130,14 @@ export default function PointsOperatorPanel({
   const handleResetMatch = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post<Match>(`/matches/${match.id}/reset_match/`);
-      onMatchUpdate(data);
+      const resp = await api.post<Match>(`/matches/${match.id}/reset_match/`);
       toast({ title: "Поєдинок успішно скинуто!" });
       setResetDialogOpen(false);
-    } catch (error_: unknown) {
-      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
+      onMatchUpdate(resp.data);
+    } catch (err) {
       toast({
         title: "Не вдалося скинути поєдинок",
-        description: msg,
+        description: getErrorMessage(err, "Помилка скидання поєдинку"),
         variant: "destructive",
       });
     } finally {
@@ -398,24 +397,6 @@ export default function PointsOperatorPanel({
         </DialogContent>
       </Dialog>
 
-      {/* ── Draw dialog ── */}
-      <Dialog open={drawDialogOpen} onOpenChange={setDrawDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Зафіксувати нічию</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Ви впевнені, що хочете зафіксувати результат цього поєдинку як нічию? Ця дія доступна лише для кругової сітки.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDrawDialogOpen(false)}>Скасувати</Button>
-            <Button disabled={busy} onClick={handleSetDraw}>
-              Підтвердити
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* ── Reset dialog ── */}
       <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
         <DialogContent>
@@ -444,6 +425,24 @@ export default function PointsOperatorPanel({
             <Button variant="outline" onClick={() => setResetDialogOpen(false)}>Скасувати</Button>
             <Button variant="destructive" disabled={busy} onClick={handleResetMatch}>
               Скинути та почати заново
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Draw dialog ── */}
+      <Dialog open={drawDialogOpen} onOpenChange={setDrawDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Зафіксувати нічию</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Ви впевнені, що хочете зафіксувати результат цього поєдинку як нічию? Ця дія доступна лише для кругової сітки.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDrawDialogOpen(false)}>Скасувати</Button>
+            <Button disabled={busy} onClick={handleSetDraw}>
+              Підтвердити
             </Button>
           </DialogFooter>
         </DialogContent>

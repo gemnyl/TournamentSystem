@@ -72,8 +72,8 @@ class TournamentAPITestCase(TestCase):
 
         # Базова категорія
         self.category = Category.objects.create(
+            name="Чоловіки -75кг (Турнір)",
             tournament=self.tournament,
-            name="Чоловіки -75кг",
             allowed_gender=Category.AllowedGender.MALE,
             min_age=18,
             max_age=35,
@@ -86,7 +86,7 @@ class TournamentAPITestCase(TestCase):
         """Авторизує клієнта від імені вказаного користувача."""
         self.client.force_authenticate(user=user)
 
-    def _create_athlete(self, idx, club=None):
+    def _create_athlete(self, idx, club=None, category=None):
         """Хелпер: створює атлета з підтвердженою реєстрацією."""
         club = club or self.club_a
         athlete = Athlete.objects.create(
@@ -100,7 +100,7 @@ class TournamentAPITestCase(TestCase):
         )
         reg = Registration.objects.create(
             athlete=athlete,
-            category=self.category,
+            category=category or self.category,
             seed_number=idx,
             recorded_weight=73,
             status=Registration.Status.CONFIRMED,
@@ -285,16 +285,19 @@ class TestBracketGeneration(TournamentAPITestCase):
 
         self._login(self.coach)
         athlete = Athlete.objects.create(
+            first_name="BlockedName",
+            last_name="BlockedLastName",
             coach=self.coach,
-            club=self.club_a,
-            first_name="Блокований",
-            last_name="Атлет",
-            gender=Athlete.Gender.MALE,
-            birth_date=date(2001, 5, 10),
-            base_weight=73,
+            club=self.club_b,
+            gender=Athlete.Gender.FEMALE,
+            birth_date=date(2002, 6, 20),
+            base_weight=65.0,
         )
-        payload = {"athlete_id": athlete.pk, "category": self.category.pk}
-        response = self.client.post("/api/registrations/", payload, format="json")
+        response = self.client.post(
+            "/api/registrations/",
+            {"athlete_id": athlete.pk, "category": self.category.pk},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn(
             "Реєстрація можлива лише тоді",
@@ -370,9 +373,94 @@ class TestCategoryNLPImport(TournamentAPITestCase):
         self.assertIsNone(cat5.min_weight)
         self.assertEqual(float(cat5.max_weight), 30.0)
 
+    def test_parse_category_name_various_formats(self):
+        from apps.tournaments.views import parse_category_name
+
+        # Test genders
+        res = parse_category_name("boy 18+", "Karate")
+        self.assertEqual(res["allowed_gender"], Category.AllowedGender.MALE)
+
+        res = parse_category_name("girl 18+", "Karate")
+        self.assertEqual(res["allowed_gender"], Category.AllowedGender.FEMALE)
+
+        res = parse_category_name("mixed 18+", "Karate")
+        self.assertEqual(res["allowed_gender"], Category.AllowedGender.MIXED)
+
+        # Test age formats
+        # Plus match: 18 і старше / 18 years and older / 18+
+        res = parse_category_name("18 років і старше", "Karate")
+        self.assertEqual(res["min_age"], 18)
+        self.assertEqual(res["max_age"], 99)
+
+        # Under match: до 18 років / under 18 yo
+        res = parse_category_name("under 18 yo", "Karate")
+        self.assertEqual(res["min_age"], 0)
+        self.assertEqual(res["max_age"], 18)
+
+        # Simple age: 12 років / 12 yo
+        res = parse_category_name("12 yo", "Karate")
+        self.assertEqual(res["min_age"], 12)
+        self.assertEqual(res["max_age"], 12)
+
+        # Test weight formats
+        # w_under: under 45 / -30 / до 40 кг
+        res = parse_category_name("18+ under 45kg", "Karate")
+        self.assertIsNone(res["min_weight"])
+        self.assertEqual(res["max_weight"], 45.0)
+
+        # w_over: over 70 / 70+ / 70 plus / від 70
+        res = parse_category_name("18+ over 70 plus", "Karate")
+        self.assertEqual(res["min_weight"], 70.0)
+        self.assertIsNone(res["max_weight"])
+
+        res = parse_category_name("18+ 70 plus", "Karate")
+        self.assertEqual(res["min_weight"], 70.0)
+        self.assertIsNone(res["max_weight"])
+
+        res = parse_category_name("18+ 70+", "Karate")
+        self.assertEqual(res["min_weight"], 70.0)
+        self.assertIsNone(res["max_weight"])
+
+        res = parse_category_name("18+ 70 плюс", "Karate")
+        self.assertEqual(res["min_weight"], 70.0)
+        self.assertIsNone(res["max_weight"])
+
+        # Ruleset key based on sport type
+        res = parse_category_name("18+", "Shobu Ippon")
+        self.assertEqual(res["ruleset_key"], "shobu_ippon")
+
+        # Invalid weight digits causing ValueError on conversion
+        res = parse_category_name("18+ .+", "Karate")
+        self.assertIsNone(res["min_weight"])
+        res = parse_category_name("18+ .plus", "Karate")
+        self.assertIsNone(res["min_weight"])
+
 
 class CategoryResultsTestCase(TournamentAPITestCase):
     """Тести для розрахунку результатів категорії (Results Engine)."""
+
+    def _find_match(self, matches, r_a, r_b):
+        return [
+            m
+            for m in matches
+            if (m.reg_first_id == r_a.id and m.reg_second_id == r_b.id)
+            or (m.reg_first_id == r_b.id and m.reg_second_id == r_a.id)
+        ][0]
+
+    def _play_match(self, matches, r_winner, r_loser, score_winner, score_loser):
+        from apps.matches.models import Match
+
+        m = self._find_match(matches, r_winner, r_loser)
+        m.status = Match.Status.COMPLETED
+        m.winner = r_winner
+        if m.reg_first_id == r_winner.id:
+            m.score_first = score_winner
+            m.score_second = score_loser
+        else:
+            m.score_first = score_loser
+            m.score_second = score_winner
+        m.save()
+        return m
 
     def test_single_elimination_results(self):
         from apps.brackets.services import BracketGenerator
@@ -431,7 +519,6 @@ class CategoryResultsTestCase(TournamentAPITestCase):
 
     def test_round_robin_results(self):
         from apps.brackets.services import BracketGenerator
-        from apps.matches.models import Match
         from apps.tournaments.services import calculate_category_standings
 
         # Змінюємо формат категорії на круговий
@@ -448,58 +535,13 @@ class CategoryResultsTestCase(TournamentAPITestCase):
 
         # Зіграємо сутички:
         # Match 1: r1 vs r2. Winner r1, score 3:0
-        m1 = [
-            m
-            for m in matches
-            if (m.reg_first_id == r1.id and m.reg_second_id == r2.id)
-            or (m.reg_first_id == r2.id and m.reg_second_id == r1.id)
-        ][0]
-        m1.status = Match.Status.COMPLETED
-        if m1.reg_first_id == r1.id:
-            m1.winner = r1
-            m1.score_first = 3
-            m1.score_second = 0
-        else:
-            m1.winner = r1
-            m1.score_first = 0
-            m1.score_second = 3
-        m1.save()
+        self._play_match(matches, r1, r2, 3, 0)
 
         # Match 2: r2 vs r3. Winner r2, score 2:1
-        m2 = [
-            m
-            for m in matches
-            if (m.reg_first_id == r2.id and m.reg_second_id == r3.id)
-            or (m.reg_first_id == r3.id and m.reg_second_id == r2.id)
-        ][0]
-        m2.status = Match.Status.COMPLETED
-        if m2.reg_first_id == r2.id:
-            m2.winner = r2
-            m2.score_first = 2
-            m2.score_second = 1
-        else:
-            m2.winner = r2
-            m2.score_first = 1
-            m2.score_second = 2
-        m2.save()
+        self._play_match(matches, r2, r3, 2, 1)
 
         # Match 3: r3 vs r1. Winner r3, score 1:0
-        m3 = [
-            m
-            for m in matches
-            if (m.reg_first_id == r3.id and m.reg_second_id == r1.id)
-            or (m.reg_first_id == r1.id and m.reg_second_id == r3.id)
-        ][0]
-        m3.status = Match.Status.COMPLETED
-        if m3.reg_first_id == r3.id:
-            m3.winner = r3
-            m3.score_first = 1
-            m3.score_second = 0
-        else:
-            m3.winner = r3
-            m3.score_first = 0
-            m3.score_second = 1
-        m3.save()
+        self._play_match(matches, r3, r1, 1, 0)
 
         # Розраховуємо та зберігаємо результати
         calculate_category_standings(self.category, persist=True)
@@ -582,7 +624,6 @@ class CategoryResultsTestCase(TournamentAPITestCase):
 
     def test_round_robin_two_way_tie_breaker(self):
         from apps.brackets.services import BracketGenerator
-        from apps.matches.models import Match
         from apps.tournaments.services import calculate_category_standings
 
         self.category.bracket_format = Category.BracketFormat.ROUND_ROBIN
@@ -596,58 +637,13 @@ class CategoryResultsTestCase(TournamentAPITestCase):
         matches = BracketGenerator(self.category).generate()
 
         # Match 1: r1 vs r2. Winner r1, score 1:0
-        m1 = [
-            m
-            for m in matches
-            if (m.reg_first_id == r1.id and m.reg_second_id == r2.id)
-            or (m.reg_first_id == r2.id and m.reg_second_id == r1.id)
-        ][0]
-        m1.status = Match.Status.COMPLETED
-        if m1.reg_first_id == r1.id:
-            m1.winner = r1
-            m1.score_first = 1
-            m1.score_second = 0
-        else:
-            m1.winner = r1
-            m1.score_first = 0
-            m1.score_second = 1
-        m1.save()
+        self._play_match(matches, r1, r2, 1, 0)
 
         # Match 2: r2 vs r3. Winner r2, score 1:0
-        m2 = [
-            m
-            for m in matches
-            if (m.reg_first_id == r2.id and m.reg_second_id == r3.id)
-            or (m.reg_first_id == r3.id and m.reg_second_id == r2.id)
-        ][0]
-        m2.status = Match.Status.COMPLETED
-        if m2.reg_first_id == r2.id:
-            m2.winner = r2
-            m2.score_first = 1
-            m2.score_second = 0
-        else:
-            m2.winner = r2
-            m2.score_first = 0
-            m2.score_second = 1
-        m2.save()
+        self._play_match(matches, r2, r3, 1, 0)
 
         # Match 3: r3 vs r1. Winner r3, score 1:0
-        m3 = [
-            m
-            for m in matches
-            if (m.reg_first_id == r3.id and m.reg_second_id == r1.id)
-            or (m.reg_first_id == r1.id and m.reg_second_id == r3.id)
-        ][0]
-        m3.status = Match.Status.COMPLETED
-        if m3.reg_first_id == r3.id:
-            m3.winner = r3
-            m3.score_first = 1
-            m3.score_second = 0
-        else:
-            m3.winner = r3
-            m3.score_first = 0
-            m3.score_second = 1
-        m3.save()
+        self._play_match(matches, r3, r1, 1, 0)
 
         calculate_category_standings(self.category, persist=True)
 
@@ -667,8 +663,8 @@ class CategoryResultsTestCase(TournamentAPITestCase):
         self.category.bracket_format = "unknown_format"
         self.category.save()
 
-        _, r1 = self._create_athlete(1)
-        _, r2 = self._create_athlete(2)
+        self._create_athlete(1)
+        self._create_athlete(2)
 
         results = calculate_category_standings(self.category, persist=True)
         # Should not crash, and should return stats dicts
@@ -691,4 +687,437 @@ class CategoryResultsTestCase(TournamentAPITestCase):
         # 4. POST /api/categories/{id}/save_results/ with organizer login should succeed (200 OK)
         self._login(self.organizer)
         response = self.client.post(f"/api/categories/{self.category.pk}/save_results/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_round_robin_results_with_draw(self):
+        from apps.brackets.services import BracketGenerator
+        from apps.matches.models import Match
+        from apps.tournaments.services import calculate_category_standings
+
+        self.category.bracket_format = Category.BracketFormat.ROUND_ROBIN
+        self.category.save()
+
+        _, r1 = self._create_athlete(1)
+        _, r2 = self._create_athlete(2)
+
+        matches = BracketGenerator(self.category).generate()
+
+        # Match: r1 vs r2 ends in a draw
+        m = matches[0]
+        m.status = Match.Status.COMPLETED
+        m.winner = None
+        m.win_method = Match.WinMethod.DRAW
+        m.score_first = 1
+        m.score_second = 1
+        m.save()
+
+        calculate_category_standings(self.category, persist=True)
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+
+        # Both should have 1 point, 1 draw, same scores
+        self.assertEqual(r1.place, 1)
+        self.assertEqual(r2.place, 2)
+
+    def test_round_robin_two_way_tie_h2h_winner(self):
+        from apps.brackets.services import BracketGenerator
+        from apps.tournaments.services import calculate_category_standings
+
+        self.category.bracket_format = Category.BracketFormat.ROUND_ROBIN
+        self.category.save()
+
+        _, r1 = self._create_athlete(1)
+        _, r2 = self._create_athlete(2)
+
+        matches = BracketGenerator(self.category).generate()
+
+        # Match 1: r1 vs r2. Winner r1
+        self._play_match(matches, r1, r2, 2, 0)
+
+        calculate_category_standings(self.category, persist=True)
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+
+        self.assertEqual(r1.place, 1)
+        self.assertEqual(r2.place, 2)
+
+
+class TestTournamentExtraActions(TournamentAPITestCase):
+    def _generate_bracket_setup(self):
+        self._create_athlete(1)
+        self._create_athlete(2)
+        self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
+
+    def test_auto_distribute_tatamis_no_active_tatamis(self):
+        self._login(self.organizer)
+        # 1. No tatamis exist at all
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/auto_distribute_tatamis/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Немає активних татамі", response.data["detail"])
+
+    def test_auto_distribute_tatamis_no_categories_with_matches(self):
+        self._login(self.organizer)
+        from apps.tatamis.models import Tatami
+
+        Tatami.objects.create(tournament=self.tournament, number=1, is_active=True)
+
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/auto_distribute_tatamis/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Немає категорій зі згенерованими сітками", response.data["detail"])
+
+    def test_auto_distribute_tatamis_success(self):
+        self._login(self.organizer)
+        from apps.tatamis.models import Tatami
+
+        t1 = Tatami.objects.create(tournament=self.tournament, number=1, is_active=True)
+        Tatami.objects.create(tournament=self.tournament, number=2, is_active=True)
+
+        # Generate a bracket so category has matches
+        self._generate_bracket_setup()
+
+        # Assign a mock current_match to a tatami to test clearing it
+        match = self.category.matches.first()
+        t1.current_match = match
+        t1.save()
+
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/auto_distribute_tatamis/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        t1.refresh_from_db()
+        self.assertIsNone(t1.current_match)
+
+    def test_assign_tatami_validation(self):
+        self._login(self.organizer)
+        # Missing tatami_id
+        response = self.client.post(f"/api/categories/{self.category.pk}/assign_tatami/", {})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Invalid tatami_id
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/assign_tatami/", {"tatami_id": 9999}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_assign_tatami_success(self):
+        self._login(self.organizer)
+        from apps.tatamis.models import Tatami
+
+        t1 = Tatami.objects.create(tournament=self.tournament, number=1)
+        t2 = Tatami.objects.create(tournament=self.tournament, number=2)
+
+        self._generate_bracket_setup()
+        match = self.category.matches.first()
+
+        # Set t2 as having match as current
+        t2.current_match = match
+        t2.save()
+
+        # Assign to t1, clearing t2.current_match (covers L474-476)
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/assign_tatami/", {"tatami_id": t1.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        match.refresh_from_db()
+        self.assertEqual(match.tatami_id, t1.id)
+        t2.refresh_from_db()
+        self.assertIsNone(t2.current_match)
+
+    def test_set_judges_count_validation(self):
+        self._login(self.organizer)
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/", {"judges_count": 4}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_set_judges_count_success(self):
+        self._login(self.organizer)
+        self.category.ruleset_key = "karate_kata"
+        self.category.save()
+
+        self._generate_bracket_setup()
+
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/set_judges_count/", {"judges_count": 5}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.category.refresh_from_db()
+        self.assertEqual(self.category.judges_count, 5)
+
+    def test_set_judges_count_validation_error(self):
+        self._login(self.organizer)
+        self.category.ruleset_key = "karate_kata"
+        self.category.save()
+
+        self._generate_bracket_setup()
+
+        # Mark match as completed to trigger validation flow
+        match = self.category.matches.first()
+        from apps.matches.models import Match
+
+        match.status = Match.Status.COMPLETED
+        match.save()
+
+        # Mock can_reset_match to fail (covers L640-642)
+        from unittest.mock import patch
+
+        with patch("apps.matches.services.match_service.MatchService.can_reset_match") as mock_can:
+            mock_can.return_value = (False, "Mock reset error")
+            response = self.client.post(
+                f"/api/categories/{self.category.pk}/set_judges_count/", {"judges_count": 3}
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_save_results_with_overrides(self):
+        self._login(self.organizer)
+        from apps.tatamis.models import Tatami
+
+        t = Tatami.objects.create(tournament=self.tournament, number=1)
+
+        self._generate_bracket_setup()
+        match = self.category.matches.first()
+        t.current_match = match
+        t.active_results_category = self.category
+        t.save()
+
+        reg = self.category.registrations.first()
+
+        # 1. Valid override (covers L546 tatami broadcast)
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/save_results/",
+            {"overrides": {str(reg.id): 1}},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        reg.refresh_from_db()
+        self.assertEqual(reg.place, 1)
+
+        # 2. Invalid override (covers L529-530 exception catch)
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/save_results/",
+            {"overrides": {"invalid_id": "not_an_int"}},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_unlock_results(self):
+        self._login(self.organizer)
+        from apps.tatamis.models import Tatami
+
+        t = Tatami.objects.create(tournament=self.tournament, number=1)
+        t.active_results_category = self.category
+        t.save()
+
+        self._generate_bracket_setup()
+        reg = self.category.registrations.first()
+        reg.place = 2
+        reg.save()
+
+        response = self.client.post(f"/api/categories/{self.category.pk}/unlock_results/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        reg.refresh_from_db()
+        self.assertIsNone(reg.place)
+
+    def test_confirm_weigh_in_validation(self):
+        self._login(self.coach)
+        ath = Athlete.objects.create(
+            first_name="ValidationWeight",
+            last_name="AthleteUser",
+            coach=self.coach,
+            club=self.club_b,
+            gender=Athlete.Gender.FEMALE,
+            birth_date=date(1999, 12, 31),
+            base_weight=62.5,
+        )
+        reg = Registration.objects.create(
+            category=self.category,
+            athlete=ath,
+            status=Registration.Status.PENDING,
+        )
+
+        self._login(self.organizer)
+        # Missing weight
+        response = self.client.post(
+            f"/api/registrations/{reg.pk}/confirm_weigh_in/", {}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Invalid weight format
+        response = self.client.post(
+            f"/api/registrations/{reg.pk}/confirm_weigh_in/", {"weight": "invalid"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_import_categories_validation(self):
+        self._login(self.organizer)
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/import_categories/", {}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/import_categories/",
+            {"names": "not_a_list"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Exception during import (covers L228-229 except catch)
+        from unittest.mock import patch
+
+        with patch("apps.tournaments.views.parse_category_name") as mock_parse:
+            mock_parse.side_effect = ValueError("NLP parsing failed")
+            response = self.client.post(
+                f"/api/tournaments/{self.tournament.pk}/import_categories/",
+                {"names": ["Valid Category"]},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn("NLP parsing failed", response.data["detail"])
+
+    def test_import_categories_success(self):
+        self._login(self.organizer)
+        # Test L213 skipping non-string or empty elements
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/import_categories/",
+            {"names": ["", 123]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.data), 0)
+
+        # Success path
+        payload = {"names": ["Boys 10-11 -30kg (Karate)"]}
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/import_categories/", payload, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.data), 1)
+
+    def test_tournament_retrieve_anonymous_and_authenticated(self):
+        # Retrieve anonymously (covers L52-54 AllowAny)
+        response = self.client.get(f"/api/tournaments/{self.tournament.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Verify it uses TournamentDetailSerializer (covers L35 return TournamentDetailSerializer)
+        self.assertIn("categories", response.data)
+
+        # List anonymously
+        response = self.client.get("/api/tournaments/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_tournament_validation_errors(self):
+        self._login(self.organizer)
+        from unittest.mock import patch
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        with patch("apps.tournaments.models.Tournament.open_registration") as mock_open:
+            mock_open.side_effect = DjangoValidationError("Already open")
+            response = self.client.post(f"/api/tournaments/{self.tournament.pk}/open_registration/")
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(response.data["detail"], "Already open")
+
+        with patch("apps.tournaments.models.Tournament.start_tournament") as mock_start:
+            mock_start.side_effect = DjangoValidationError("Cannot start")
+            response = self.client.post(f"/api/tournaments/{self.tournament.pk}/start/")
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(response.data["detail"], "Cannot start")
+
+        with patch("apps.tournaments.models.Tournament.complete_tournament") as mock_complete:
+            mock_complete.side_effect = DjangoValidationError("Cannot complete")
+            response = self.client.post(f"/api/tournaments/{self.tournament.pk}/complete/")
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(response.data["detail"], "Cannot complete")
+
+    def test_generate_all_brackets_extra_paths(self):
+        self._login(self.organizer)
+        cat_with_matches = self.category
+        self._create_athlete(1)
+        self._create_athlete(2)
+        self.client.post(f"/api/categories/{cat_with_matches.pk}/generate_bracket/")
+        self.assertTrue(cat_with_matches.matches.exists())
+
+        from apps.tournaments.models import Category
+
+        Category.objects.create(
+            tournament=self.tournament,
+            name="Cat No Regs",
+            allowed_gender="mixed",
+            min_age=10,
+            max_age=11,
+        )
+
+        cat_single = Category.objects.create(
+            tournament=self.tournament,
+            name="Cat Single",
+            allowed_gender="mixed",
+            min_age=10,
+            max_age=11,
+        )
+        for i in range(10, 16):
+            self._create_athlete(i, category=cat_single)
+
+        from unittest.mock import patch
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        with patch("apps.brackets.services.BracketGenerator.generate") as mock_gen:
+            mock_gen.side_effect = DjangoValidationError("Generator failed")
+            response = self.client.post(
+                f"/api/tournaments/{self.tournament.pk}/generate_all_brackets/",
+                {
+                    "round_robin_min": 2,
+                    "round_robin_max": 5,
+                    "single_elimination_min": 6,
+                    "single_elimination_max": 32,
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIn("Generator failed", response.data["errors"][0])
+
+    def test_verify_judge_permission_paths(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        judge = User.objects.create_user(
+            email="judge_perm@example.com",
+            password="password",
+            role="judge",
+            first_name="Judge",
+            last_name="Test",
+        )
+        self._login(judge)
+
+        response = self.client.post(f"/api/categories/{self.category.pk}/save_results/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("Категорія не призначена на жодне татамі", response.data["detail"])
+
+        from apps.matches.models import Match
+
+        m = Match.objects.create(category=self.category, round_index=0, match_order=1)
+        response = self.client.post(f"/api/categories/{self.category.pk}/save_results/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("Категорія не призначена на жодне татамі", response.data["detail"])
+
+        from apps.tatamis.models import Tatami
+
+        tatami = Tatami.objects.create(tournament=self.tournament, number=3, is_active=True)
+        m.tatami = tatami
+        m.save()
+        response = self.client.post(f"/api/categories/{self.category.pk}/save_results/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(
+            "Ви не є призначеним суддею на татамі цієї категорії", response.data["detail"]
+        )
+
+    def test_registrations_extra_paths(self):
+        response = self.client.get(f"/api/registrations/?category={self.category.pk}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.get("/api/registrations/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)

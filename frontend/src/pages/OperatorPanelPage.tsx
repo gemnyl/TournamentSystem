@@ -323,41 +323,45 @@ export default function OperatorPanelPage() {
     return () => clearInterval(interval);
   }, [fetchMatches]);
 
+  const handleTatamiData = useCallback((data: { tatami: Tatami; current_match: Match | null }) => {
+    setTatami(data.tatami);
+    setCurrentMatch((prev) => {
+      const isViewingPastMatch = prev !== null && prev.status === "completed";
+      if (isViewingPastMatch) {
+        const wasActiveMatchOnTatami = tatami && getTatamiMatchId(tatami.current_match) === prev.id;
+        if (wasActiveMatchOnTatami) {
+          if (data.current_match) {
+            setTimerState(matchToTimerState(data.current_match));
+            return data.current_match;
+          } else {
+            setTimerState(DEFAULT_TIMER);
+            return null;
+          }
+        }
+        if (data.current_match && data.current_match.id === prev.id) {
+          setTimerState(matchToTimerState(data.current_match));
+          return data.current_match;
+        }
+        return prev;
+      }
+      if (data.current_match) {
+        setTimerState(matchToTimerState(data.current_match));
+        return data.current_match;
+      } else {
+        setTimerState(DEFAULT_TIMER);
+        return null;
+      }
+    });
+    fetchMatches();
+    fetchCategories();
+    fetchCategoryResults();
+  }, [tatami, fetchMatches, fetchCategories, fetchCategoryResults, setTimerState]);
+
   useTatamiSocket(tid || "", n || "", {
     onClockOffsetUpdate: setServerTimeOffset,
     onSnapshot(data) {
       setConnected(true);
-      setTatami(data.tatami);
-      setCurrentMatch((prev) => {
-        const isViewingPastMatch = prev !== null && prev.status === "completed";
-        if (isViewingPastMatch) {
-          const wasActiveMatchOnTatami = tatami && getTatamiMatchId(tatami.current_match) === prev.id;
-          if (wasActiveMatchOnTatami) {
-            if (data.current_match) {
-              setTimerState(matchToTimerState(data.current_match));
-              return data.current_match;
-            } else {
-              setTimerState(DEFAULT_TIMER);
-              return null;
-            }
-          }
-          if (data.current_match && data.current_match.id === prev.id) {
-            setTimerState(matchToTimerState(data.current_match));
-            return data.current_match;
-          }
-          return prev;
-        }
-        if (data.current_match) {
-          setTimerState(matchToTimerState(data.current_match));
-          return data.current_match;
-        } else {
-          setTimerState(DEFAULT_TIMER);
-          return null;
-        }
-      });
-      fetchMatches();
-      fetchCategories();
-      fetchCategoryResults();
+      handleTatamiData(data);
     },
     onMatchEvent(_event, match) {
       setCurrentMatch((prev) => {
@@ -392,37 +396,7 @@ export default function OperatorPanelPage() {
       });
     },
     onTatamiState(data) {
-      setTatami(data.tatami);
-      setCurrentMatch((prev) => {
-        const isViewingPastMatch = prev !== null && prev.status === "completed";
-        if (isViewingPastMatch) {
-          const wasActiveMatchOnTatami = tatami && getTatamiMatchId(tatami.current_match) === prev.id;
-          if (wasActiveMatchOnTatami) {
-            if (data.current_match) {
-              setTimerState(matchToTimerState(data.current_match));
-              return data.current_match;
-            } else {
-              setTimerState(DEFAULT_TIMER);
-              return null;
-            }
-          }
-          if (data.current_match && data.current_match.id === prev.id) {
-            setTimerState(matchToTimerState(data.current_match));
-            return data.current_match;
-          }
-          return prev;
-        }
-        if (data.current_match) {
-          setTimerState(matchToTimerState(data.current_match));
-          return data.current_match;
-        } else {
-          setTimerState(DEFAULT_TIMER);
-          return null;
-        }
-      });
-      fetchMatches();
-      fetchCategories();
-      fetchCategoryResults();
+      handleTatamiData(data);
     },
   });
 
@@ -506,37 +480,42 @@ export default function OperatorPanelPage() {
     }
   };
 
+  const assignNextAvailableMatch = async () => {
+    if (!tatami || !currentMatch) return;
+    const nextMatch = tatamiMatches.find(
+      (m) => m.status === "scheduled" && m.id !== currentMatch.id && m.category === currentMatch.category
+    );
+
+    if (nextMatch) {
+      const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextMatch.id });
+      setTatami(data);
+      setCurrentMatch(nextMatch);
+      setTimerState(matchToTimerState(nextMatch));
+      toast({ title: `Перехід до наступного бою: ${nextMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextMatch.reg_second?.athlete?.full_name ?? "—"}` });
+    } else {
+      const nextAnyMatch = tatamiMatches.find(
+        (m) => m.status === "scheduled" && m.id !== currentMatch.id
+      );
+      if (nextAnyMatch) {
+        const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextAnyMatch.id });
+        setTatami(data);
+        setCurrentMatch(nextAnyMatch);
+        setTimerState(matchToTimerState(nextAnyMatch));
+        toast({ title: `Перехід до наступного бою: ${nextAnyMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextAnyMatch.reg_second?.athlete?.full_name ?? "—"}` });
+      } else {
+        toast({ title: "Всі бої на татамі завершено!" });
+      }
+    }
+    fetchMatches();
+    fetchCategories();
+    fetchCategoryResults();
+  };
+
   const handleNextMatch = async () => {
     if (!tatami || !currentMatch) return;
     setBusy(true);
     try {
-      const nextMatch = tatamiMatches.find(
-        (m) => m.status === "scheduled" && m.id !== currentMatch.id && m.category === currentMatch.category
-      );
-
-      if (nextMatch) {
-        const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextMatch.id });
-        setTatami(data);
-        setCurrentMatch(nextMatch);
-        setTimerState(matchToTimerState(nextMatch));
-        toast({ title: `Перехід до наступного бою: ${nextMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextMatch.reg_second?.athlete?.full_name ?? "—"}` });
-      } else {
-        const nextAnyMatch = tatamiMatches.find(
-          (m) => m.status === "scheduled" && m.id !== currentMatch.id
-        );
-        if (nextAnyMatch) {
-          const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextAnyMatch.id });
-          setTatami(data);
-          setCurrentMatch(nextAnyMatch);
-          setTimerState(matchToTimerState(nextAnyMatch));
-          toast({ title: `Перехід до наступного бою: ${nextAnyMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextAnyMatch.reg_second?.athlete?.full_name ?? "—"}` });
-        } else {
-          toast({ title: "Всі бої на татамі завершено!" });
-        }
-      }
-      fetchMatches();
-      fetchCategories();
-      fetchCategoryResults();
+      await assignNextAvailableMatch();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка переходу до наступного бою";
       toast({ title: msg, variant: "destructive" });
@@ -558,34 +537,7 @@ export default function OperatorPanelPage() {
         });
       }
 
-      // Автоматичний пошук та призначення наступного поєдинку в БД
-      const nextMatch = tatamiMatches.find(
-        (m) => m.status === "scheduled" && m.id !== currentMatch.id && m.category === currentMatch.category
-      );
-
-      if (nextMatch) {
-        const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextMatch.id });
-        setTatami(data);
-        setCurrentMatch(nextMatch);
-        setTimerState(matchToTimerState(nextMatch));
-        toast({ title: `Перехід до наступного бою: ${nextMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextMatch.reg_second?.athlete?.full_name ?? "—"}` });
-      } else {
-        const nextAnyMatch = tatamiMatches.find(
-          (m) => m.status === "scheduled" && m.id !== currentMatch.id
-        );
-        if (nextAnyMatch) {
-          const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextAnyMatch.id });
-          setTatami(data);
-          setCurrentMatch(nextAnyMatch);
-          setTimerState(matchToTimerState(nextAnyMatch));
-          toast({ title: `Перехід до наступного бою: ${nextAnyMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextAnyMatch.reg_second?.athlete?.full_name ?? "—"}` });
-        } else {
-          toast({ title: "Всі бої на татамі завершено!" });
-        }
-      }
-      fetchMatches();
-      fetchCategories();
-      fetchCategoryResults();
+      await assignNextAvailableMatch();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка фіксації результату";
       toast({ title: msg, variant: "destructive" });

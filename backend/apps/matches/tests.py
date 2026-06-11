@@ -97,25 +97,25 @@ class MatchAPITestCase(TestCase):
 
         # Створюємо 8 підтверджених реєстрацій та генеруємо сітку
         self.registrations = []
-        for i in range(1, 9):
-            club = self.club_a if i % 2 else self.club_b
-            athlete = Athlete.objects.create(
+        for idx in range(1, 9):
+            ath = Athlete.objects.create(
                 coach=self.coach,
-                club=club,
-                first_name=f"Ім{i}",
-                last_name=f"Пр{i}",
+                club=self.club_a if idx % 2 else self.club_b,
+                first_name=f"TestF_{idx}",
+                last_name=f"TestL_{idx}",
                 gender=Athlete.Gender.MALE,
                 birth_date=date(2000, 1, 1),
-                base_weight=73,
+                base_weight=73.0,
             )
-            reg = Registration.objects.create(
-                athlete=athlete,
-                category=self.category,
-                seed_number=i,
-                recorded_weight=73,
-                status=Registration.Status.CONFIRMED,
+            self.registrations.append(
+                Registration.objects.create(
+                    athlete=ath,
+                    category=self.category,
+                    seed_number=idx,
+                    recorded_weight=73.0,
+                    status=Registration.Status.CONFIRMED,
+                )
             )
-            self.registrations.append(reg)
 
         BracketGenerator(self.category).generate()
 
@@ -473,6 +473,119 @@ class TestMatchService(MatchAPITestCase):
         nxt.refresh_from_db()
         self.assertIsNone(nxt.reg_second)
 
+    def test_apply_score_undo_ao_warning(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # Test warning undo for ao
+        svc.apply_score("ao", "penalty")
+        match.refresh_from_db()
+        self.assertEqual(match.warnings_second, 1)
+
+        svc.apply_score("ao", "penalty", is_undo=True)
+        match.refresh_from_db()
+        self.assertEqual(match.warnings_second, 0)
+
+    def test_set_draw(self):
+        from django.core.exceptions import ValidationError
+
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # Draw is not allowed for single elimination by default
+        self.assertEqual(match.category.bracket_format, "single_elimination")
+        with self.assertRaises(ValidationError):
+            svc.set_draw()
+
+        # Set to round robin
+        match.category.bracket_format = "round_robin"
+        match.category.save()
+        match.refresh_from_db()
+
+        svc.set_draw()
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+        self.assertIsNone(match.winner)
+        self.assertEqual(match.win_method, "draw")
+
+    def test_adjust_timer_duration(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # Normal adjustment
+        svc.timer_add_time(10000)
+        match.refresh_from_db()
+        self.assertEqual(match.timer_duration_ms, 190000)
+
+        # Negative duration error
+        with self.assertRaises(ValueError):
+            svc.timer_add_time(-300000)
+
+        # Duration adjustment while running raises ValueError
+        match.timer_status = Match.TimerStatus.RUNNING
+        match.save()
+        with self.assertRaises(ValueError):
+            svc.timer_add_time(10000)
+
+    def test_timer_start_and_pause(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # Start timer
+        svc.timer_start()
+        match.refresh_from_db()
+        self.assertEqual(match.timer_status, Match.TimerStatus.RUNNING)
+        self.assertIsNotNone(match.timer_started_at)
+
+        # Pause timer within 5 seconds delta
+        svc.timer_pause(elapsed_ms=1000)
+        match.refresh_from_db()
+        self.assertEqual(match.timer_status, Match.TimerStatus.PAUSED)
+        self.assertEqual(match.timer_elapsed_ms, 1000)
+
+        # Start again
+        svc.timer_resume()
+
+        # Pause timer outside 5 seconds delta
+        svc.timer_pause(elapsed_ms=20000)
+        match.refresh_from_db()
+        self.assertEqual(match.timer_status, Match.TimerStatus.PAUSED)
+        self.assertLess(match.timer_elapsed_ms, 5000)
+
+    def test_reset_match(self):
+        from django.core.exceptions import ValidationError
+
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # Advance participant
+        svc.apply_score("aka", "yuko")
+        svc.set_winner("aka", Match.WinMethod.POINTS)
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+
+        nxt = match.next_match
+        nxt.refresh_from_db()
+        self.assertEqual(nxt.reg_first, match.reg_first)
+
+        # Try to reset when next match is already ongoing (not scheduled) -> raises ValidationError
+        nxt.status = Match.Status.ONGOING
+        nxt.save()
+        with self.assertRaises(ValidationError):
+            svc.reset_match()
+
+        # Reset works when next match is scheduled
+        nxt.status = Match.Status.SCHEDULED
+        nxt.save()
+
+        svc.reset_match()
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.SCHEDULED)
+        self.assertEqual(match.score_first, 0)
+
+        nxt.refresh_from_db()
+        self.assertIsNone(nxt.reg_first)
+
 
 class TestSetSenshuEndpoint(MatchAPITestCase):
     """Тест ендпоінту set_senshu через HTTP."""
@@ -523,6 +636,77 @@ class TestSetSenshuEndpoint(MatchAPITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestMatchTimerEndpoints(MatchAPITestCase):
+    def test_timer_lifecycle_via_api(self):
+        self._login(self.judge)
+        match = self.first_round_match
+
+        # Start
+        response = self.client.post(f"/api/matches/{match.pk}/timer/start/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["timer_status"], "running")
+
+        # Pause
+        response = self.client.post(
+            f"/api/matches/{match.pk}/timer/pause/", {"elapsed_ms": 5000}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["timer_status"], "paused")
+
+        # Resume
+        response = self.client.post(f"/api/matches/{match.pk}/timer/resume/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["timer_status"], "running")
+
+        # Reset
+        self.client.post(
+            f"/api/matches/{match.pk}/timer/pause/", {"elapsed_ms": 6000}, format="json"
+        )
+        response = self.client.post(f"/api/matches/{match.pk}/timer/reset/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Set duration
+        response = self.client.post(
+            f"/api/matches/{match.pk}/timer/set_duration/", {"duration_ms": 120000}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["timer_duration_ms"], 120000)
+
+        # Set duration missing duration_ms
+        response = self.client.post(
+            f"/api/matches/{match.pk}/timer/set_duration/", {}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Add time
+        response = self.client.post(
+            f"/api/matches/{match.pk}/timer/add_time/", {"delta_ms": 10000}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Add time missing delta_ms
+        response = self.client.post(f"/api/matches/{match.pk}/timer/add_time/", {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Toggle timer
+        response = self.client.post(
+            f"/api/matches/{match.pk}/toggle_timer/", {"show_timer": False}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Toggle timer missing show_timer
+        response = self.client.post(f"/api/matches/{match.pk}/toggle_timer/", {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Set draw API (fails because single elimination)
+        response = self.client.post(f"/api/matches/{match.pk}/set_draw/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Reset match API
+        response = self.client.post(f"/api/matches/{match.pk}/reset_match/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
 class TestRulesetsEndpoint(MatchAPITestCase):
@@ -724,7 +908,7 @@ class TestKarateKataMatches(MatchAPITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_match_set_judges_count_resets_completed(self):
+    def _setup_completed_match_with_judges(self):
         self._login(self.judge)
         self.client.post(
             f"/api/categories/{self.category.pk}/set_judges_count/",
@@ -732,42 +916,33 @@ class TestKarateKataMatches(MatchAPITestCase):
             format="json",
         )
         match = self.first_round_match
-        # Зафіксуємо результат спочатку
         self.client.post(
             f"/api/matches/{match.pk}/submit_flags/", {"flags_aka": 2, "flags_ao": 1}, format="json"
         )
         match.refresh_from_db()
         self.assertEqual(match.status, Match.Status.COMPLETED)
         self.assertIsNotNone(match.winner)
+        return match
 
-        # Тепер змінимо кількість суддів для цього матчу
-        response = self.client.post(
-            f"/api/matches/{match.pk}/set_judges_count/", {"judges_count": 5}, format="json"
-        )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+    def _assert_match_reset_to_judges_count(self, match, count):
         match.refresh_from_db()
-        self.assertEqual(match.judges_count, 5)
+        self.assertEqual(match.judges_count, count)
         self.assertEqual(match.status, Match.Status.SCHEDULED)
         self.assertIsNone(match.winner)
         self.assertIsNone(match.flags_aka)
         self.assertIsNone(match.flags_ao)
 
-    def test_category_set_judges_count_resets_completed(self):
-        self._login(self.judge)
-        self.client.post(
-            f"/api/categories/{self.category.pk}/set_judges_count/",
-            {"judges_count": 3},
-            format="json",
+    def test_match_set_judges_count_resets_completed(self):
+        match = self._setup_completed_match_with_judges()
+        # Тепер змінимо кількість суддів для цього матчу
+        response = self.client.post(
+            f"/api/matches/{match.pk}/set_judges_count/", {"judges_count": 5}, format="json"
         )
-        match = self.first_round_match
-        # Зафіксуємо результат спочатку
-        self.client.post(
-            f"/api/matches/{match.pk}/submit_flags/", {"flags_aka": 2, "flags_ao": 1}, format="json"
-        )
-        match.refresh_from_db()
-        self.assertEqual(match.status, Match.Status.COMPLETED)
-        self.assertIsNotNone(match.winner)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self._assert_match_reset_to_judges_count(match, 5)
 
+    def test_category_set_judges_count_resets_completed(self):
+        match = self._setup_completed_match_with_judges()
         # Тепер змінимо кількість суддів для ВСІЄЇ категорії
         response = self.client.post(
             f"/api/categories/{self.category.pk}/set_judges_count/",
@@ -775,9 +950,100 @@ class TestKarateKataMatches(MatchAPITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        match.refresh_from_db()
-        self.assertEqual(match.judges_count, 5)
-        self.assertEqual(match.status, Match.Status.SCHEDULED)
-        self.assertIsNone(match.winner)
-        self.assertIsNone(match.flags_aka)
-        self.assertIsNone(match.flags_ao)
+        self._assert_match_reset_to_judges_count(match, 5)
+
+
+class TestMatchesExtraActions(MatchAPITestCase):
+    def test_filter_by_tatami_number(self):
+        from apps.tatamis.models import Tatami
+
+        tatami = Tatami.objects.create(tournament=self.tournament, number=1)
+        self.first_round_match.tatami = tatami
+        self.first_round_match.save()
+
+        response = self.client.get("/api/matches/?tatami_number=1")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], self.first_round_match.pk)
+
+    def test_set_draw_validation_and_errors(self):
+        self._login(self.judge)
+        # Try to set draw on a single elimination match where draw is not allowed
+        response = self.client.post(f"/api/matches/{self.first_round_match.pk}/set_draw/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_set_draw_success(self):
+        self._login(self.judge)
+        # Draw is allowed in round robin brackets
+        self.category.bracket_format = "round_robin"
+        self.category.save()
+
+        response = self.client.post(
+            f"/api/matches/{self.first_round_match.pk}/set_draw/",
+            {"win_method": "draw"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.first_round_match.refresh_from_db()
+        self.assertEqual(self.first_round_match.win_method, Match.WinMethod.DRAW)
+
+    def test_reset_match_errors(self):
+        self._login(self.judge)
+        # Call reset match
+        response = self.client.post(f"/api/matches/{self.first_round_match.pk}/reset_match/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Trigger a ValidationError by modifying next match status to ongoing and setting a winner
+        self.first_round_match.reg_first = self.category.registrations.all()[0]
+        self.first_round_match.reg_second = self.category.registrations.all()[1]
+        self.first_round_match.save()
+        self.first_round_match.next_match.status = Match.Status.ONGOING
+        self.first_round_match.next_match.save()
+
+        response = self.client.post(f"/api/matches/{self.first_round_match.pk}/reset_match/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_submit_flags_validation(self):
+        self._login(self.judge)
+        response = self.client.post(
+            f"/api/matches/{self.first_round_match.pk}/submit_flags/",
+            {"flags_aka": 1},  # missing flags_ao
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_toggle_timer_validation(self):
+        self._login(self.judge)
+        # Missing show_timer
+        response = self.client.post(
+            f"/api/matches/{self.first_round_match.pk}/toggle_timer/", {}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        response = self.client.post(
+            f"/api/matches/{self.first_round_match.pk}/toggle_timer/",
+            {"show_timer": "invalid"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_toggle_timer_completed_match_error(self):
+        self._login(self.judge)
+        from unittest.mock import patch
+
+        with patch("apps.matches.views.MatchService.toggle_timer") as mock_toggle:
+            mock_toggle.side_effect = ValueError("Mock error")
+            response = self.client.post(
+                f"/api/matches/{self.first_round_match.pk}/toggle_timer/",
+                {"show_timer": True},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_set_judges_count_validation(self):
+        self._login(self.judge)
+        response = self.client.post(
+            f"/api/matches/{self.first_round_match.pk}/set_judges_count/", {}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

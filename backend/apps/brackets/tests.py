@@ -326,6 +326,17 @@ try:
             with pytest.raises(Exception, match=".*"):
                 gen.generate()
 
+        def test_duration_fallback_on_invalid_ruleset(self):
+            self._create_confirmed_registrations(2)
+            self.category.match_duration_seconds = None
+            self.category.ruleset_key = "invalid_ruleset_key"
+            self.category.save()
+
+            gen = BracketGenerator(self.category)
+            matches = gen.generate()
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0].timer_duration_ms, 180000)
+
 except ImportError:
     # Django не налаштовано — інтеграційні тести пропускаються
     pass

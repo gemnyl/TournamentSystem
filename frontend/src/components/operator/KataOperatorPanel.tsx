@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import api from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage, getOptimisticTimerUpdate } from "@/lib/utils";
 import type { Match } from "@/types/api";
 import { formatTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
@@ -52,7 +52,7 @@ export default function KataOperatorPanel({
     setSelectedAo(null);
   }, [match.id]);
 
-  const handleSetJudgesCount = async (count: number) => {
+  const updateCategoryJudges = async (count: number, closeModal = false) => {
     setBusy(true);
     try {
       await api.post(`/categories/${match.category}/set_judges_count/`, {
@@ -64,13 +64,18 @@ export default function KataOperatorPanel({
       setSelectedAka(null);
       setSelectedAo(null);
       toast({ title: `Категорію налаштовано на ${count} суддів.` });
+      if (closeModal) {
+        setChangeJudgesOpen(false);
+      }
     } catch (error_: unknown) {
-      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+      const msg = getErrorMessage(error_, "Помилка встановлення кількості суддів");
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
     }
   };
+
+  const handleSetJudgesCount = (count: number) => updateCategoryJudges(count, false);
 
   const handleSetMatchJudgesCount = async (count: number) => {
     setBusy(true);
@@ -84,32 +89,14 @@ export default function KataOperatorPanel({
       toast({ title: `Поєдинок налаштовано на ${count} суддів.` });
       setChangeJudgesOpen(false);
     } catch (error_: unknown) {
-      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+      const msg = getErrorMessage(error_, "Помилка встановлення кількості суддів");
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
     }
   };
 
-  const handleSetCategoryJudgesCount = async (count: number) => {
-    setBusy(true);
-    try {
-      await api.post(`/categories/${match.category}/set_judges_count/`, {
-        judges_count: count,
-      });
-      const { data } = await api.get<Match>(`/matches/${match.id}/`);
-      onMatchUpdate(data);
-      setSelectedAka(null);
-      setSelectedAo(null);
-      toast({ title: `Категорію налаштовано на ${count} суддів.` });
-      setChangeJudgesOpen(false);
-    } catch (error_: unknown) {
-      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
-      toast({ title: msg, variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  };
+  const handleSetCategoryJudgesCount = (count: number) => updateCategoryJudges(count, true);
 
   const handleToggleTimer = async (checked: boolean) => {
     setBusy(true);
@@ -129,32 +116,21 @@ export default function KataOperatorPanel({
   };
 
   const timerAction = async (path: string, body?: Record<string, unknown>) => {
-    let reqBody = body;
-    if (path === "pause") {
-      const serverNow = Date.now() + serverTimeOffset;
-      const currentElapsed = timerState.started_at_ms !== null
-        ? timerState.elapsed_ms + (serverNow - timerState.started_at_ms)
-        : timerState.elapsed_ms;
-      const elapsed_ms = Math.round(Math.max(0, currentElapsed));
-      reqBody = { ...body, elapsed_ms };
-
-      onMatchUpdate({
-        ...match,
-        timer_status: "paused",
-        timer_started_at: null,
-        timer_elapsed_ms: elapsed_ms,
-      });
-    } else if (path === "resume" || path === "start") {
-      const estimatedStart = Date.now() + serverTimeOffset;
-      onMatchUpdate({
-        ...match,
-        timer_status: "running",
-        timer_started_at: new Date(estimatedStart).toISOString(),
-      });
+    const { updatedMatch, reqBody } = getOptimisticTimerUpdate(
+      path,
+      timerState,
+      serverTimeOffset,
+      match
+    );
+    if (updatedMatch) {
+      onMatchUpdate(updatedMatch);
     }
     setBusy(true);
     try {
-      const { data } = await api.post<Match>(`/matches/${match.id}/timer/${path}/`, reqBody ?? {});
+      const { data } = await api.post<Match>(`/matches/${match.id}/timer/${path}/`, {
+        ...body,
+        ...reqBody,
+      });
       onMatchUpdate(data);
     } catch {
       toast({ title: "Помилка керування таймером", variant: "destructive" });
@@ -184,7 +160,7 @@ export default function KataOperatorPanel({
       onMatchUpdate(data);
       toast({ title: "Результат Ката зафіксовано!" });
     } catch (error_: unknown) {
-      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка фіксації результату";
+      const msg = getErrorMessage(error_, "Помилка фіксації результату");
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -194,17 +170,16 @@ export default function KataOperatorPanel({
   const handleResetMatch = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post<Match>(`/matches/${match.id}/reset_match/`);
-      onMatchUpdate(data);
+      const resp = await api.post<Match>(`/matches/${match.id}/reset_match/`);
+      onMatchUpdate(resp.data);
       setSelectedAka(null);
       setSelectedAo(null);
-      toast({ title: "Поєдинок успішно скинуто!" });
       setResetDialogOpen(false);
+      toast({ title: "Поєдинок успішно скинуто!" });
     } catch (error_: unknown) {
-      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
       toast({
         title: "Не вдалося скинути поєдинок",
-        description: msg,
+        description: getErrorMessage(error_, "Помилка скидання поєдинку"),
         variant: "destructive",
       });
     } finally {

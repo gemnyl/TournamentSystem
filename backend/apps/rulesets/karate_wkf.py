@@ -40,12 +40,9 @@ class KarateWKFRuleSet(PointsRuleSet):
             new = replace(state, is_finished=True, winner=winner, win_method="points")
             return cast(MatchState, new)
 
-        if state.warnings_aka >= self.get_max_warnings():
-            new = replace(state, is_finished=True, winner="ao", win_method="hansoku")
-            return cast(MatchState, new)
-        if state.warnings_ao >= self.get_max_warnings():
-            new = replace(state, is_finished=True, winner="aka", win_method="hansoku")
-            return cast(MatchState, new)
+        warnings_state = self.check_warnings_finish(state)
+        if warnings_state is not None:
+            return warnings_state
 
         return state
 

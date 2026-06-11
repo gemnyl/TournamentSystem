@@ -21,10 +21,10 @@ export function useTatamiSocket(
   n: string | number,
   options: UseTatamiSocketOptions,
 ) {
-  const wsRef = useRef<WebSocket | null>(null);
-  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryDelay = useRef(1000);
-  const isMounted = useRef(true);
+  const socketRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectDelay = useRef(1000);
+  const activeTabRef = useRef(true);
   const optsRef = useRef(options);
 
   useEffect(() => { optsRef.current = options; }, [options]);
@@ -88,12 +88,12 @@ export function useTatamiSocket(
   }, [tid, n]);
 
   const connect = useCallback(() => {
-    if (!isMounted.current) return;
+    if (!activeTabRef.current) return;
 
     const proto = globalThis.location.protocol === "https:" ? "wss" : "ws";
     const url = `${proto}://${globalThis.location.host}/ws/tournament/${tid}/tatami/${n}/`;
     const ws = new WebSocket(url);
-    wsRef.current = ws;
+    socketRef.current = ws;
 
     let pongTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -186,7 +186,7 @@ export function useTatamiSocket(
     };
 
     ws.onopen = () => {
-      retryDelay.current = 1000;
+      reconnectDelay.current = 1000;
       sendPing();
 
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
@@ -227,23 +227,23 @@ export function useTatamiSocket(
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
       }
-      if (!isMounted.current) return;
-      const delay = Math.min(retryDelay.current, 30_000);
-      retryDelay.current = Math.min(retryDelay.current * 2, 30_000);
-      retryRef.current = setTimeout(connect, delay);
+      if (!activeTabRef.current) return;
+      const delay = Math.min(reconnectDelay.current, 30_000);
+      reconnectDelay.current = Math.min(reconnectDelay.current * 2, 30_000);
+      reconnectTimerRef.current = setTimeout(connect, delay);
     };
 
     ws.onerror = () => { ws.close(); };
   }, [tid, n]);
 
   useEffect(() => {
-    isMounted.current = true;
+    activeTabRef.current = true;
     connect();
     return () => {
-      isMounted.current = false;
-      if (retryRef.current) clearTimeout(retryRef.current);
+      activeTabRef.current = false;
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      wsRef.current?.close();
+      socketRef.current?.close();
     };
   }, [connect]);
 

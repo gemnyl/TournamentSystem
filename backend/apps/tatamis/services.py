@@ -84,23 +84,9 @@ class TatamiService:
                             calculate_category_standings(category, persist=True)
 
                             # Broadcast to category channel so spectators get new results
-                            from asgiref.sync import async_to_sync
-                            from channels.layers import get_channel_layer
+                            from apps.common.broadcast import broadcast_category_results_update
 
-                            channel_layer = get_channel_layer()
-                            async_to_sync(channel_layer.group_send)(
-                                f"category_{category.id}",
-                                {
-                                    "type": "match.event",
-                                    "match_id": 0,
-                                    "event": {
-                                        "sequence": 0,
-                                        "event_type": "results_update",
-                                        "payload": {},
-                                    },
-                                    "match": None,
-                                },
-                            )
+                            broadcast_category_results_update(category.id)
                         except Exception:
                             import logging
 

@@ -41,15 +41,20 @@ class TatamiViewSet(viewsets.ModelViewSet):
             return [IsJudgeOrOrganizer()]
         return [AllowAny()]
 
-    @action(detail=True, methods=["post"], url_path="assign_match")
-    def assign_match(self, request, pk=None):
-        tatami = self.get_object()
+    def _check_judge_assignment(self, request, tatami) -> Response | None:
         if request.user.is_authenticated and request.user.role == "judge":
             if tatami.assigned_judge_id != request.user.id:
                 return Response(
                     {"detail": self.NOT_ASSIGNED_MESSAGE},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+        return None
+
+    @action(detail=True, methods=["post"], url_path="assign_match")
+    def assign_match(self, request, pk=None):
+        tatami = self.get_object()
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
         match_id = request.data.get("match_id")
         if not match_id:
             return Response(
@@ -66,12 +71,8 @@ class TatamiViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="release")
     def release(self, request, pk=None):
         tatami = self.get_object()
-        if request.user.is_authenticated and request.user.role == "judge":
-            if tatami.assigned_judge_id != request.user.id:
-                return Response(
-                    {"detail": self.NOT_ASSIGNED_MESSAGE},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
         TatamiService.release(tatami)
         tatami.refresh_from_db()
         return Response(TatamiSerializer(tatami).data)
@@ -79,12 +80,8 @@ class TatamiViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="set_active_results_category")
     def set_active_results_category(self, request, pk=None):
         tatami = self.get_object()
-        if request.user.is_authenticated and request.user.role == "judge":
-            if tatami.assigned_judge_id != request.user.id:
-                return Response(
-                    {"detail": self.NOT_ASSIGNED_MESSAGE},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
         category_id = request.data.get("category_id")
         try:
             TatamiService.set_active_results_category(
@@ -98,12 +95,8 @@ class TatamiViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="state")
     def state(self, request, pk=None):
         tatami = self.get_object()
-        if request.user.is_authenticated and request.user.role == "judge":
-            if tatami.assigned_judge_id != request.user.id:
-                return Response(
-                    {"detail": self.NOT_ASSIGNED_MESSAGE},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
         current_match = tatami.current_match
         return Response(
             {

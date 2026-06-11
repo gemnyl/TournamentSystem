@@ -70,9 +70,19 @@ def _find_final_match(matches: list[Match]) -> Match | None:
     return final_match
 
 
-def _assign_semi_losers_places(
-    final_match_id: int, matches: list[Match], category: Category, stats: dict[int, dict]
-) -> None:
+def _loser_sort_key(r_id: int, stats: dict[int, dict]) -> tuple:
+    s = stats[r_id]
+    return (
+        s["points"],
+        s["wins"],
+        s["scores_scored"] - s["scores_conceded"],
+        s["scores_scored"],
+    )
+
+
+def _get_semi_losers(
+    final_match_id: int, matches: list[Match], stats: dict[int, dict]
+) -> list[int]:
     semi_final_matches = [m for m in matches if m.next_match_id == final_match_id]
     semi_losers = []
     for sf in semi_final_matches:
@@ -81,7 +91,13 @@ def _assign_semi_losers_places(
             sf_loser = sf.reg_second_id if sf_winner == sf.reg_first_id else sf.reg_first_id
             if sf_loser in stats:
                 semi_losers.append(sf_loser)
+    return semi_losers
 
+
+def _assign_semi_losers_places(
+    final_match_id: int, matches: list[Match], category: Category, stats: dict[int, dict]
+) -> None:
+    semi_losers = _get_semi_losers(final_match_id, matches, stats)
     if not semi_losers:
         return
 
@@ -89,17 +105,7 @@ def _assign_semi_losers_places(
         for sl in semi_losers:
             stats[sl]["place"] = 3
     else:
-
-        def loser_sort_key(r_id):
-            s = stats[r_id]
-            return (
-                s["points"],
-                s["wins"],
-                s["scores_scored"] - s["scores_conceded"],
-                s["scores_scored"],
-            )
-
-        semi_losers.sort(key=loser_sort_key, reverse=True)
+        semi_losers.sort(key=lambda r_id: _loser_sort_key(r_id, stats), reverse=True)
         stats[semi_losers[0]]["place"] = 3
         if len(semi_losers) > 1:
             stats[semi_losers[1]]["place"] = 5

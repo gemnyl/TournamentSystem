@@ -195,10 +195,10 @@ class TournamentViewSet(viewsets.ModelViewSet):
         Приймає {"names": [...]} та створює категорії bulk за допомогою розумного NLP-парсеру.
         """
         tournament = self.get_object()
-        names = request.data.get("names", [])
-        if not isinstance(names, list):
+        names = request.data.get("names")
+        if not isinstance(names, list) or not names:
             return Response(
-                {"detail": "Поле 'names' має бути списком."},
+                {"detail": "Поле 'names' має бути непустим списком."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -326,12 +326,52 @@ def parse_category_name(name_str: str, sport_type: str) -> dict:
             )
 
     w_over = re.search(
-        r"(?:від|понад|over|\+)\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
+        r"(?:від|понад|over|\+)\s*(\d+(?:\.\d+)?)",
         weight_search_str,
         re.IGNORECASE,
     )
     if not w_over:
-        w_over = re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|\bplus\b)", weight_search_str, re.IGNORECASE)
+        if "+" in weight_search_str:
+            parts = weight_search_str.split("+")
+            stripped = parts[0].rstrip()
+            last_number = ""
+            for char in reversed(stripped):
+                if char.isdigit() or char == ".":
+                    last_number = char + last_number
+                elif last_number:
+                    break
+            if last_number:
+                try:
+                    float(last_number)
+
+                    class DummyMatch:
+                        def group(self, _idx):
+                            return last_number
+
+                    w_over = DummyMatch()
+                except ValueError:
+                    pass
+        else:
+            parts = re.split(r"\b(?:plus|плюс)\b", weight_search_str, flags=re.IGNORECASE)
+            if len(parts) > 1:
+                stripped = parts[0].rstrip()
+                last_number = ""
+                for char in reversed(stripped):
+                    if char.isdigit() or char == ".":
+                        last_number = char + last_number
+                    elif last_number:
+                        break
+                if last_number:
+                    try:
+                        float(last_number)
+
+                        class DummyMatch:
+                            def group(self, _idx):
+                                return last_number
+
+                        w_over = DummyMatch()
+                    except ValueError:
+                        pass
 
     if w_range:
         min_weight = float(w_range.group(1))
@@ -503,6 +543,24 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
                 raise PermissionDenied("Категорія не призначена на жодне татамі.")
 
+    def _broadcast_results_update(self, category):
+        # Broadcast state to all relevant tatami WS channels
+        from django.db.models import Q
+
+        from apps.common.broadcast import broadcast_tatami_state
+        from apps.tatamis.models import Tatami
+
+        matching_tatamis = Tatami.objects.filter(
+            Q(current_match__category=category) | Q(active_results_category=category)
+        )
+        for tatami in matching_tatamis:
+            broadcast_tatami_state(tatami)
+
+        # Broadcast to category channel to trigger spectator page updates
+        from apps.common.broadcast import broadcast_category_results_update
+
+        broadcast_category_results_update(category.id)
+
     @action(detail=True, methods=["post"], url_path="save_results")
     def save_results(self, request, pk=None):
         """POST /api/categories/{id}/save_results/
@@ -533,36 +591,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
             # Використовуємо автоматичний розрахунок
             results_data = calculate_category_standings(category, persist=True)
 
-        # Broadcast state to all relevant tatami WS channels
-        from django.db.models import Q
-
-        from apps.common.broadcast import broadcast_tatami_state
-        from apps.tatamis.models import Tatami
-
-        matching_tatamis = Tatami.objects.filter(
-            Q(current_match__category=category) | Q(active_results_category=category)
-        )
-        for tatami in matching_tatamis:
-            broadcast_tatami_state(tatami)
-
-        # Broadcast to category channel to trigger spectator page updates
-        from asgiref.sync import async_to_sync
-        from channels.layers import get_channel_layer
-
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"category_{category.id}",
-            {
-                "type": "match.event",
-                "match_id": 0,
-                "event": {
-                    "sequence": 0,
-                    "event_type": "results_update",
-                    "payload": {},
-                },
-                "match": None,
-            },
-        )
+        self._broadcast_results_update(category)
 
         serializer = CategoryResultSerializer(results_data, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -577,36 +606,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
         Registration.objects.filter(category=category).update(place=None)
 
-        # Broadcast state to all relevant tatami WS channels
-        from django.db.models import Q
-
-        from apps.common.broadcast import broadcast_tatami_state
-        from apps.tatamis.models import Tatami
-
-        matching_tatamis = Tatami.objects.filter(
-            Q(current_match__category=category) | Q(active_results_category=category)
-        )
-        for tatami in matching_tatamis:
-            broadcast_tatami_state(tatami)
-
-        # Broadcast to category channel to trigger spectator page updates
-        from asgiref.sync import async_to_sync
-        from channels.layers import get_channel_layer
-
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"category_{category.id}",
-            {
-                "type": "match.event",
-                "match_id": 0,
-                "event": {
-                    "sequence": 0,
-                    "event_type": "results_update",
-                    "payload": {},
-                },
-                "match": None,
-            },
-        )
+        self._broadcast_results_update(category)
 
         return Response({"detail": "Фіксацію результатів скасовано."}, status=status.HTTP_200_OK)
 

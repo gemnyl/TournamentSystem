@@ -97,20 +97,7 @@ class MatchService:
             if m.score_first == 0 and m.score_second == 0:
                 m.senshu = Match.Senshu.NONE
                 update_fields.append("senshu")
-            if m.next_match:
-                nxt = m.next_match
-                nxt_updated = False
-                if m.winner == nxt.reg_first:
-                    nxt.reg_first = None
-                    nxt_updated = True
-                elif m.winner == nxt.reg_second:
-                    nxt.reg_second = None
-                    nxt_updated = True
-                if nxt_updated:
-                    nxt.save(update_fields=["reg_first", "reg_second"])
-                    from apps.common.broadcast import broadcast_match_update
-
-                    broadcast_match_update(nxt)
+            self._clear_winner_from_next_match()
 
             m.status = Match.Status.ONGOING
             m.winner = None
@@ -378,20 +365,7 @@ class MatchService:
         if not can_reset:
             raise ValidationError(error_msg)
 
-        if m.next_match:
-            nxt = m.next_match
-            nxt_updated = False
-            if m.winner == nxt.reg_first:
-                nxt.reg_first = None
-                nxt_updated = True
-            elif m.winner == nxt.reg_second:
-                nxt.reg_second = None
-                nxt_updated = True
-            if nxt_updated:
-                nxt.save(update_fields=["reg_first", "reg_second"])
-                from apps.common.broadcast import broadcast_match_update
-
-                broadcast_match_update(nxt)
+        self._clear_winner_from_next_match()
 
         m.score_first = 0
         m.score_second = 0
@@ -504,6 +478,23 @@ class MatchService:
         broadcast_match_event(m, event)
         return m
 
+    def _clear_winner_from_next_match(self):
+        m = self.match
+        if m.next_match:
+            nxt = m.next_match
+            nxt_updated = False
+            if m.winner == nxt.reg_first:
+                nxt.reg_first = None
+                nxt_updated = True
+            elif m.winner == nxt.reg_second:
+                nxt.reg_second = None
+                nxt_updated = True
+            if nxt_updated:
+                nxt.save(update_fields=["reg_first", "reg_second"])
+                from apps.common.broadcast import broadcast_match_update
+
+                broadcast_match_update(nxt)
+
     @transaction.atomic
     def set_judges_count(self, judges_count: int, judge=None) -> Match:
         """Встановлює кількість суддів для конкретного поєдинку (3 або 5)."""
@@ -527,20 +518,7 @@ class MatchService:
                 raise ValidationError(f"Не можна змінити кількість суддів: {error_msg}")
 
             # Скидаємо просування переможця в наступний поєдинок, якщо є
-            if m.next_match:
-                nxt = m.next_match
-                nxt_updated = False
-                if m.winner == nxt.reg_first:
-                    nxt.reg_first = None
-                    nxt_updated = True
-                elif m.winner == nxt.reg_second:
-                    nxt.reg_second = None
-                    nxt_updated = True
-                if nxt_updated:
-                    nxt.save(update_fields=["reg_first", "reg_second"])
-                    from apps.common.broadcast import broadcast_match_update
-
-                    broadcast_match_update(nxt)
+            self._clear_winner_from_next_match()
 
             m.flags_aka = None
             m.flags_ao = None

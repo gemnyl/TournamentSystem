@@ -70,6 +70,32 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         return [AllowAny()]
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _execute_and_broadcast(self, match, action_func, *args, **kwargs):
+        try:
+            action_func(*args, **kwargs)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        last_event = match.events.order_by("-sequence").first()
+        broadcast_match_event(match, last_event)
+        return Response(MatchSerializer(match).data)
+
+    def _execute_service_action(self, match, action_func, *args, **kwargs):
+        try:
+            action_func(*args, **kwargs)
+        except Exception as exc:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+
+            if isinstance(exc, ValueError | TypeError | DjangoValidationError):
+                msg = exc.message if hasattr(exc, "message") else str(exc)
+                return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+            raise exc
+        match.refresh_from_db()
+        return Response(MatchSerializer(match).data)
+
+    # ------------------------------------------------------------------
     # Ігрові дії
     # ------------------------------------------------------------------
 
@@ -89,15 +115,10 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            svc = MatchService(match)
-            svc.apply_score(corner, action_key, judge=request.user, is_undo=is_undo)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        last_event = match.events.order_by("-sequence").first()
-        broadcast_match_event(match, last_event)
-        return Response(MatchSerializer(match).data)
+        svc = MatchService(match)
+        return self._execute_and_broadcast(
+            match, svc.apply_score, corner, action_key, judge=request.user, is_undo=is_undo
+        )
 
     @action(detail=True, methods=["post"], url_path="set_senshu")
     def set_senshu(self, request, pk=None):
@@ -113,15 +134,8 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            svc = MatchService(match)
-            svc.set_senshu(value, judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        last_event = match.events.order_by("-sequence").first()
-        broadcast_match_event(match, last_event)
-        return Response(MatchSerializer(match).data)
+        svc = MatchService(match)
+        return self._execute_and_broadcast(match, svc.set_senshu, value, judge=request.user)
 
     @action(detail=True, methods=["post"], url_path="set_winner")
     def set_winner(self, request, pk=None):
@@ -138,15 +152,10 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            svc = MatchService(match)
-            svc.set_winner(corner, win_method, judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        last_event = match.events.order_by("-sequence").first()
-        broadcast_match_event(match, last_event)
-        return Response(MatchSerializer(match).data)
+        svc = MatchService(match)
+        return self._execute_and_broadcast(
+            match, svc.set_winner, corner, win_method, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="set_draw")
     def set_draw(self, request, pk=None):
@@ -155,29 +164,15 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         """
         match = self.get_object()
         win_method = request.data.get("win_method", Match.WinMethod.DRAW)
-        try:
-            from django.core.exceptions import ValidationError
-
-            svc = MatchService(match)
-            svc.set_draw(win_method, judge=request.user)
-        except (ValueError, ValidationError) as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(MatchSerializer(match).data)
+        svc = MatchService(match)
+        return self._execute_service_action(match, svc.set_draw, win_method, judge=request.user)
 
     @action(detail=True, methods=["post"], url_path="reset_match")
     def reset_match(self, request, pk=None):
         """POST /api/matches/{id}/reset_match/"""
         match = self.get_object()
-        try:
-            from django.core.exceptions import ValidationError
-
-            svc = MatchService(match)
-            svc.reset_match(judge=request.user)
-        except (ValueError, ValidationError) as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(MatchSerializer(match).data)
+        svc = MatchService(match)
+        return self._execute_service_action(match, svc.reset_match, judge=request.user)
 
     # ------------------------------------------------------------------
     # Сітка категорії (список раундів)
@@ -224,40 +219,31 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"], url_path="timer/start")
     def timer_start(self, request, pk=None):
         match = self.get_object()
-        try:
-            MatchService(match).timer_start(judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        match.refresh_from_db()
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_start, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/pause")
     def timer_pause(self, request, pk=None):
         match = self.get_object()
         elapsed_ms = request.data.get("elapsed_ms")
-        try:
-            MatchService(match).timer_pause(elapsed_ms=elapsed_ms, judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        match.refresh_from_db()
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_pause, elapsed_ms=elapsed_ms, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/resume")
     def timer_resume(self, request, pk=None):
         match = self.get_object()
-        try:
-            MatchService(match).timer_resume(judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        match.refresh_from_db()
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_resume, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/reset")
     def timer_reset(self, request, pk=None):
         match = self.get_object()
-        MatchService(match).timer_reset(judge=request.user)
-        match.refresh_from_db()
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_reset, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/set_duration")
     def timer_set_duration(self, request, pk=None):
@@ -268,11 +254,9 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Поле 'duration_ms' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            MatchService(match).timer_set_duration(int(duration_ms), judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_set_duration, int(duration_ms), judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/add_time")
     def timer_add_time(self, request, pk=None):
@@ -283,11 +267,9 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Поле 'delta_ms' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            MatchService(match).timer_add_time(int(delta_ms), judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_add_time, int(delta_ms), judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="submit_flags")
     def submit_flags(self, request, pk=None):
@@ -302,18 +284,13 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Поля 'flags_aka' та 'flags_ao' є обов'язковими."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        try:
-            from django.core.exceptions import ValidationError as DjangoValidationError
-
-            svc = MatchService(match)
-            svc.submit_flags_decision(int(flags_aka), int(flags_ao), judge=request.user)
-        except (ValueError, TypeError, DjangoValidationError) as exc:
-            msg = exc.message if hasattr(exc, "message") else str(exc)
-            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
-
-        match.refresh_from_db()
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match,
+            MatchService(match).submit_flags_decision,
+            int(flags_aka),
+            int(flags_ao),
+            judge=request.user,
+        )
 
     @action(detail=True, methods=["post"], url_path="toggle_timer")
     def toggle_timer(self, request, pk=None):
@@ -327,15 +304,9 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Поле 'show_timer' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        try:
-            svc = MatchService(match)
-            svc.toggle_timer(bool(show_timer), judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        match.refresh_from_db()
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).toggle_timer, bool(show_timer), judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="set_judges_count")
     def set_judges_count(self, request, pk=None):
@@ -349,15 +320,6 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Поле 'judges_count' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        try:
-            from django.core.exceptions import ValidationError as DjangoValidationError
-
-            svc = MatchService(match)
-            svc.set_judges_count(int(judges_count), judge=request.user)
-        except (ValueError, TypeError, DjangoValidationError) as exc:
-            msg = exc.message if hasattr(exc, "message") else str(exc)
-            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
-
-        match.refresh_from_db()
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).set_judges_count, int(judges_count), judge=request.user
+        )

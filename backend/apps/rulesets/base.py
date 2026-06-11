@@ -83,6 +83,15 @@ class PointsRuleSet(BaseRuleSet):
     @abstractmethod
     def get_max_warnings(self) -> int: ...
 
+    def check_warnings_finish(self, state: MatchState) -> MatchState | None:
+        if state.warnings_aka >= self.get_max_warnings():
+            new = replace(state, is_finished=True, winner="ao", win_method="hansoku")
+            return cast(MatchState, new)
+        if state.warnings_ao >= self.get_max_warnings():
+            new = replace(state, is_finished=True, winner="aka", win_method="hansoku")
+            return cast(MatchState, new)
+        return None
+
     @abstractmethod
     def check_auto_finish(self, state: MatchState) -> MatchState: ...
 

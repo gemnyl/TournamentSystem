@@ -122,8 +122,7 @@ export default function KumiteWKFScoreboard({
 
   return (
     <div className="board font-scoreboard">
-      {/* Dynamic styles matching WKF professional layout and Oswald fonts */}
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&display=swap');
 
         :root {
@@ -326,7 +325,7 @@ export default function KumiteWKFScoreboard({
         .animate-timer-blink {
           animation: timer-blink 1s infinite step-end;
         }
-      ` }} />
+      `}</style>
 
       {/* HEADER */}
       <header className="header flex items-center justify-between">
