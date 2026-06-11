@@ -22,6 +22,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { Tatami, Tournament, Category, Match } from "@/types/api";
 
+interface JudgeUser {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+}
+
 
 const tatamiSchema = z.object({
   number: z.coerce.number().min(1, "Номер татамі має бути не менше 1"),
@@ -45,7 +52,7 @@ export default function TatamiAdminPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingTatami, setEditingTatami] = useState<Tatami | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Tatami | null>(null);
-  const [judges, setJudges] = useState<Record<string, unknown>[]>([]);
+  const [judges, setJudges] = useState<JudgeUser[]>([]);
   const [isReassigning, setIsReassigning] = useState<number | null>(null);
 
   // Helper for formatting finish time
@@ -153,7 +160,7 @@ export default function TatamiAdminPage() {
       const [tRes, tatamiRes, judgeRes, catRes, matchRes] = await Promise.all([
         api.get<Tournament>(`/tournaments/${tid}/`),
         api.get<Tatami[] | { results: Tatami[] }>(`/tatamis/?tournament=${tid}`),
-        api.get<Record<string, unknown>[] | { results: Record<string, unknown>[] }>("/auth/users/?role=judge"),
+        api.get<JudgeUser[] | { results: JudgeUser[] }>("/auth/users/?role=judge"),
         api.get<Category[] | { results: Category[] }>(`/categories/?tournament=${tid}`),
         api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${tid}`),
       ]);
@@ -165,7 +172,7 @@ export default function TatamiAdminPage() {
 
       const judgeList = Array.isArray(judgeRes.data)
           ? judgeRes.data
-          : (judgeRes.data as { results: Record<string, unknown>[] }).results;
+          : (judgeRes.data as { results: JudgeUser[] }).results;
       setJudges(judgeList);
 
       const catList = Array.isArray(catRes.data)

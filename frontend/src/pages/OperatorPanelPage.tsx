@@ -23,6 +23,26 @@ import { BracketView } from "@/components/bracket/BracketView";
 import { RoundRobinTable } from "@/components/bracket/RoundRobinTable";
 import type { Match, RulesetInfo, Tatami, Tournament, BracketResponse, Category } from "@/types/api";
 
+interface CategoryResult {
+  place: number | null;
+  wins: number;
+  draws: number;
+  losses: number;
+  points: number;
+  scores_scored: number;
+  scores_conceded: number;
+  name?: string;
+  club?: string;
+  registration: {
+    id: number;
+    place?: number | null;
+    athlete: {
+      full_name: string;
+      club?: { name?: string } | null;
+    };
+  };
+}
+
 function matchToTimerState(m: Match): TimerState {
   return {
     status: m.timer_status,
@@ -86,7 +106,7 @@ export default function OperatorPanelPage() {
   const [savingResultsCategoryId, setSavingResultsCategoryId] = useState<number | null>(null);
 
   const [middleTab, setMiddleTab] = useState<"matches" | "results">("matches");
-  const [categoryResults, setCategoryResults] = useState<Record<string, unknown>[]>([]);
+  const [categoryResults, setCategoryResults] = useState<CategoryResult[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [placeOverrides, setPlaceOverrides] = useState<Record<number, number | null>>({});
 
@@ -109,7 +129,7 @@ export default function OperatorPanelPage() {
       return;
     }
     try {
-      const { data } = await api.get<Record<string, unknown>[]>(`/categories/${selectedCategoryId}/results/`);
+      const { data } = await api.get<CategoryResult[]>(`/categories/${selectedCategoryId}/results/`);
       setCategoryResults(data);
     } catch {
       setCategoryResults([]);
@@ -1068,7 +1088,7 @@ export default function OperatorPanelPage() {
                         const dbCat = categories.find(c => c.id === selectedCategoryId);
                         const resultsPersisted = dbCat?.results_finalized ?? false;
 
-                        return categoryResults.map((res: Record<string, unknown>) => {
+                        return categoryResults.map((res: CategoryResult) => {
                           const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
 
                           const medal =
@@ -1229,9 +1249,9 @@ export default function OperatorPanelPage() {
                         {/* Standings List Preview */}
                         <div className="space-y-2.5 max-w-md mx-auto">
                           {categoryResults
-                            .filter((r) => r.place != null && r.place > 0)
-                            .sort((a, b) => a.place - b.place)
-                            .map((res: Record<string, unknown>) => {
+                            .filter((r) => r.place != null && (r.place ?? 0) > 0)
+                            .sort((a, b) => (a.place ?? 0) - (b.place ?? 0))
+                            .map((res: CategoryResult) => {
                               const place = res.place;
                               const name = res.registration?.athlete?.full_name ?? res.name ?? "—";
                               const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
@@ -1340,7 +1360,7 @@ export default function OperatorPanelPage() {
             {(() => {
               const dbCat = categories.find(c => c.id === selectedCategoryId);
               const resultsPersisted = dbCat?.results_finalized ?? false;
-              const standings = categoryResults.filter(r => r.place != null && r.place > 0).sort((a, b) => a.place - b.place);
+              const standings = categoryResults.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0));
 
               return (
                 <>
@@ -1350,14 +1370,14 @@ export default function OperatorPanelPage() {
                         <Trophy className="w-3.5 h-3.5 text-yellow-500" /> Переможці та призери
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                        {standings.map((res: Record<string, unknown>) => {
+                        {standings.map((res: CategoryResult) => {
                           const place = res.place;
                           const name = res.registration?.athlete?.full_name ?? res.name;
                           const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
                           let badge = "🥇";
                           if (place === 2) badge = "🥈";
                           else if (place === 3) badge = "🥉";
-                          else if (place > 3) badge = "🎖️";
+                          else if ((place ?? 0) > 3) badge = "🎖️";
 
                           return (
                             <div key={res.registration?.id || res.id} className="flex items-center gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">

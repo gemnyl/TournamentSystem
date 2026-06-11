@@ -31,6 +31,30 @@ import type { Category, Registration, Athlete, PaginatedResponse, Tournament, Ta
 const weighInSchema = z.object({ weight: z.coerce.number().min(20).max(300) });
 type WeighInForm = z.infer<typeof weighInSchema>;
 
+interface CategoryResult {
+  place: number | null;
+  wins: number;
+  draws: number;
+  losses: number;
+  points: number;
+  scores_scored: number;
+  scores_conceded: number;
+  registration: {
+    id: number;
+    place?: number | null;
+    athlete: {
+      full_name: string;
+      club?: { name?: string; region?: string } | null;
+    };
+  };
+}
+
+interface RulesetOption {
+  key: string;
+  label?: string;
+  name?: string;
+}
+
 const editCategorySchema = z.object({
   name:                   z.string().min(2, "Введіть назву"),
   allowed_gender:         z.enum(["male", "female", "mixed"]),
@@ -80,8 +104,7 @@ export default function CategoryDetailPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedTatamiId, setSelectedTatamiId] = useState<string>("");
   const [assigningTatami, setAssigningTatami] = useState(false);
-  // Re-use rulesets
-  const [rulesets, setRulesets] = useState<Record<string, unknown>[]>([]);
+  const [rulesets, setRulesets] = useState<RulesetOption[]>([]);
 
   const categoryMatches = matches.filter((m: Match) => m.category === Number(id));
   const firstMatchWithTatami = categoryMatches?.find((m: Match) => m.tatami !== null);
@@ -96,7 +119,7 @@ export default function CategoryDetailPage() {
 
   // Tab states and results engine states
   const [activeTab, setActiveTab] = useState<"registrations" | "results">("registrations");
-  const [results, setResults] = useState<Record<string, unknown>[]>([]);
+  const [results, setResults] = useState<CategoryResult[]>([]);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
   const [isSavingResults, setIsSavingResults] = useState(false);
   const [placeOverrides, setPlaceOverrides] = useState<Record<number, number | null>>({});
@@ -194,7 +217,7 @@ export default function CategoryDetailPage() {
   const handleOpenEditCat = async () => {
     if (!category) return;
     try {
-      const { data } = await api.get<Record<string, unknown>[]>("/rulesets/");
+      const { data } = await api.get<RulesetOption[]>("/rulesets/");
       setRulesets(data);
     } catch {
       // intentionally empty
@@ -313,7 +336,7 @@ export default function CategoryDetailPage() {
     if (!silent) setIsLoadingResults(true);
     try {
       const [resultsRes, regRes] = await Promise.all([
-        api.get<Record<string, unknown>[]>(`/categories/${id}/results/`),
+        api.get<CategoryResult[]>(`/categories/${id}/results/`),
         api.get<PaginatedResponse<Registration> | Registration[]>(`/registrations/?category=${id}`),
       ]);
       setResults(resultsRes.data);
@@ -364,6 +387,7 @@ export default function CategoryDetailPage() {
     if (activeTab === "results") {
       fetchResults();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, id]);
 
   if (isLoading) {
@@ -692,8 +716,7 @@ export default function CategoryDetailPage() {
                               Немає даних для заліку
                             </TableCell>
                           </TableRow>
-                        ) : (
-                          results.map((res: Record<string, unknown>) => {
+                        ) : results.map((res: CategoryResult) => {
                             const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
                             const medal =
                               placeVal === 1
@@ -716,7 +739,7 @@ export default function CategoryDetailPage() {
                                         placeVal === 1 && "text-yellow-400 scale-110",
                                         placeVal === 2 && "text-slate-300 scale-105",
                                         placeVal === 3 && "text-amber-600",
-                                        placeVal > 3 && "text-muted-foreground text-sm font-normal"
+                                        (placeVal ?? 0) > 3 && "text-muted-foreground text-sm font-normal"
                                       )}
                                     >
                                       {medal}
@@ -775,7 +798,7 @@ export default function CategoryDetailPage() {
                               </TableRow>
                             );
                           })
-                        )}
+                        }
                       </TableBody>
                     </Table>
                   </div>

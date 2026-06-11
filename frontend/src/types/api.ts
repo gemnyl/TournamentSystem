@@ -181,6 +181,9 @@ export interface Tatami {
   upcoming_matches?: Match[];
   active_results_category?: number | null;
   active_results_category_name?: string | null;
+  // Annotated fields from list endpoints
+  tournament_title?: string;
+  tournament_status?: string;
 }
 
 export interface TatamiSnapshot {

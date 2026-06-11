@@ -7,13 +7,27 @@ import { BracketView } from "@/components/bracket/BracketView";
 import { Button } from "@/components/ui/button";
 import type { BracketResponse, Category, Match } from "@/types/api";
 
+interface CategoryStanding {
+  place?: number | null;
+  id?: number;
+  name?: string;
+  club?: string;
+  registration?: {
+    id?: number;
+    athlete?: {
+      full_name?: string;
+      club?: { name?: string; region?: string };
+    };
+  };
+}
+
 export default function BracketPage() {
   const { id } = useParams<{ id: string }>();
   const [bracket, setBracket]   = useState<BracketResponse | null>(null);
   const [category, setCategory] = useState<Category | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
-  const [standings, setStandings] = useState<Record<string, unknown>[]>([]);
+  const [standings, setStandings] = useState<CategoryStanding[]>([]);
 
   const fetchBracket = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -33,8 +47,8 @@ export default function BracketPage() {
       setCategory(catRes.data);
 
       try {
-        const res = await api.get<Record<string, unknown>[]>(`/categories/${id}/results/`);
-        setStandings(res.data.filter(r => r.place != null && r.place > 0).sort((a, b) => a.place - b.place));
+        const res = await api.get<CategoryStanding[]>(`/categories/${id}/results/`);
+        setStandings(res.data.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)));
       } catch {
         setStandings([]);
       }
@@ -62,8 +76,8 @@ export default function BracketPage() {
       };
     });
     // Silently re-fetch standings to keep standings updated in real-time
-    api.get<Record<string, unknown>[]>(`/categories/${id}/results/`).then((res) => {
-      setStandings(res.data.filter(r => r.place != null && r.place > 0).sort((a, b) => a.place - b.place));
+    api.get<CategoryStanding[]>(`/categories/${id}/results/`).then((res) => {
+      setStandings(res.data.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)));
     }).catch(() => {});
   }, [id, fetchBracket]);
 
@@ -145,7 +159,7 @@ export default function BracketPage() {
               let badge = "🥇";
               if (place === 2) badge = "🥈";
               else if (place === 3) badge = "🥉";
-              else if (place > 3) badge = "🎖️";
+              else if ((place ?? 0) > 3) badge = "🎖️";
 
               return (
                 <div key={res.registration?.id || res.id} className="flex items-center gap-2 p-2 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
