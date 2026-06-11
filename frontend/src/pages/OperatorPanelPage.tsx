@@ -52,9 +52,9 @@ function matchToTimerState(m: Match): TimerState {
   };
 }
 
-function getTatamiMatchId(currentMatch: Match | null | number | Record<string, unknown>): number | null {
+function getTatamiMatchId(currentMatch: Match | null | number | Record<string, unknown> | undefined): number | null {
   if (!currentMatch) return null;
-  if (typeof currentMatch === "object") return currentMatch.id;
+  if (typeof currentMatch === "object") return (currentMatch as { id?: number }).id ?? null;
   return currentMatch;
 }
 
@@ -227,10 +227,10 @@ export default function OperatorPanelPage() {
         api.get<Record<string, unknown>[]>(`/matches/bracket/?category=${selectedCategoryId}`),
         api.get<Category>(`/categories/${selectedCategoryId}/`),
       ]);
-      const rounds = bracketRes.data.map(r => r.matches);
+      const rawRounds = bracketRes.data.map(r => (r as { matches?: Match[] }).matches ?? []);
       setSelectedCategoryBracket({
         format: catRes.data.bracket_format,
-        rounds: rounds
+        rounds: rawRounds
       });
     } catch {
       setSelectedCategoryBracket(null);
@@ -635,7 +635,7 @@ export default function OperatorPanelPage() {
 
   // Upcoming matches across the entire tatami
   const nextUpcomingMatches = useMemo(() => {
-    const activeMatchId = getTatamiMatchId(tatami?.current_match);
+    const activeMatchId = getTatamiMatchId(tatami?.current_match ?? null);
     const scheduled = tatamiMatches.filter((m) => m.status === "scheduled" && m.id !== activeMatchId);
     return scheduled
       .sort((a, b) => {
@@ -676,7 +676,7 @@ export default function OperatorPanelPage() {
         key={m.id}
         disabled={isCurrent}
         onClick={() => {
-          if (getTatamiMatchId(tatami?.current_match) === m.id) {
+          if (getTatamiMatchId(tatami?.current_match ?? null) === m.id) {
             setCurrentMatch(m);
             setTimerState(matchToTimerState(m));
             return;
@@ -1263,7 +1263,7 @@ export default function OperatorPanelPage() {
 
                               return (
                                 <div
-                                  key={res.registration?.id || res.id}
+                                  key={res.registration?.id}
                                   className={cn(
                                     "flex items-center justify-between p-3 rounded-xl border text-xs",
                                     place === 1 ? "bg-yellow-500/5 border-yellow-500/20" :
@@ -1380,7 +1380,7 @@ export default function OperatorPanelPage() {
                           else if ((place ?? 0) > 3) badge = "🎖️";
 
                           return (
-                            <div key={res.registration?.id || res.id} className="flex items-center gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
+                            <div key={res.registration?.id} className="flex items-center gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
                               <span className="text-base select-none shrink-0">{badge}</span>
                               <div className="flex flex-col min-w-0 text-left">
                                 <span className="font-bold text-[11px] text-white truncate leading-tight">{name}</span>

@@ -34,10 +34,10 @@ const tatamiSchema = z.object({
   number: z.coerce.number().min(1, "Номер татамі має бути не менше 1"),
   name: z.string().optional().default(""),
   is_active: z.boolean().default(true),
-  assigned_judge: z.string().optional().transform(v => v === "" || v === undefined ? null : Number(v)),
+  assigned_judge: z.string().optional(),
 });
 
-type TatamiForm = z.infer<typeof tatamiSchema>;
+type TatamiFormValues = z.infer<typeof tatamiSchema>;
 
 export default function TatamiAdminPage() {
   const { tid } = useParams<{ tid: string }>();
@@ -149,7 +149,7 @@ export default function TatamiAdminPage() {
     });
   }, [categories, matches]);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<TatamiForm>({
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<TatamiFormValues>({
     resolver: zodResolver(tatamiSchema),
     defaultValues: { number: 1, name: "", is_active: true, assigned_judge: "" }
   });
@@ -292,7 +292,10 @@ export default function TatamiAdminPage() {
     }
   };
 
-  const onSubmit = async (data: TatamiForm) => {
+  const onSubmit = async (data: TatamiFormValues) => {
+    const assignedJudge = data.assigned_judge === "" || data.assigned_judge === undefined
+      ? null
+      : Number(data.assigned_judge);
     setIsSubmitting(true);
     try {
       if (editingTatami) {
@@ -300,6 +303,7 @@ export default function TatamiAdminPage() {
         const res = await api.put<Tatami>(`/tatamis/${editingTatami.id}/`, {
           tournament: Number(tid),
           ...data,
+          assigned_judge: assignedJudge,
         });
         setTatamis((prev) => prev.map((item) => (item.id === editingTatami.id ? res.data : item)));
         toast({ title: "Татамі оновлено!" });
@@ -308,6 +312,7 @@ export default function TatamiAdminPage() {
         const res = await api.post<Tatami>("/tatamis/", {
           tournament: Number(tid),
           ...data,
+          assigned_judge: assignedJudge,
         });
         setTatamis((prev) => [...prev, res.data].sort((a, b) => a.number - b.number));
         toast({ title: "Татамі успішно створено!" });

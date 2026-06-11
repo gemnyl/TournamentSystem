@@ -80,7 +80,7 @@ export default function ScoreboardPage() {
           setTatami(matchingTatami);
           fetchTatamiMatches(matchingTatami);
           if (matchingTatami.current_match) {
-            const matchObj = matchingTatami.current_match as Match;
+            const matchObj = matchingTatami.current_match as unknown as Match;
             setCurrentMatch(matchObj);
             setTimerState(matchToTimerState(matchObj));
           }

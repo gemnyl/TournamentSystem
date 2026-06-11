@@ -152,7 +152,7 @@ export default function BracketPage() {
             <Trophy className="w-4 h-4 text-yellow-500" /> Переможці та призери
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
-            {standings.map((res: Record<string, unknown>) => {
+            {standings.map((res) => {
               const place = res.place;
               const name = res.registration?.athlete?.full_name ?? res.name;
               const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
@@ -162,7 +162,7 @@ export default function BracketPage() {
               else if ((place ?? 0) > 3) badge = "🎖️";
 
               return (
-                <div key={res.registration?.id || res.id} className="flex items-center gap-2 p-2 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
+                <div key={res.registration?.id ?? res.id} className="flex items-center gap-2 p-2 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
                   <span className="text-xl select-none shrink-0">{badge}</span>
                   <div className="flex flex-col min-w-0 text-left">
                     <span className="font-bold text-xs text-white truncate leading-tight">{name}</span>

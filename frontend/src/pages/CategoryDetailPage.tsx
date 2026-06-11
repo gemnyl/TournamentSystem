@@ -53,6 +53,7 @@ interface RulesetOption {
   key: string;
   label?: string;
   name?: string;
+  sport_type?: string;
 }
 
 const editCategorySchema = z.object({
@@ -70,7 +71,10 @@ const editCategorySchema = z.object({
   ),
   bracket_format:         z.enum(["single_elimination", "round_robin"]),
   ruleset_key:            z.string().min(1, "Оберіть правила"),
-  match_duration_seconds: z.string().optional().transform(v => v === "" || v === undefined ? undefined : Number(v)),
+  match_duration_seconds: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined) ? undefined : Number(val),
+    z.number().positive().optional()
+  ),
   allowed_skill_level:    z.string().optional(),
   two_third_places:       z.boolean().default(true),
 });
@@ -231,7 +235,7 @@ export default function CategoryDetailPage() {
       max_weight: category.max_weight ?? undefined,
       bracket_format: category.bracket_format as "single_elimination" | "round_robin",
       ruleset_key: category.ruleset_key,
-      match_duration_seconds: category.match_duration_seconds ? String(category.match_duration_seconds) : "",
+      match_duration_seconds: category.match_duration_seconds ?? undefined,
       allowed_skill_level: category.allowed_skill_level ?? "",
       two_third_places: category.two_third_places ?? true,
     });

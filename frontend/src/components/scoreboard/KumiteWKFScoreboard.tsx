@@ -97,7 +97,7 @@ export default function KumiteWKFScoreboard({
   const backUrl = `/tournaments/${tidFromUrl}/day`;
 
   const finalStandings = categoryResults
-    .filter((r) => r.place != null && r.place > 0)
+    .filter((r): r is typeof r & { place: number } => r.place != null && r.place > 0)
     .sort((a, b) => a.place - b.place);
 
   return (
