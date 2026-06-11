@@ -7,5 +7,6 @@ class RulesetsConfig(AppConfig):
     verbose_name = "Ruleset Engine"
 
     def ready(self):
+        import apps.rulesets.karate_kata  # noqa: F401
         import apps.rulesets.karate_wkf  # noqa: F401
         import apps.rulesets.shobu_ippon  # noqa: F401

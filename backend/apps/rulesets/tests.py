@@ -165,11 +165,12 @@ class ShobuIpponRuleSetTest(TestCase):
 
 
 class RegistryTest(TestCase):
-    def test_list_rulesets_returns_both(self):
+    def test_list_rulesets_returns_all(self):
         rulesets = list_rulesets()
         keys = {r["key"] for r in rulesets}
         self.assertIn("karate_wkf", keys)
         self.assertIn("shobu_ippon", keys)
+        self.assertIn("karate_kata", keys)
 
     def test_list_rulesets_has_required_fields(self):
         for rs in list_rulesets():
@@ -179,7 +180,46 @@ class RegistryTest(TestCase):
     def test_get_ruleset_returns_instance(self):
         rs = get_ruleset("karate_wkf")
         self.assertEqual(rs.key, "karate_wkf")
+        rs_kata = get_ruleset("karate_kata")
+        self.assertEqual(rs_kata.key, "karate_kata")
 
     def test_get_ruleset_unknown_key_raises(self):
         with self.assertRaises(KeyError):
             get_ruleset("nonexistent_ruleset")
+
+
+class KarateKataRuleSetTest(TestCase):
+    def setUp(self):
+        from apps.rulesets.karate_kata import KarateKataRuleSet
+
+        self.ruleset = KarateKataRuleSet()
+
+    def test_judges_count_options(self):
+        self.assertEqual(list(self.ruleset.get_judges_count_options()), [3, 5])
+
+    def test_win_methods(self):
+        methods = {m.key for m in self.ruleset.get_win_methods()}
+        self.assertIn("decision", methods)
+        self.assertIn("walkover", methods)
+
+    def test_apply_flags_decision_aka_wins(self):
+        state = MatchState()
+        result = self.ruleset.apply_flags_decision(state, flags_aka=3, flags_ao=2, judges_count=5)
+        self.assertTrue(result.is_finished)
+        self.assertEqual(result.winner, "aka")
+        self.assertEqual(result.win_method, "decision")
+        self.assertEqual(result.flags_aka, 3)
+        self.assertEqual(result.flags_ao, 2)
+        self.assertEqual(result.judges_count, 5)
+
+    def test_apply_flags_decision_ao_wins(self):
+        state = MatchState()
+        result = self.ruleset.apply_flags_decision(state, flags_aka=1, flags_ao=2, judges_count=3)
+        self.assertTrue(result.is_finished)
+        self.assertEqual(result.winner, "ao")
+        self.assertEqual(result.win_method, "decision")
+
+    def test_apply_flags_decision_invalid_sum_raises(self):
+        state = MatchState()
+        with self.assertRaises(ValueError):
+            self.ruleset.apply_flags_decision(state, flags_aka=2, flags_ao=2, judges_count=5)

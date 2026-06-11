@@ -22,6 +22,7 @@ class AthleteSerializer(serializers.ModelSerializer):
     )
     coach = UserSerializer(read_only=True)
     age = serializers.SerializerMethodField()
+    full_name = serializers.CharField(source="get_full_name", read_only=True)
 
     class Meta:
         model = Athlete
@@ -29,6 +30,7 @@ class AthleteSerializer(serializers.ModelSerializer):
             "id",
             "first_name",
             "last_name",
+            "full_name",
             "gender",
             "birth_date",
             "base_weight",

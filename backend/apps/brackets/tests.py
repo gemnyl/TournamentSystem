@@ -16,7 +16,26 @@ Unit-тести для підсистеми генерації турнірни�
 
 import random
 
-import pytest
+try:
+    import pytest
+except ImportError:
+
+    class MockPytest:
+        class raises:
+            def __init__(self, expected_exception, *args, **kwargs):
+                self.expected_exception = expected_exception
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                if exc_type is None:
+                    raise AssertionError(f"{self.expected_exception.__name__} not raised")
+                if issubclass(exc_type, self.expected_exception):
+                    return True
+                return False
+
+    pytest = MockPytest()
 
 from apps.brackets import utils
 from apps.brackets.utils import Participant
@@ -306,6 +325,17 @@ try:
             gen = BracketGenerator(self.category)
             with pytest.raises(Exception, match=".*"):
                 gen.generate()
+
+        def test_duration_fallback_on_invalid_ruleset(self):
+            self._create_confirmed_registrations(2)
+            self.category.match_duration_seconds = None
+            self.category.ruleset_key = "invalid_ruleset_key"
+            self.category.save()
+
+            gen = BracketGenerator(self.category)
+            matches = gen.generate()
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0].timer_duration_ms, 180000)
 
 except ImportError:
     # Django не налаштовано — інтеграційні тести пропускаються

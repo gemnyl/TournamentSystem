@@ -12,32 +12,89 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TournamentCard } from "@/components/tournament/TournamentCard";
 import type { Tournament, PaginatedResponse } from "@/types/api";
+import { formatSportType } from "@/lib/utils";
+
+const getTodayAtTime = (hours: number, minutes: number) => {
+  const d = new Date();
+  d.setHours(hours, minutes, 0, 0);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hh}:${mm}`;
+};
 
 // ── Схема форми створення турніру ──
 const createSchema = z.object({
-  title:       z.string().min(3, "Мінімум 3 символи"),
-  sport_type:  z.string().min(2, "Введіть вид спорту"),
-  location:    z.string().min(2, "Введіть місце проведення"),
-  start_date:  z.string().min(1, "Оберіть дату початку"),
-  end_date:    z.string().min(1, "Оберіть дату кінця"),
+  title:              z.string().min(3, "Мінімум 3 символи"),
+  sport_type:         z.string().min(2, "Введіть вид спорту"),
+  location:           z.string().min(2, "Введіть місце проведення"),
+  start_date:         z.string().min(1, "Оберіть дату початку"),
+  end_date:           z.string().min(1, "Оберіть дату кінця"),
+  registration_start: z.string().optional().nullable(),
+  registration_end:   z.string().optional().nullable(),
+}).refine((data) => {
+  const start = new Date(data.start_date).getTime();
+  const now = Date.now() - 5 * 60 * 1000; // 5-minute buffer
+  return start >= now;
+}, {
+  message: "Дата початку не може бути в минулому",
+  path: ["start_date"]
+}).refine((data) => {
+  const start = new Date(data.start_date).getTime();
+  const end = new Date(data.end_date).getTime();
+  return end > start;
+}, {
+  message: "Дата кінця має бути пізнішою за дату початку",
+  path: ["end_date"]
+}).refine((data) => {
+  if (data.registration_start && data.registration_end) {
+    const regStart = new Date(data.registration_start).getTime();
+    const regEnd = new Date(data.registration_end).getTime();
+    return regEnd > regStart;
+  }
+  return true;
+}, {
+  message: "Кінець реєстрації має бути пізнішим за початок реєстрації",
+  path: ["registration_end"]
 });
+
 type CreateForm = z.infer<typeof createSchema>;
 
 export default function TournamentListPage() {
   const { isOrganizer } = useAuth();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [rulesets, setRulesets] = useState<Record<string, unknown>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateForm>({
+  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
+    defaultValues: {
+      start_date: getTodayAtTime(9, 0),
+      end_date: getTodayAtTime(18, 0),
+      registration_start: "",
+      registration_end: "",
+      sport_type: "",
+    }
   });
 
-  // Завантаження турнірів
+  // Завантаження правил та турнірів
+  const fetchRulesets = async () => {
+    try {
+      const { data } = await api.get("/rulesets/");
+      setRulesets(data);
+    } catch (e) {
+      console.error("Помилка завантаження правил:", e);
+    }
+  };
+
   const fetchTournaments = async () => {
     setIsLoading(true);
     try {
@@ -49,7 +106,10 @@ export default function TournamentListPage() {
     }
   };
 
-  useEffect(() => { fetchTournaments(); }, []);
+  useEffect(() => {
+    fetchTournaments();
+    fetchRulesets();
+  }, []);
 
   // Фільтрація на клієнті за пошуком
   const filtered = tournaments.filter((t) =>
@@ -61,7 +121,12 @@ export default function TournamentListPage() {
   const onCreateSubmit = async (data: CreateForm) => {
     setIsCreating(true);
     try {
-      await api.post("/tournaments/", data);
+      const payload = {
+        ...data,
+        registration_start: data.registration_start || null,
+        registration_end: data.registration_end || null,
+      };
+      await api.post("/tournaments/", payload);
       toast({ title: "Турнір створено!", variant: "default" });
       setDialogOpen(false);
       reset();
@@ -134,7 +199,7 @@ export default function TournamentListPage() {
 
       {/* Діалог створення */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Новий турнір</DialogTitle>
           </DialogHeader>
@@ -146,7 +211,18 @@ export default function TournamentListPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Вид спорту</Label>
-              <Input placeholder="Карате, Дзюдо, Тхеквондо..." {...register("sport_type")} />
+              <Select onValueChange={(v) => setValue("sport_type", v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Оберіть вид спорту..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from(new Set(rulesets.map(r => r.sport_type as string).filter(Boolean))).map((sport) => (
+                    <SelectItem key={sport} value={sport}>
+                      {formatSportType(sport)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {errors.sport_type && <p className="text-xs text-destructive">{errors.sport_type.message}</p>}
             </div>
             <div className="space-y-1.5">
@@ -156,17 +232,29 @@ export default function TournamentListPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Початок</Label>
-                <Input type="date" {...register("start_date")} />
+                <Label>Початок турніру</Label>
+                <Input type="datetime-local" {...register("start_date")} />
                 {errors.start_date && <p className="text-xs text-destructive">{errors.start_date.message}</p>}
               </div>
               <div className="space-y-1.5">
-                <Label>Кінець</Label>
-                <Input type="date" {...register("end_date")} />
+                <Label>Кінець турніру</Label>
+                <Input type="datetime-local" {...register("end_date")} />
                 {errors.end_date && <p className="text-xs text-destructive">{errors.end_date.message}</p>}
               </div>
             </div>
-            <DialogFooter>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Початок реєстрації <span className="text-muted-foreground text-xs">(опціонально)</span></Label>
+                <Input type="datetime-local" {...register("registration_start")} />
+                {errors.registration_start && <p className="text-xs text-destructive">{errors.registration_start.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Кінець реєстрації <span className="text-muted-foreground text-xs">(опціонально)</span></Label>
+                <Input type="datetime-local" {...register("registration_end")} />
+                {errors.registration_end && <p className="text-xs text-destructive">{errors.registration_end.message}</p>}
+              </div>
+            </div>
+            <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Скасувати
               </Button>

@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Club, User
+from apps.accounts.permissions import IsOrganizer
 from apps.accounts.serializers import (
     ClubSerializer,
     LoginSerializer,
@@ -83,11 +84,17 @@ class ClubViewSet(viewsets.ModelViewSet):
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    """Список користувачів — тільки для адміністраторів."""
+    """Список користувачів — тільки для адміністраторів та організаторів."""
 
-    queryset = User.objects.select_related("club").all()
     serializer_class = UserSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsOrganizer]
+
+    def get_queryset(self):
+        qs = User.objects.select_related("club").all()
+        role = self.request.query_params.get("role")
+        if role:
+            qs = qs.filter(role=role)
+        return qs
 
 
 # Create your views here.

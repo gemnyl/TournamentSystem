@@ -16,11 +16,13 @@ from apps.brackets.services import BracketGenerator
 from apps.matches.serializers import MatchSerializer
 from apps.tournaments.models import Category, Registration, Tournament
 from apps.tournaments.serializers import (
+    CategoryResultSerializer,
     CategorySerializer,
     RegistrationSerializer,
     TournamentDetailSerializer,
     TournamentSerializer,
 )
+from apps.tournaments.services import calculate_category_standings
 
 
 class TournamentViewSet(viewsets.ModelViewSet):
@@ -42,6 +44,9 @@ class TournamentViewSet(viewsets.ModelViewSet):
             "open_registration",
             "start",
             "complete",
+            "generate_all_brackets",
+            "auto_distribute_tatamis",
+            "import_categories",
         ):
             return [IsOrganizer()]
         from rest_framework.permissions import AllowAny
@@ -86,6 +91,313 @@ class TournamentViewSet(viewsets.ModelViewSet):
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(TournamentSerializer(tournament).data)
 
+    @action(detail=True, methods=["post"], url_path="generate_all_brackets")
+    def generate_all_brackets(self, request, pk=None):
+        """POST /api/tournaments/{id}/generate_all_brackets/"""
+        tournament = self.get_object()
+        categories = tournament.categories.all()
+
+        round_robin_min = int(request.data.get("round_robin_min", 2))
+        round_robin_max = int(request.data.get("round_robin_max", 5))
+        single_elimination_min = int(request.data.get("single_elimination_min", 6))
+        single_elimination_max = int(request.data.get("single_elimination_max", 32))
+
+        generated_count = 0
+        errors = []
+        for cat in categories:
+            if cat.matches.exists():
+                continue
+            confirmed_count = cat.registrations.filter(status=Registration.Status.CONFIRMED).count()
+            if confirmed_count < 2:
+                continue
+
+            if round_robin_min <= confirmed_count <= round_robin_max:
+                cat.bracket_format = Category.BracketFormat.ROUND_ROBIN
+                cat.save(update_fields=["bracket_format"])
+            elif single_elimination_min <= confirmed_count <= single_elimination_max:
+                cat.bracket_format = Category.BracketFormat.SINGLE_ELIMINATION
+                cat.save(update_fields=["bracket_format"])
+
+            try:
+                BracketGenerator(cat).generate()
+                generated_count += 1
+            except DjangoValidationError as exc:
+                errors.append(f"Категорія {cat.name}: {exc.message}")
+
+        return Response(
+            {"detail": f"Згенеровано сітки для {generated_count} категорій.", "errors": errors},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="auto_distribute_tatamis")
+    def auto_distribute_tatamis(self, request, pk=None):
+        """POST /api/tournaments/{id}/auto_distribute_tatamis/"""
+        tournament = self.get_object()
+        active_tatamis = list(tournament.tatamis.filter(is_active=True).order_by("number"))
+        if not active_tatamis:
+            return Response(
+                {"detail": "Немає активних татамі в цьому турнірі."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        categories = list(tournament.categories.all())
+        categories_with_matches = [c for c in categories if c.matches.exists()]
+        if not categories_with_matches:
+            return Response(
+                {"detail": "Немає категорій зі згенерованими сітками."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Clear current_match for all tatamis in this tournament since the schedule is reshuffled
+        from apps.common.broadcast import broadcast_tatami_state
+
+        for t in tournament.tatamis.all():
+            if t.current_match:
+                t.current_match = None
+                t.save(update_fields=["current_match"])
+                broadcast_tatami_state(t)
+
+        # Greedy load-balancing sorting by match count descending
+        categories_with_matches.sort(key=lambda c: c.matches.count(), reverse=True)
+
+        tatami_loads = {t.id: 0 for t in active_tatamis}
+        assignments = []
+
+        for cat in categories_with_matches:
+            least_loaded_tatami = min(active_tatamis, key=lambda t: tatami_loads[t.id])
+            cat.matches.update(tatami=least_loaded_tatami)
+            match_count = cat.matches.count()
+            tatami_loads[least_loaded_tatami.id] += match_count
+            assignments.append(
+                {
+                    "category_id": cat.id,
+                    "category_name": cat.name,
+                    "tatami_id": least_loaded_tatami.id,
+                    "tatami_number": least_loaded_tatami.number,
+                    "matches_count": match_count,
+                }
+            )
+
+        return Response(
+            {
+                "detail": (
+                    f"Успішно розподілено {len(categories_with_matches)} "
+                    f"категорій по {len(active_tatamis)} татамі."
+                ),
+                "assignments": assignments,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="import_categories")
+    def import_categories(self, request, pk=None):
+        """POST /api/tournaments/{id}/import_categories/
+        Приймає {"names": [...]} та створює категорії bulk за допомогою розумного NLP-парсеру.
+        """
+        tournament = self.get_object()
+        names = request.data.get("names")
+        if not isinstance(names, list) or not names:
+            return Response(
+                {"detail": "Поле 'names' має бути непустим списком."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.db import transaction
+
+        created_categories = []
+
+        try:
+            with transaction.atomic():
+                for name_str in names:
+                    if not isinstance(name_str, str) or not name_str.strip():
+                        continue
+
+                    parsed = parse_category_name(name_str, tournament.sport_type)
+                    category = Category.objects.create(
+                        tournament=tournament,
+                        name=parsed["name"],
+                        allowed_gender=parsed["allowed_gender"],
+                        min_age=parsed["min_age"],
+                        max_age=parsed["max_age"],
+                        min_weight=parsed["min_weight"],
+                        max_weight=parsed["max_weight"],
+                        ruleset_key=parsed["ruleset_key"],
+                        bracket_format=parsed["bracket_format"],
+                    )
+                    created_categories.append(category)
+        except Exception as exc:
+            return Response(
+                {"detail": f"Помилка при імпорті категорій: {str(exc)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            CategorySerializer(created_categories, many=True).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+def parse_category_name(name_str: str, sport_type: str) -> dict:
+    import re
+
+    name_clean = name_str.strip()
+    lower_name = name_clean.lower()
+
+    # 1. Parse gender
+    allowed_gender = Category.AllowedGender.MIXED
+    if any(w in lower_name for w in ["хлоп", "чол", "boy", "man", "men", "male"]):
+        allowed_gender = Category.AllowedGender.MALE
+    elif any(w in lower_name for w in ["дівчат", "жін", "girl", "woman", "women", "female"]):
+        allowed_gender = Category.AllowedGender.FEMALE
+
+    # 2. Parse age
+    min_age = 0
+    max_age = 99
+
+    # Extract patterns and replace them in the search string for weight
+    range_match = re.search(
+        r"(\d+)\s*[-–]\s*(\d+)\s*(?:років|року|р\.?|years|y\.?o\.?)?",
+        name_clean,
+        re.IGNORECASE,
+    )
+    u_match = re.search(r"\bU\s*(\d+)\b", name_clean, re.IGNORECASE)
+    plus_match = re.search(
+        r"(\d+)\s*(?:років|р\.|р|years|\+)\s*(?:\+|і старше|понад|and older)",
+        name_clean,
+        re.IGNORECASE,
+    )
+    if not plus_match:
+        plus_match = re.search(r"(\d+)\s*\+", name_clean)
+
+    under_match = re.search(
+        r"(?:до|under)\s*(\d+)\s*(?:років|р\.|р|years|yo)?",
+        name_clean,
+        re.IGNORECASE,
+    )
+
+    weight_search_str = name_clean
+
+    if range_match:
+        min_age = int(range_match.group(1))
+        max_age = int(range_match.group(2))
+        weight_search_str = weight_search_str.replace(range_match.group(0), "")
+    elif u_match:
+        min_age = 0
+        max_age = int(u_match.group(1))
+        weight_search_str = weight_search_str.replace(u_match.group(0), "")
+    elif plus_match:
+        min_age = int(plus_match.group(1))
+        max_age = 99
+        weight_search_str = weight_search_str.replace(plus_match.group(0), "")
+    elif under_match:
+        min_age = 0
+        max_age = int(under_match.group(1))
+        weight_search_str = weight_search_str.replace(under_match.group(0), "")
+    else:
+        simple_age = re.search(
+            r"(\d+)\s*(?:років|р\.|р|року|years|yo)\b", name_clean, re.IGNORECASE
+        )
+        if simple_age:
+            min_age = int(simple_age.group(1))
+            max_age = int(simple_age.group(1))
+            weight_search_str = weight_search_str.replace(simple_age.group(0), "")
+
+    # 3. Parse weight
+    min_weight = None
+    max_weight = None
+
+    w_range = re.search(
+        r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
+        weight_search_str,
+        re.IGNORECASE,
+    )
+    w_under = re.search(
+        r"(?:до|under|-)\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)",
+        weight_search_str,
+        re.IGNORECASE,
+    )
+    if not w_under:
+        w_under = re.search(r"(?:до|under)\s*(\d+(?:\.\d+)?)", weight_search_str, re.IGNORECASE)
+        if not w_under:
+            w_under = re.search(
+                r"-\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
+                weight_search_str,
+                re.IGNORECASE,
+            )
+
+    w_over = re.search(
+        r"(?:від|понад|over|\+)\s*(\d+(?:\.\d+)?)",
+        weight_search_str,
+        re.IGNORECASE,
+    )
+    if not w_over:
+        if "+" in weight_search_str:
+            parts = weight_search_str.split("+")
+            stripped = parts[0].rstrip()
+            last_number = ""
+            for char in reversed(stripped):
+                if char.isdigit() or char == ".":
+                    last_number = char + last_number
+                elif last_number:
+                    break
+            if last_number:
+                try:
+                    float(last_number)
+
+                    class DummyMatch:
+                        def group(self, _idx):
+                            return last_number
+
+                    w_over = DummyMatch()
+                except ValueError:
+                    pass
+        else:
+            parts = re.split(r"\b(?:plus|плюс)\b", weight_search_str, flags=re.IGNORECASE)
+            if len(parts) > 1:
+                stripped = parts[0].rstrip()
+                last_number = ""
+                for char in reversed(stripped):
+                    if char.isdigit() or char == ".":
+                        last_number = char + last_number
+                    elif last_number:
+                        break
+                if last_number:
+                    try:
+                        float(last_number)
+
+                        class DummyMatch:
+                            def group(self, _idx):
+                                return last_number
+
+                        w_over = DummyMatch()
+                    except ValueError:
+                        pass
+
+    if w_range:
+        min_weight = float(w_range.group(1))
+        max_weight = float(w_range.group(2))
+    elif w_under:
+        max_weight = float(w_under.group(1))
+    elif w_over:
+        min_weight = float(w_over.group(1))
+
+    # 4. Map default ruleset based on tournament's sport type
+    ruleset_key = "karate_wkf"
+    sport_lower = sport_type.lower() if sport_type else ""
+    if "ippon" in sport_lower or "shobu" in sport_lower:
+        ruleset_key = "shobu_ippon"
+
+    return {
+        "name": name_clean,
+        "allowed_gender": allowed_gender,
+        "min_age": min_age,
+        "max_age": max_age,
+        "min_weight": min_weight,
+        "max_weight": max_weight,
+        "ruleset_key": ruleset_key,
+        "bracket_format": Category.BracketFormat.SINGLE_ELIMINATION,
+    }
+
 
 class CategoryViewSet(viewsets.ModelViewSet):
     """Категорії турніру. Вкладені під турнір через query param tournament."""
@@ -100,8 +412,20 @@ class CategoryViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_permissions(self):
-        if self.action in ("create", "update", "partial_update", "destroy", "generate_bracket"):
+        if self.action in (
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+            "generate_bracket",
+            "delete_bracket",
+            "assign_tatami",
+        ):
             return [IsOrganizer()]
+        if self.action in ("save_results", "unlock_results", "set_judges_count"):
+            from apps.accounts.permissions import IsJudgeOrOrganizer
+
+            return [IsJudgeOrOrganizer()]
         from rest_framework.permissions import AllowAny
 
         return [AllowAny()]
@@ -121,6 +445,16 @@ class CategoryViewSet(viewsets.ModelViewSet):
         Генерує турнірну сітку для категорії та повертає список матчів.
         """
         category = self.get_object()
+        bracket_format = request.data.get("bracket_format")
+        if bracket_format:
+            if bracket_format not in Category.BracketFormat.values:
+                return Response(
+                    {"detail": f"Некоректний формат сітки: {bracket_format}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            category.bracket_format = bracket_format
+            category.save(update_fields=["bracket_format"])
+
         try:
             matches = BracketGenerator(category).generate()
         except DjangoValidationError as exc:
@@ -132,6 +466,182 @@ class CategoryViewSet(viewsets.ModelViewSet):
             MatchSerializer(matches, many=True).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["post"], url_path="delete_bracket")
+    def delete_bracket(self, request, pk=None):
+        """POST /api/categories/{id}/delete_bracket/
+        Видаляє всі матчі для категорії.
+        """
+        category = self.get_object()
+        matches = category.matches.all()
+        count = matches.count()
+        matches.delete()
+        return Response(
+            {"detail": f"Успішно видалено {count} матчів сітки."}, status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=["post"], url_path="assign_tatami")
+    def assign_tatami(self, request, pk=None):
+        """POST /api/categories/{id}/assign_tatami/
+        Тіло: {"tatami_id": int}
+        """
+        category = self.get_object()
+        tatami_id = request.data.get("tatami_id")
+        if not tatami_id:
+            return Response(
+                {"detail": "Поле 'tatami_id' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            from apps.tatamis.models import Tatami
+
+            tatami = Tatami.objects.get(id=int(tatami_id), tournament=category.tournament)
+        except (Tatami.DoesNotExist, ValueError, TypeError):
+            return Response(
+                {"detail": "Вказано некоректний або неіснуючий ID татамі для цього турніру."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        category.matches.update(tatami=tatami)
+
+        # Clear current_match on other tatamis for matches of this category
+        from apps.common.broadcast import broadcast_tatami_state
+
+        affected_tatamis = Tatami.objects.filter(
+            tournament=category.tournament, current_match__category=category
+        ).exclude(id=tatami.id)
+        for t in affected_tatamis:
+            t.current_match = None
+            t.save(update_fields=["current_match"])
+            broadcast_tatami_state(t)
+
+        return Response(
+            {"detail": f"Усі матчі категорії успішно призначено на татамі №{tatami.number}."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["get"], url_path="results")
+    def results(self, request, pk=None):
+        """GET /api/categories/{id}/results/
+        Розраховує та повертає поточні результати категорії.
+        """
+        category = self.get_object()
+        results_data = calculate_category_standings(category, persist=False)
+        serializer = CategoryResultSerializer(results_data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def _verify_judge_permission(self, category, user):
+        if user.is_authenticated and user.role == "judge":
+            match = category.matches.first()
+            if match and match.tatami:
+                if match.tatami.assigned_judge_id != user.id:
+                    from rest_framework.exceptions import PermissionDenied
+
+                    raise PermissionDenied("Ви не є призначеним суддею на татамі цієї категорії.")
+            else:
+                from rest_framework.exceptions import PermissionDenied
+
+                raise PermissionDenied("Категорія не призначена на жодне татамі.")
+
+    def _broadcast_results_update(self, category):
+        # Broadcast state to all relevant tatami WS channels
+        from django.db.models import Q
+
+        from apps.common.broadcast import broadcast_tatami_state
+        from apps.tatamis.models import Tatami
+
+        matching_tatamis = Tatami.objects.filter(
+            Q(current_match__category=category) | Q(active_results_category=category)
+        )
+        for tatami in matching_tatamis:
+            broadcast_tatami_state(tatami)
+
+        # Broadcast to category channel to trigger spectator page updates
+        from apps.common.broadcast import broadcast_category_results_update
+
+        broadcast_category_results_update(category.id)
+
+    @action(detail=True, methods=["post"], url_path="save_results")
+    def save_results(self, request, pk=None):
+        """POST /api/categories/{id}/save_results/
+        Розраховує та фіксує результати категорії у базу даних з підтримкою ручних перевизначень.
+        """
+        category = self.get_object()
+        self._verify_judge_permission(category, request.user)
+
+        overrides = request.data.get("overrides")
+        if overrides is not None and isinstance(overrides, dict):
+            from django.db import transaction
+
+            with transaction.atomic():
+                # Очищаємо старі місця в цій категорії
+                Registration.objects.filter(category=category).update(place=None)
+                # Записуємо нові призові місця з перевизначень
+                for reg_id_str, place_val in overrides.items():
+                    if place_val is not None:
+                        try:
+                            place_int = int(place_val)
+                            Registration.objects.filter(
+                                id=int(reg_id_str), category=category
+                            ).update(place=place_int)
+                        except (ValueError, TypeError):
+                            pass
+            results_data = calculate_category_standings(category, persist=False)
+        else:
+            # Використовуємо автоматичний розрахунок
+            results_data = calculate_category_standings(category, persist=True)
+
+        self._broadcast_results_update(category)
+
+        serializer = CategoryResultSerializer(results_data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unlock_results")
+    def unlock_results(self, request, pk=None):
+        """POST /api/categories/{id}/unlock_results/
+        Скидає зафіксовані результати категорії.
+        """
+        category = self.get_object()
+        self._verify_judge_permission(category, request.user)
+
+        Registration.objects.filter(category=category).update(place=None)
+
+        self._broadcast_results_update(category)
+
+        return Response({"detail": "Фіксацію результатів скасовано."}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="set_judges_count")
+    def set_judges_count(self, request, pk=None):
+        """POST /api/categories/{id}/set_judges_count/
+        Встановлює кількість суддів для Ката (3 або 5).
+        """
+        category = self.get_object()
+        judges_count = request.data.get("judges_count")
+        if judges_count not in (3, 5, "3", "5"):
+            return Response(
+                {"detail": "Кількість суддів повинна бути 3 або 5."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from django.db import transaction
+
+        from apps.matches.services.match_service import MatchService
+
+        try:
+            with transaction.atomic():
+                category.judges_count = int(judges_count)
+                category.save(update_fields=["judges_count"])
+
+                # Оновлюємо кожен матч за допомогою MatchService для скидання та валідації
+                for match in category.matches.all():
+                    svc = MatchService(match)
+                    svc.set_judges_count(int(judges_count), judge=request.user)
+        except (ValueError, DjangoValidationError) as exc:
+            msg = exc.message if hasattr(exc, "message") else str(exc)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(CategorySerializer(category).data, status=status.HTTP_200_OK)
 
 
 class RegistrationViewSet(viewsets.ModelViewSet):

@@ -6,6 +6,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class Tournament(models.Model):
@@ -32,8 +33,19 @@ class Tournament(models.Model):
     location = models.CharField(max_length=255, verbose_name="Місце проведення")
     start_date = models.DateTimeField(verbose_name="Початок")
     end_date = models.DateTimeField(verbose_name="Завершення")
+    registration_start = models.DateTimeField(
+        null=True, blank=True, verbose_name="Початок реєстрації"
+    )
+    registration_end = models.DateTimeField(null=True, blank=True, verbose_name="Кінець реєстрації")
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name="Завершено о")
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.DRAFT, verbose_name="Статус"
+    )
+    weigh_in_required = models.BooleanField(
+        default=True,
+        verbose_name="Потрібне зважування",
+        help_text="Якщо вимкнено, учасники автоматично "
+        "підтверджуються при реєстрації без зважування",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -68,7 +80,8 @@ class Tournament(models.Model):
         if self.status != self.Status.ACTIVE:
             raise ValidationError("Завершити можна лише активний турнір")
         self.status = self.Status.COMPLETED
-        self.save(update_fields=["status"])
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "completed_at"])
 
 
 class Category(models.Model):
@@ -93,8 +106,20 @@ class Category(models.Model):
     )
     min_age = models.PositiveSmallIntegerField(verbose_name="Мінімальний вік")
     max_age = models.PositiveSmallIntegerField(verbose_name="Максимальний вік")
-    min_weight = models.DecimalField(max_digits=5, decimal_places=2, verbose_name="Мін. вага (кг)")
-    max_weight = models.DecimalField(max_digits=5, decimal_places=2, verbose_name="Макс. вага (кг)")
+    min_weight = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Мін. вага (кг)",
+    )
+    max_weight = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Макс. вага (кг)",
+    )
     allowed_skill_level = models.CharField(
         max_length=50, blank=True, verbose_name="Допустимий рівень майстерності"
     )
@@ -115,12 +140,28 @@ class Category(models.Model):
         verbose_name="Тривалість поєдинку (сек)",
         help_text="Перевизначає значення за замовчуванням із рулсету",
     )
+    schedule_order = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Порядок у розкладі",
+    )
+    two_third_places = models.BooleanField(
+        default=True,
+        verbose_name="Два третіх місця",
+        help_text=(
+            "Якщо увімкнено, обидва спортсмени, які програли в півфіналах, отримують 3-є місце."
+        ),
+    )
+    judges_count = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Кількість суддів для Ката",
+    )
 
     class Meta:
         db_table = "category"
         verbose_name = "Категорія"
         verbose_name_plural = "Категорії"
-        ordering = ["tournament", "name"]
+        ordering = ["tournament", "schedule_order", "name"]
 
     def __str__(self):
         return f"{self.name} — {self.tournament.title}"
@@ -128,8 +169,9 @@ class Category(models.Model):
     def clean(self):
         if self.min_age > self.max_age:
             raise ValidationError("Мін. вік не може бути більшим за макс.")
-        if self.min_weight >= self.max_weight:
-            raise ValidationError("Мін. вага повинна бути меншою за макс.")
+        if self.min_weight is not None and self.max_weight is not None:
+            if self.min_weight >= self.max_weight:
+                raise ValidationError("Мін. вага повинна бути меншою за макс.")
 
     def validate_athlete_eligibility(self, athlete, reference_date=None):
         """Перевіряє, чи підходить спортсмен під критерії категорії.
@@ -151,11 +193,25 @@ class Category(models.Model):
             reasons.append(f"Вік {age} поза діапазоном [{self.min_age}; {self.max_age}]")
 
         # Вага (базова, фактична перевіряється при зважуванні)
-        if not (self.min_weight <= athlete.base_weight <= self.max_weight):
-            reasons.append(
-                f"Базова вага {athlete.base_weight} кг поза діапазоном "
-                f"[{self.min_weight}; {self.max_weight}]"
-            )
+        # Перевірка ваги лише якщо категорія має вагові обмеження
+        if self.min_weight is not None and self.max_weight is not None:
+            if not (self.min_weight <= athlete.base_weight <= self.max_weight):
+                reasons.append(
+                    f"Базова вага {athlete.base_weight} кг поза діапазоном "
+                    f"[{self.min_weight}; {self.max_weight}]"
+                )
+        elif self.min_weight is not None:
+            if athlete.base_weight < self.min_weight:
+                reasons.append(
+                    f"Базова вага {athlete.base_weight} кг менша за "
+                    f"мінімальну ({self.min_weight} кг)"
+                )
+        elif self.max_weight is not None:
+            if athlete.base_weight > self.max_weight:
+                reasons.append(
+                    f"Базова вага {athlete.base_weight} кг більша за "
+                    f"максимальну ({self.max_weight} кг)"
+                )
 
         return (len(reasons) == 0, reasons)
 
@@ -193,6 +249,12 @@ class Registration(models.Model):
     )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING, verbose_name="Статус"
+    )
+    place = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Місце в категорії",
+        help_text="Отримане призове місце (1, 2, 3, 5 тощо) після закінчення змагань у категорії",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

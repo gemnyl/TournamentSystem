@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Play, Pause, RotateCcw, Plus } from "lucide-react";
+import { useState, useRef } from "react";
+import { Play, Pause, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, getOptimisticTimerUpdate } from "@/lib/utils";
 import api from "@/lib/api";
 import type { Match, ScoreAction } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
@@ -12,6 +12,7 @@ interface KumiteOperatorControlsProps {
   rulesetActions: ScoreAction[];
   timerState: TimerState;
   remainingMs: number;
+  serverTimeOffset: number;
   onMatchUpdate: (match: Match) => void;
 }
 
@@ -29,29 +30,54 @@ export default function KumiteOperatorControls({
   rulesetActions,
   timerState,
   remainingMs,
+  serverTimeOffset,
   onMatchUpdate,
 }: Readonly<KumiteOperatorControlsProps>) {
+  const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
+  const [undoMode, setUndoMode] = useState(false);
+  const customTimeInputRef = useRef<HTMLInputElement>(null);
+  const absoluteTimeInputRef = useRef<HTMLInputElement>(null);
 
   const post = async (url: string, body?: Record<string, unknown>) => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const { data } = await api.post<Match>(url, body ?? {});
       onMatchUpdate(data);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
-  const scoreAction = (corner: "ao" | "aka", action_key: string) =>
-    post(`/matches/${match.id}/update_score/`, { corner, action_key });
+  const scoreAction = (corner: "ao" | "aka", action_key: string) => {
+    const is_undo = undoMode;
+    if (undoMode) {
+      setUndoMode(false);
+    }
+    post(`/matches/${match.id}/update_score/`, { corner, action_key, is_undo });
+  };
 
   const setSenshu = (value: "ao" | "aka" | "none") =>
     post(`/matches/${match.id}/set_senshu/`, { value });
 
-  const timerAction = (path: string, body?: Record<string, unknown>) =>
-    post(`/matches/${match.id}/timer/${path}`, body);
+  const timerAction = (path: string, body?: Record<string, unknown>) => {
+    const { updatedMatch, reqBody } = getOptimisticTimerUpdate(
+      path,
+      timerState,
+      serverTimeOffset,
+      match
+    );
+    if (updatedMatch) {
+      onMatchUpdate(updatedMatch);
+    }
+    return post(`/matches/${match.id}/timer/${path}/`, {
+      ...body,
+      ...reqBody,
+    });
+  };
 
   const isCompleted = match.status === "completed";
   const { status } = timerState;
@@ -61,7 +87,29 @@ export default function KumiteOperatorControls({
   const akaSenshu = match.senshu === "aka";
 
   return (
-    <div className="grid grid-cols-[1fr_160px_1fr] gap-3 items-start">
+    <div className="flex flex-col gap-4 w-full">
+      {/* Undo Action Toggle & Alert */}
+      <div className="flex flex-col items-center gap-1 bg-zinc-950/40 p-2.5 rounded-xl border border-border/40">
+        <Button
+          variant={undoMode ? "destructive" : "outline"}
+          size="sm"
+          disabled={isCompleted || busy}
+          onClick={() => setUndoMode(!undoMode)}
+          className={cn(
+            "gap-1.5 font-bold transition-all duration-200 text-xs px-4 h-8",
+            undoMode && "animate-pulse"
+          )}
+        >
+          ⟲ {undoMode ? "Скасування... Оберіть бал" : "Скасувати дію (Undo)"}
+        </Button>
+        {undoMode && (
+          <div className="text-[11px] font-bold text-destructive animate-pulse mt-1">
+            ⚠ Режим скасування активний! Натисніть кнопку відповідного балу або попередження нижче, щоб зняти його.
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-[1fr_170px_1fr] gap-3 items-start">
 
       {/* ── AO (left, reg_second) ── */}
       <div className={cn(
@@ -77,7 +125,12 @@ export default function KumiteOperatorControls({
         </div>
 
         <div className="text-center">
-          <span className="font-mono text-7xl font-black text-blue-300 leading-none">
+          <span className={cn(
+            "font-mono text-7xl font-black leading-none transition-all duration-300",
+            match.status === "completed" && match.winner === match.reg_second?.id
+              ? "animate-pulse text-green-400"
+              : "text-blue-300"
+          )}>
             {match.score_second}
           </span>
         </div>
@@ -90,18 +143,20 @@ export default function KumiteOperatorControls({
         </div>
 
         {/* Senshu */}
-        <button
-          disabled={isCompleted || busy}
-          onClick={() => setSenshu(aoSenshu ? "none" : "ao")}
-          className={cn(
-            "w-full text-xs py-1 rounded border transition-colors",
-            aoSenshu
-              ? "border-blue-400 bg-blue-500/20 text-blue-300"
-              : "border-border text-muted-foreground hover:border-blue-400/50"
-          )}
-        >
-          {aoSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AO"}
-        </button>
+        {match.ruleset_key === "karate_wkf" && (
+          <button
+            disabled={isCompleted || busy}
+            onClick={() => setSenshu(aoSenshu ? "none" : "ao")}
+            className={cn(
+              "w-full text-xs py-1 rounded border transition-colors",
+              aoSenshu
+                ? "border-blue-400 bg-blue-500/20 text-blue-300"
+                : "border-border text-muted-foreground hover:border-blue-400/50"
+            )}
+          >
+            {aoSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AO"}
+          </button>
+        )}
 
         {/* Score actions */}
         <div className="grid grid-cols-2 gap-1.5">
@@ -159,11 +214,123 @@ export default function KumiteOperatorControls({
                 onClick={() => timerAction("reset")}>
                 <RotateCcw className="w-3 h-3" /> Reset
               </Button>
-              <Button size="sm" variant="outline" className="w-full text-xs"
+            </>
+          )}
+          {status === "finished" && (
+            <Button size="sm" variant="outline" className="w-full"
+              disabled={busy}
+              onClick={() => timerAction("reset")}>
+              <RotateCcw className="w-3 h-3" /> Reset
+            </Button>
+          )}
+
+          {/* Time adjustments active when timer is paused or not yet started */}
+          {(status === "paused" || status === "not_started") && !isCompleted && (
+            <>
+              {/* ±10s and ±30s buttons */}
+              <div className="grid grid-cols-2 gap-1 w-full mt-1">
+                <Button size="sm" variant="outline" className="h-7 text-[10px] font-bold"
+                  disabled={busy}
+                  onClick={() => timerAction("add_time", { delta_ms: 10000 })}>
+                  +10s
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[10px] font-bold"
+                  disabled={busy}
+                  onClick={() => timerAction("add_time", { delta_ms: -10000 })}>
+                  -10s
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[10px] font-bold"
+                  disabled={busy}
+                  onClick={() => timerAction("add_time", { delta_ms: 30000 })}>
+                  +30s
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[10px] font-bold"
+                  disabled={busy}
+                  onClick={() => timerAction("add_time", { delta_ms: -30000 })}>
+                  -30s
+                </Button>
+              </div>
+
+              {/* Relative adjustment (delta input) */}
+              <div className="flex gap-1 items-center w-full mt-1">
+                <input
+                  type="number"
+                  placeholder="± сек"
+                  ref={customTimeInputRef}
+                  disabled={busy}
+                  className="w-full h-7 text-xs px-1 border border-input rounded bg-zinc-950 text-white text-center font-mono"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const val = Number.parseInt((e.target as HTMLInputElement).value || "0");
+                      if (val !== 0) {
+                        timerAction("add_time", { delta_ms: val * 1000 });
+                        (e.target as HTMLInputElement).value = "";
+                      }
+                    }
+                  }}
+                />
+                <Button size="sm" variant="secondary" className="h-7 text-xs font-bold shrink-0 px-2.5"
+                  disabled={busy}
+                  onClick={() => {
+                    const val = Number.parseInt(customTimeInputRef.current?.value || "0");
+                    if (val !== 0) {
+                      timerAction("add_time", { delta_ms: val * 1000 });
+                      if (customTimeInputRef.current) customTimeInputRef.current.value = "";
+                    }
+                  }}>
+                  ОК
+                </Button>
+              </div>
+
+              {/* Absolute adjustment (manual input) */}
+              <div className="flex gap-1 items-center w-full mt-0.5">
+                <input
+                  type="number"
+                  placeholder="Задати сек"
+                  ref={absoluteTimeInputRef}
+                  disabled={busy}
+                  className="w-full h-7 text-xs px-1 border border-input rounded bg-zinc-950 text-white text-center font-mono"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const val = Number.parseInt((e.target as HTMLInputElement).value || "0");
+                      if (val > 0) {
+                        timerAction("set_duration", { duration_ms: val * 1000 });
+                        (e.target as HTMLInputElement).value = "";
+                      }
+                    }
+                  }}
+                />
+                <Button size="sm" variant="secondary" className="h-7 text-xs font-bold shrink-0 px-2.5"
+                  disabled={busy}
+                  onClick={() => {
+                    const val = Number.parseInt(absoluteTimeInputRef.current?.value || "0");
+                    if (val > 0) {
+                      timerAction("set_duration", { duration_ms: val * 1000 });
+                      if (absoluteTimeInputRef.current) absoluteTimeInputRef.current.value = "";
+                    }
+                  }}>
+                  Задати
+                </Button>
+              </div>
+
+              {/* Set total duration select (presets) */}
+              <select
                 disabled={busy}
-                onClick={() => timerAction("add_time", { delta_ms: 30000 })}>
-                <Plus className="w-3 h-3" /> +30s
-              </Button>
+                onChange={(e) => {
+                  const val = Number.parseInt(e.target.value);
+                  if (val > 0) {
+                    timerAction("set_duration", { duration_ms: val * 1000 });
+                  }
+                }}
+                defaultValue=""
+                className="w-full h-7 text-xs px-1 border border-input rounded bg-zinc-950 text-white mt-1 cursor-pointer"
+              >
+                <option value="" disabled>Оберіть час...</option>
+                <option value="90">1:30</option>
+                <option value="120">2:00</option>
+                <option value="180">3:00</option>
+                <option value="240">4:00</option>
+              </select>
             </>
           )}
           {status === "finished" && (
@@ -190,7 +357,12 @@ export default function KumiteOperatorControls({
         </div>
 
         <div className="text-center">
-          <span className="font-mono text-7xl font-black text-red-300 leading-none">
+          <span className={cn(
+            "font-mono text-7xl font-black leading-none transition-all duration-300",
+            match.status === "completed" && match.winner === match.reg_first?.id
+              ? "animate-pulse text-green-400"
+              : "text-red-300"
+          )}>
             {match.score_first}
           </span>
         </div>
@@ -203,18 +375,20 @@ export default function KumiteOperatorControls({
         </div>
 
         {/* Senshu */}
-        <button
-          disabled={isCompleted || busy}
-          onClick={() => setSenshu(akaSenshu ? "none" : "aka")}
-          className={cn(
-            "w-full text-xs py-1 rounded border transition-colors",
-            akaSenshu
-              ? "border-red-400 bg-red-500/20 text-red-300"
-              : "border-border text-muted-foreground hover:border-red-400/50"
-          )}
-        >
-          {akaSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AKA"}
-        </button>
+        {match.ruleset_key === "karate_wkf" && (
+          <button
+            disabled={isCompleted || busy}
+            onClick={() => setSenshu(akaSenshu ? "none" : "aka")}
+            className={cn(
+              "w-full text-xs py-1 rounded border transition-colors",
+              akaSenshu
+                ? "border-red-400 bg-red-500/20 text-red-300"
+                : "border-border text-muted-foreground hover:border-red-400/50"
+            )}
+          >
+            {akaSenshu ? "S Senshu (натисни щоб зняти)" : "Senshu AKA"}
+          </button>
+        )}
 
         {/* Score actions */}
         <div className="grid grid-cols-2 gap-1.5">
@@ -232,6 +406,7 @@ export default function KumiteOperatorControls({
             </button>
           ))}
         </div>
+      </div>
       </div>
     </div>
   );

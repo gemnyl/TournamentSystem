@@ -12,7 +12,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.accounts.permissions import IsJudge
+from apps.accounts.permissions import IsJudgeOrOrganizer
 from apps.common.broadcast import broadcast_match_event
 from apps.matches.models import Match
 from apps.matches.serializers import BracketNodeSerializer, MatchSerializer
@@ -38,7 +38,10 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         tournament_id = self.request.query_params.get("tournament")
         if tournament_id:
             qs = qs.filter(category__tournament_id=tournament_id)
-        return qs.order_by("round_index", "match_order")
+        tatami_number = self.request.query_params.get("tatami_number")
+        if tatami_number:
+            qs = qs.filter(tatami__number=tatami_number)
+        return qs.order_by("category__schedule_order", "round_index", "match_order")
 
     def get_serializer_class(self):
         return MatchSerializer
@@ -48,18 +51,49 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             "update_score",
             "set_senshu",
             "set_winner",
+            "set_draw",
+            "reset_match",
             "timer_start",
             "timer_pause",
             "timer_resume",
             "timer_reset",
             "timer_set_duration",
             "timer_add_time",
+            "submit_flags",
+            "toggle_timer",
+            "set_judges_count",
         )
         if self.action in judge_actions:
-            return [IsJudge()]
+            return [IsJudgeOrOrganizer()]
         from rest_framework.permissions import AllowAny
 
         return [AllowAny()]
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _execute_and_broadcast(self, match, action_func, *args, **kwargs):
+        try:
+            action_func(*args, **kwargs)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        last_event = match.events.order_by("-sequence").first()
+        broadcast_match_event(match, last_event)
+        return Response(MatchSerializer(match).data)
+
+    def _execute_service_action(self, match, action_func, *args, **kwargs):
+        try:
+            action_func(*args, **kwargs)
+        except Exception as exc:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+
+            if isinstance(exc, ValueError | TypeError | DjangoValidationError):
+                msg = exc.message if hasattr(exc, "message") else str(exc)
+                return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+            raise exc
+        match.refresh_from_db()
+        return Response(MatchSerializer(match).data)
 
     # ------------------------------------------------------------------
     # Ігрові дії
@@ -68,11 +102,12 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"], url_path="update_score")
     def update_score(self, request, pk=None):
         """POST /api/matches/{id}/update_score/
-        Тіло: {"corner": "aka"|"ao", "action_key": "yuko"|"wazaari"|"ippon"|"penalty"|...}
+        Тіло: {"corner": "aka"|"ao", "action_key": "yuko"|..., "is_undo": bool}
         """
         match = self.get_object()
         corner = request.data.get("corner")
         action_key = request.data.get("action_key")
+        is_undo = bool(request.data.get("is_undo", False))
 
         if not corner or not action_key:
             return Response(
@@ -80,15 +115,10 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            svc = MatchService(match)
-            svc.apply_score(corner, action_key, judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        last_event = match.events.order_by("-sequence").first()
-        broadcast_match_event(match, last_event)
-        return Response(MatchSerializer(match).data)
+        svc = MatchService(match)
+        return self._execute_and_broadcast(
+            match, svc.apply_score, corner, action_key, judge=request.user, is_undo=is_undo
+        )
 
     @action(detail=True, methods=["post"], url_path="set_senshu")
     def set_senshu(self, request, pk=None):
@@ -104,15 +134,8 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            svc = MatchService(match)
-            svc.set_senshu(value, judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        last_event = match.events.order_by("-sequence").first()
-        broadcast_match_event(match, last_event)
-        return Response(MatchSerializer(match).data)
+        svc = MatchService(match)
+        return self._execute_and_broadcast(match, svc.set_senshu, value, judge=request.user)
 
     @action(detail=True, methods=["post"], url_path="set_winner")
     def set_winner(self, request, pk=None):
@@ -129,15 +152,27 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            svc = MatchService(match)
-            svc.set_winner(corner, win_method, judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        svc = MatchService(match)
+        return self._execute_and_broadcast(
+            match, svc.set_winner, corner, win_method, judge=request.user
+        )
 
-        last_event = match.events.order_by("-sequence").first()
-        broadcast_match_event(match, last_event)
-        return Response(MatchSerializer(match).data)
+    @action(detail=True, methods=["post"], url_path="set_draw")
+    def set_draw(self, request, pk=None):
+        """POST /api/matches/{id}/set_draw/
+        Тіло: {"win_method": "draw"}
+        """
+        match = self.get_object()
+        win_method = request.data.get("win_method", Match.WinMethod.DRAW)
+        svc = MatchService(match)
+        return self._execute_service_action(match, svc.set_draw, win_method, judge=request.user)
+
+    @action(detail=True, methods=["post"], url_path="reset_match")
+    def reset_match(self, request, pk=None):
+        """POST /api/matches/{id}/reset_match/"""
+        match = self.get_object()
+        svc = MatchService(match)
+        return self._execute_service_action(match, svc.reset_match, judge=request.user)
 
     # ------------------------------------------------------------------
     # Сітка категорії (список раундів)
@@ -184,35 +219,31 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["post"], url_path="timer/start")
     def timer_start(self, request, pk=None):
         match = self.get_object()
-        try:
-            MatchService(match).timer_start(judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_start, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/pause")
     def timer_pause(self, request, pk=None):
         match = self.get_object()
-        try:
-            MatchService(match).timer_pause(judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(MatchSerializer(match).data)
+        elapsed_ms = request.data.get("elapsed_ms")
+        return self._execute_service_action(
+            match, MatchService(match).timer_pause, elapsed_ms=elapsed_ms, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/resume")
     def timer_resume(self, request, pk=None):
         match = self.get_object()
-        try:
-            MatchService(match).timer_resume(judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_resume, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/reset")
     def timer_reset(self, request, pk=None):
         match = self.get_object()
-        MatchService(match).timer_reset(judge=request.user)
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_reset, judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/set_duration")
     def timer_set_duration(self, request, pk=None):
@@ -223,11 +254,9 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Поле 'duration_ms' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            MatchService(match).timer_set_duration(int(duration_ms), judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_set_duration, int(duration_ms), judge=request.user
+        )
 
     @action(detail=True, methods=["post"], url_path="timer/add_time")
     def timer_add_time(self, request, pk=None):
@@ -238,8 +267,59 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Поле 'delta_ms' є обов'язковим."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            MatchService(match).timer_add_time(int(delta_ms), judge=request.user)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(MatchSerializer(match).data)
+        return self._execute_service_action(
+            match, MatchService(match).timer_add_time, int(delta_ms), judge=request.user
+        )
+
+    @action(detail=True, methods=["post"], url_path="submit_flags")
+    def submit_flags(self, request, pk=None):
+        """POST /api/matches/{id}/submit_flags/
+        Тіло: {"flags_aka": int, "flags_ao": int}
+        """
+        match = self.get_object()
+        flags_aka = request.data.get("flags_aka")
+        flags_ao = request.data.get("flags_ao")
+        if flags_aka is None or flags_ao is None:
+            return Response(
+                {"detail": "Поля 'flags_aka' та 'flags_ao' є обов'язковими."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._execute_service_action(
+            match,
+            MatchService(match).submit_flags_decision,
+            int(flags_aka),
+            int(flags_ao),
+            judge=request.user,
+        )
+
+    @action(detail=True, methods=["post"], url_path="toggle_timer")
+    def toggle_timer(self, request, pk=None):
+        """POST /api/matches/{id}/toggle_timer/
+        Тіло: {"show_timer": bool}
+        """
+        match = self.get_object()
+        show_timer = request.data.get("show_timer")
+        if show_timer is None:
+            return Response(
+                {"detail": "Поле 'show_timer' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._execute_service_action(
+            match, MatchService(match).toggle_timer, bool(show_timer), judge=request.user
+        )
+
+    @action(detail=True, methods=["post"], url_path="set_judges_count")
+    def set_judges_count(self, request, pk=None):
+        """POST /api/matches/{id}/set_judges_count/
+        Тіло: {"judges_count": int}
+        """
+        match = self.get_object()
+        judges_count = request.data.get("judges_count")
+        if judges_count is None:
+            return Response(
+                {"detail": "Поле 'judges_count' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._execute_service_action(
+            match, MatchService(match).set_judges_count, int(judges_count), judge=request.user
+        )

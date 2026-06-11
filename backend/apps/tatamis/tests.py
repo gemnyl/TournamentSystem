@@ -30,6 +30,7 @@ from apps.matches.models import Match
 from apps.matches.serializers import MatchSerializer
 from apps.tatamis.models import Tatami
 from apps.tatamis.routing import websocket_urlpatterns
+from apps.tatamis.serializers import TatamiSerializer
 from apps.tatamis.services import TatamiService
 from apps.tournaments.models import Category, Registration, Tournament
 
@@ -71,20 +72,20 @@ class TatamiTestCase(TestCase):
         )
 
         self.tournament = Tournament.objects.create(
+            title="Tatami Cup Tournament",
             organizer=self.organizer,
-            title="Татамі Тест Кубок",
+            location="Tatami Arena",
             sport_type="Карате",
-            location="Арена",
-            start_date=timezone.now() + timedelta(days=5),
-            end_date=timezone.now() + timedelta(days=6),
+            start_date=timezone.now() + timedelta(days=10),
+            end_date=timezone.now() + timedelta(days=11),
             status=Tournament.Status.ACTIVE,
         )
         self.category = Category.objects.create(
+            name="Tatami Category Male -75kg",
             tournament=self.tournament,
-            name="Чоловіки -75кг",
             allowed_gender=Category.AllowedGender.MALE,
-            min_age=18,
-            max_age=35,
+            min_age=20,
+            max_age=30,
             min_weight=70,
             max_weight=75,
             bracket_format=Category.BracketFormat.SINGLE_ELIMINATION,
@@ -122,6 +123,7 @@ class TatamiTestCase(TestCase):
             tournament=self.tournament,
             number=1,
             name="Tatami A",
+            assigned_judge=self.judge,
         )
 
     def _login(self, user):
@@ -140,6 +142,47 @@ class TestTatamiViewSet(TatamiTestCase):
         ids = [t["id"] for t in results]
         self.assertIn(self.tatami.pk, ids)
         self.assertEqual(len(ids), 2)
+
+    def test_judge_assignment_permissions_403(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        other_judge = User.objects.create_user(
+            email="other_judge@example.com",
+            password="password",
+            role="judge",
+            first_name="Other",
+            last_name="Judge",
+        )
+        self._login(other_judge)
+
+        # 1. assign_match
+        response = self.client.post(
+            f"/api/tatamis/{self.tatami.pk}/assign_match/",
+            {"match_id": self.match.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["detail"], "Ви не закріплені за цим татамі!")
+
+        # 2. release
+        response = self.client.post(f"/api/tatamis/{self.tatami.pk}/release/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["detail"], "Ви не закріплені за цим татамі!")
+
+        # 3. set_active_results_category
+        response = self.client.post(
+            f"/api/tatamis/{self.tatami.pk}/set_active_results_category/",
+            {"category_id": self.category.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["detail"], "Ви не закріплені за цим татамі!")
+
+        # 4. state
+        response = self.client.get(f"/api/tatamis/{self.tatami.pk}/state/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["detail"], "Ви не закріплені за цим татамі!")
 
     def test_create_requires_organizer(self):
         self._login(self.judge)
@@ -168,6 +211,44 @@ class TestTatamiViewSet(TatamiTestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["number"], 3)
 
+    def test_update_requires_organizer(self):
+        self._login(self.judge)
+        response = self.client.put(
+            f"/api/tatamis/{self.tatami.pk}/",
+            {
+                "tournament": self.tournament.pk,
+                "number": 1,
+                "name": "Updated Name",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_organizer_can_update(self):
+        self._login(self.organizer)
+        response = self.client.put(
+            f"/api/tatamis/{self.tatami.pk}/",
+            {
+                "tournament": self.tournament.pk,
+                "number": 1,
+                "name": "Updated Name",
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["name"], "Updated Name")
+
+    def test_destroy_requires_organizer(self):
+        self._login(self.judge)
+        response = self.client.delete(f"/api/tatamis/{self.tatami.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_organizer_can_destroy(self):
+        self._login(self.organizer)
+        response = self.client.delete(f"/api/tatamis/{self.tatami.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
     def test_assign_match_requires_judge(self):
         response = self.client.post(
             f"/api/tatamis/{self.tatami.pk}/assign_match/",
@@ -189,6 +270,8 @@ class TestTatamiViewSet(TatamiTestCase):
 
     def test_release(self):
         self._login(self.judge)
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         response = self.client.post(f"/api/tatamis/{self.tatami.pk}/release/")
@@ -197,6 +280,8 @@ class TestTatamiViewSet(TatamiTestCase):
         self.assertIsNone(self.tatami.current_match)
 
     def test_state_endpoint(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         response = self.client.get(f"/api/tatamis/{self.tatami.pk}/state/")
@@ -244,6 +329,8 @@ class TestTatamiService(TatamiTestCase):
         self.assertEqual(self.tatami.current_match_id, self.match.pk)
 
     def test_release_clears_current(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         TatamiService.release(self.tatami)
@@ -251,6 +338,8 @@ class TestTatamiService(TatamiTestCase):
         self.assertIsNone(self.tatami.current_match)
 
     def test_get_current_match_returns_match(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         result = TatamiService.get_current_match(self.tournament.pk, 1)
@@ -261,6 +350,8 @@ class TestTatamiService(TatamiTestCase):
         self.assertIsNone(result)
 
     def test_get_snapshot_structure(self):
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save()
         snapshot = TatamiService.get_snapshot(self.tournament.pk, 1)
@@ -274,9 +365,89 @@ class TestTatamiService(TatamiTestCase):
         snapshot = TatamiService.get_snapshot(self.tournament.pk, 1)
         self.assertIsNone(snapshot["current_match"])
 
-    def test_get_current_match_nonexistent_tatami_returns_none(self):
+    def test_release_handles_auto_finalize_exception(self):
+        from unittest.mock import patch
+
+        self.match.tatami = self.tatami
+        self.match.save()
+        self.tatami.current_match = self.match
+        self.tatami.save()
+
+        # Mock calculate_category_standings to trigger the release exception block
+        with patch("apps.tournaments.services.calculate_category_standings") as mock_calc:
+            mock_calc.side_effect = Exception("Test exception during standings calc")
+            # Should not raise an exception due to try/except block
+            TatamiService.release(self.tatami)
+
+        self.tatami.refresh_from_db()
+        self.assertIsNone(self.tatami.current_match)
+
+    def test_get_snapshot_with_ghost_match(self):
+        # Current match belongs to a different tatami, but is set as tatami.current_match
+        other_tatami = Tatami.objects.create(tournament=self.tournament, number=2)
+        self.match.tatami = other_tatami
+        self.match.save()
+        self.tatami.current_match = self.match
+        self.tatami.save()
+
+        snapshot = TatamiService.get_snapshot(self.tournament.pk, 1)
+        self.assertIsNone(snapshot["current_match"])
+        self.tatami.refresh_from_db()
+        self.assertIsNone(self.tatami.current_match)
+
+    def test_get_current_match_with_ghost_match(self):
+        other_tatami = Tatami.objects.create(tournament=self.tournament, number=2)
+        self.match.tatami = other_tatami
+        self.match.save()
+        self.tatami.current_match = self.match
+        self.tatami.save()
+
+        result = TatamiService.get_current_match(self.tournament.pk, 1)
+        self.assertIsNone(result)
+        self.tatami.refresh_from_db()
+        self.assertIsNone(self.tatami.current_match)
+
+    def test_get_current_match_nonexistent_tatami(self):
         result = TatamiService.get_current_match(self.tournament.pk, 999)
         self.assertIsNone(result)
+
+    def test_assign_match_clears_other_tatamis(self):
+        other_tatami = Tatami.objects.create(tournament=self.tournament, number=2)
+        other_tatami.current_match = self.match
+        other_tatami.save()
+
+        # Assigning to self.tatami should clear other_tatami's current_match
+        TatamiService.assign_match(self.tatami, self.match.pk)
+        other_tatami.refresh_from_db()
+        self.assertIsNone(other_tatami.current_match)
+
+    def test_release_calculates_standings_and_broadcasts(self):
+        # Complete all matches in category
+        for m in self.category.matches.all():
+            m.status = Match.Status.COMPLETED
+            m.save()
+
+        self.match.tatami = self.tatami
+        self.match.save()
+        self.tatami.current_match = self.match
+        self.tatami.save()
+
+        # The release method should auto-finalize
+        TatamiService.release(self.tatami)
+        self.tatami.refresh_from_db()
+        self.assertIsNone(self.tatami.current_match)
+
+    def test_set_active_results_category(self):
+        # With category ID
+        TatamiService.set_active_results_category(self.tatami, self.category.pk)
+        self.tatami.refresh_from_db()
+        self.assertEqual(self.tatami.active_results_category_id, self.category.pk)
+        self.assertIsNone(self.tatami.current_match)
+
+        # With None
+        TatamiService.set_active_results_category(self.tatami, None)
+        self.tatami.refresh_from_db()
+        self.assertIsNone(self.tatami.active_results_category_id)
 
 
 # ── 3. MatchSerializer — field validation ────────────────────────────────────
@@ -439,6 +610,8 @@ class TestTatamiConsumer(TatamiTestCase):
 
     def setUp(self):
         super().setUp()
+        self.match.tatami = self.tatami
+        self.match.save()
         self.tatami.current_match = self.match
         self.tatami.save(update_fields=["current_match"])
 
@@ -523,3 +696,38 @@ class TestBroadcast(TatamiTestCase):
         self.match.tatami = self.tatami
         self.match.save(update_fields=["tatami"])
         broadcast_timer_state(self.match)  # must not raise
+
+
+# ── 8. Serializer Fields ──────────────────────────────────────────────────────
+
+
+class TestTatamiSerializerFields(TatamiTestCase):
+    def test_tatami_serializer_fields(self):
+        # Test matches_count
+        self.match.tatami = self.tatami
+        self.match.save(update_fields=["tatami"])
+
+        serializer = TatamiSerializer(self.tatami)
+        self.assertEqual(serializer.data["matches_count"], 1)
+        self.assertIsNone(serializer.data["current_match"])
+
+        # Set current_match
+        self.tatami.current_match = self.match
+        self.tatami.save(update_fields=["current_match"])
+
+        serializer2 = TatamiSerializer(self.tatami)
+        self.assertIsNotNone(serializer2.data["current_match"])
+        self.assertEqual(serializer2.data["current_match"]["id"], self.match.pk)
+
+    def test_tatami_serializer_with_ghost_match(self):
+        # Current match belongs to a different tatami, but is set as tatami.current_match
+        other_tatami = Tatami.objects.create(tournament=self.tournament, number=2)
+        self.match.tatami = other_tatami
+        self.match.save()
+        self.tatami.current_match = self.match
+        self.tatami.save()
+
+        serializer = TatamiSerializer(self.tatami)
+        self.assertIsNone(serializer.data["current_match"])
+        self.tatami.refresh_from_db()
+        self.assertIsNone(self.tatami.current_match)

@@ -1,6 +1,7 @@
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import type { Match } from "@/types/api";
 
 interface RoundRobinTableProps {
@@ -10,82 +11,248 @@ interface RoundRobinTableProps {
 interface ParticipantStats {
   regId: number;
   name: string;
+  place: number | null;
   wins: number;
+  draws: number;
   losses: number;
   points: number;
+  scores_scored: number;
+  scores_conceded: number;
+}
+
+function computeParticipantsStats(
+  participants: { id: number; name: string }[],
+  matches: Match[],
+  placesMap: Map<number, number | null>
+): Record<number, ParticipantStats> {
+  const stats: Record<number, ParticipantStats> = {};
+  participants.forEach(({ id, name }) => {
+    stats[id] = {
+      regId: id,
+      name,
+      place: placesMap.get(id) ?? null,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      points: 0,
+      scores_scored: 0,
+      scores_conceded: 0,
+    };
+  });
+
+  matches.forEach((m) => {
+    if (m.status !== "completed") return;
+
+    const isKata = m.judging_mode === "flags";
+    const scoreFirst = isKata ? (m.flags_aka ?? 0) : (m.score_first ?? 0);
+    const scoreSecond = isKata ? (m.flags_ao ?? 0) : (m.score_second ?? 0);
+
+    if (m.reg_first && stats[m.reg_first.id]) {
+      stats[m.reg_first.id].scores_scored += scoreFirst;
+      stats[m.reg_first.id].scores_conceded += scoreSecond;
+    }
+    if (m.reg_second && stats[m.reg_second.id]) {
+      stats[m.reg_second.id].scores_scored += scoreSecond;
+      stats[m.reg_second.id].scores_conceded += scoreFirst;
+    }
+
+    if (m.win_method === "draw") {
+      if (m.reg_first && stats[m.reg_first.id]) {
+        stats[m.reg_first.id].draws++;
+        stats[m.reg_first.id].points += 1;
+      }
+      if (m.reg_second && stats[m.reg_second.id]) {
+        stats[m.reg_second.id].draws++;
+        stats[m.reg_second.id].points += 1;
+      }
+    } else if (m.winner) {
+      const loserId = m.winner === m.reg_first?.id ? m.reg_second?.id : m.reg_first?.id;
+      if (stats[m.winner]) {
+        stats[m.winner].wins++;
+        stats[m.winner].points += 3;
+      }
+      if (loserId && stats[loserId]) {
+        stats[loserId].losses++;
+      }
+    }
+  });
+
+  return stats;
+}
+
+function resolveTies(
+  sortedGroupKeys: string[],
+  groups: Record<string, number[]>,
+  matches: Match[],
+  stats: Record<number, ParticipantStats>
+): number[] {
+  const sortedIds: number[] = [];
+  sortedGroupKeys.forEach((key) => {
+    const groupIds = groups[key];
+    if (groupIds.length === 1) {
+      sortedIds.push(groupIds[0]);
+    } else if (groupIds.length === 2) {
+      const [id1, id2] = groupIds;
+      // Шукаємо особисту зустріч
+      const h2h = matches.find(
+        (m) =>
+          m.status === "completed" &&
+          ((m.reg_first?.id === id1 && m.reg_second?.id === id2) ||
+            (m.reg_first?.id === id2 && m.reg_second?.id === id1))
+      );
+      if (h2h && h2h.winner === id1) {
+        sortedIds.push(id1, id2);
+      } else if (h2h && h2h.winner === id2) {
+        sortedIds.push(id2, id1);
+      } else {
+        // Нічия або немає зустрічі. Порівнюємо різницю балів, потім набрані бали
+        const diff1 = stats[id1].scores_scored - stats[id1].scores_conceded;
+        const diff2 = stats[id2].scores_scored - stats[id2].scores_conceded;
+        if (diff1 === diff2) {
+          if (stats[id1].scores_scored >= stats[id2].scores_scored) {
+            sortedIds.push(id1, id2);
+          } else {
+            sortedIds.push(id2, id1);
+          }
+        } else {
+          if (diff1 > diff2) sortedIds.push(id1, id2);
+          else sortedIds.push(id2, id1);
+        }
+      }
+    } else {
+      // 3 або більше учасників
+      const subSorted = [...groupIds].sort((idA, idB) => {
+        const diffA = stats[idA].scores_scored - stats[idA].scores_conceded;
+        const diffB = stats[idB].scores_scored - stats[idB].scores_conceded;
+        if (diffA === diffB) {
+          return stats[idB].scores_scored - stats[idA].scores_scored;
+        }
+        return diffB - diffA;
+      });
+      sortedIds.push(...subSorted);
+    }
+  });
+  return sortedIds;
+}
+
+function buildResultMatrix(matches: Match[]): Record<string, { score: string; outcome: "win" | "loss" | "draw" }> {
+  const resultMatrix: Record<string, { score: string; outcome: "win" | "loss" | "draw" }> = {};
+  matches.forEach((m) => {
+    if (!m.reg_first || !m.reg_second) return;
+    const key = `${m.reg_first.id}-${m.reg_second.id}`;
+    if (m.status === "completed") {
+      const isDraw = m.win_method === "draw";
+      const isKata = m.judging_mode === "flags";
+      const scoreFirst = isKata ? (m.flags_aka ?? 0) : m.score_first;
+      const scoreSecond = isKata ? (m.flags_ao ?? 0) : m.score_second;
+      resultMatrix[key] = {
+        score: `${scoreFirst}:${scoreSecond}`,
+        outcome: isDraw ? "draw" : (m.winner === m.reg_first.id ? "win" : "loss"),
+      };
+      resultMatrix[`${m.reg_second.id}-${m.reg_first.id}`] = {
+        score: `${scoreSecond}:${scoreFirst}`,
+        outcome: isDraw ? "draw" : (m.winner === m.reg_second.id ? "win" : "loss"),
+      };
+    }
+  });
+  return resultMatrix;
+}
+
+function getMedalOrRank(displayRank: number): string {
+  if (displayRank === 1) return "🥇";
+  if (displayRank === 2) return "🥈";
+  if (displayRank === 3) return "🥉";
+  return `${displayRank}`;
 }
 
 /**
- * Таблиця round-robin — показує учасників, їх W/L та очки.
+ * Таблиця round-robin — показує учасників, їх W/D/L та очки.
  * Також рендерить сітку результатів (матриця учасник × учасник).
  */
 export function RoundRobinTable({ matches }: RoundRobinTableProps) {
   // Збираємо унікальних учасників
   const participantsMap = new Map<number, string>();
+  const placesMap = new Map<number, number | null>();
   matches.forEach((m) => {
-    if (m.reg_first)  participantsMap.set(m.reg_first.id,  m.reg_first.athlete?.full_name ?? `#${m.reg_first.id}`);
-    if (m.reg_second) participantsMap.set(m.reg_second.id, m.reg_second.athlete?.full_name ?? `#${m.reg_second.id}`);
+    if (m.reg_first) {
+      participantsMap.set(m.reg_first.id, m.reg_first.athlete?.full_name ?? `#${m.reg_first.id}`);
+      placesMap.set(m.reg_first.id, m.reg_first.place ?? null);
+    }
+    if (m.reg_second) {
+      participantsMap.set(m.reg_second.id, m.reg_second.athlete?.full_name ?? `#${m.reg_second.id}`);
+      placesMap.set(m.reg_second.id, m.reg_second.place ?? null);
+    }
   });
   const participants = Array.from(participantsMap.entries()).map(([id, name]) => ({ id, name }));
 
-  // Статистика
-  const stats: Record<number, ParticipantStats> = {};
-  participants.forEach(({ id, name }) => {
-    stats[id] = { regId: id, name, wins: 0, losses: 0, points: 0 };
-  });
-  matches.forEach((m) => {
-    if (m.status !== "completed" || !m.winner) return;
-    const loserId = m.winner === m.reg_first?.id ? m.reg_second?.id : m.reg_first?.id;
-    if (m.winner && stats[m.winner]) { stats[m.winner].wins++;  stats[m.winner].points += 2; }
-    if (loserId   && stats[loserId])  { stats[loserId].losses++; stats[loserId].points += 0; }
+  // Розраховуємо статистику через хелпер
+  const stats = computeParticipantsStats(participants, matches, placesMap);
+
+  // Групуємо за (points, wins) для точного відтворення бекенд-сортування
+  const groups: Record<string, number[]> = {};
+  Object.values(stats).forEach((s) => {
+    const key = `${s.points}-${s.wins}`;
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(s.regId);
   });
 
-  const sorted = Object.values(stats).sort((a, b) => b.points - a.points || b.wins - a.wins);
+  // Сортуємо групи за спаданням очок та перемог
+  const sortedGroupKeys = Object.keys(groups).sort((a, b) => {
+    const [ptsA, winsA] = a.split("-").map(Number);
+    const [ptsB, winsB] = b.split("-").map(Number);
+    return ptsB - ptsA || winsB - winsA;
+  });
+
+  // Вирішуємо нічиї/особисті зустрічі
+  const sortedIds = resolveTies(sortedGroupKeys, groups, matches, stats);
+  const sorted = sortedIds.map((id) => stats[id]);
 
   // Матриця результатів
-  const resultMatrix: Record<string, string> = {};
-  matches.forEach((m) => {
-    if (!m.reg_first || !m.reg_second) return;
-    const key = `${m.reg_first.id}-${m.reg_second.id}`;
-    if (m.status === "completed") {
-      if (m.winner === m.reg_first.id) {
-        resultMatrix[key] = `${m.score_first}:${m.score_second}`;
-        resultMatrix[`${m.reg_second.id}-${m.reg_first.id}`] = `${m.score_second}:${m.score_first}`;
-      } else if (m.winner === m.reg_second.id) {
-        resultMatrix[key] = `${m.score_first}:${m.score_second}`;
-        resultMatrix[`${m.reg_second.id}-${m.reg_first.id}`] = `${m.score_second}:${m.score_first}`;
-      }
-    }
-  });
+  const resultMatrix = buildResultMatrix(matches);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 select-none">
       {/* Турнірна таблиця */}
-      <div>
-        <h3 className="font-display text-lg font-semibold mb-3">Залікова таблиця</h3>
-        <div className="rounded-xl border border-border overflow-hidden">
+      <div className="space-y-3">
+        <h3 className="font-display text-sm font-bold uppercase tracking-wider text-muted-foreground">Залікова таблиця</h3>
+        <div className="rounded-2xl border border-border/80 backdrop-blur-md bg-card/45 shadow-md overflow-hidden">
           <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-8">#</TableHead>
-                <TableHead>Учасник</TableHead>
-                <TableHead className="text-center w-16">П</TableHead>
-                <TableHead className="text-center w-16">Пр</TableHead>
-                <TableHead className="text-center w-16">Очки</TableHead>
+            <TableHeader className="bg-muted/40">
+              <TableRow className="hover:bg-transparent border-b border-border/70">
+                <TableHead className="w-10 text-center font-bold">#</TableHead>
+                <TableHead className="font-bold">Учасник</TableHead>
+                <TableHead className="text-center w-20 font-bold">В</TableHead>
+                <TableHead className="text-center w-20 font-bold">Н</TableHead>
+                <TableHead className="text-center w-20 font-bold">П</TableHead>
+                <TableHead className="text-center w-24 font-bold text-amber-400">Очки</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sorted.map((s, i) => (
-                <TableRow key={s.regId}>
-                  <TableCell className={i === 0 ? "font-bold text-amber-500" : "text-muted-foreground"}>
-                    {i + 1}
-                  </TableCell>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell className="text-center text-green-400 font-mono">{s.wins}</TableCell>
-                  <TableCell className="text-center text-red-400 font-mono">{s.losses}</TableCell>
-                  <TableCell className="text-center font-bold font-mono">{s.points}</TableCell>
-                </TableRow>
-              ))}
+              {sorted.map((s, i) => {
+                const displayRank = s.place ?? (i + 1);
+                const medal = getMedalOrRank(displayRank);
+
+                return (
+                  <TableRow key={s.regId} className="hover:bg-muted/25 border-b border-border/50 transition-colors">
+                    <TableCell className={cn(
+                      "text-center font-bold text-xs font-mono",
+                      displayRank === 1 && "text-yellow-400 text-sm",
+                      displayRank === 2 && "text-slate-300",
+                      displayRank === 3 && "text-amber-600",
+                      displayRank > 3 && "text-muted-foreground"
+                    )}>
+                      {medal}
+                    </TableCell>
+                    <TableCell className="font-semibold text-sm text-foreground/90">{s.name}</TableCell>
+                    <TableCell className="text-center text-emerald-400 font-bold font-mono text-sm">{s.wins}</TableCell>
+                    <TableCell className="text-center text-amber-400 font-semibold font-mono text-sm">{s.draws}</TableCell>
+                    <TableCell className="text-center text-rose-400 font-medium font-mono text-sm">{s.losses}</TableCell>
+                    <TableCell className="text-center font-black font-mono text-sm text-amber-400 bg-amber-500/5">{s.points}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -93,18 +260,18 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
 
       {/* Матриця результатів */}
       {participants.length <= 12 && (
-        <div>
-          <h3 className="font-display text-lg font-semibold mb-3">Результати матчів</h3>
-          <div className="overflow-x-auto">
-            <table className="text-xs border-collapse">
+        <div className="space-y-3">
+          <h3 className="font-display text-sm font-bold uppercase tracking-wider text-muted-foreground">Результати матчів (Матриця)</h3>
+          <div className="rounded-2xl border border-border/80 bg-card/30 shadow-md overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
               <thead>
-                <tr>
-                  <th className="p-2 text-left text-muted-foreground border border-border bg-muted/30 min-w-[140px]">
+                <tr className="border-b border-border/70 bg-muted/40">
+                  <th className="p-3 text-left font-bold text-muted-foreground border-r border-border/50 min-w-[150px]">
                     Учасник
                   </th>
                   {participants.map((p) => (
-                    <th key={p.id} className="p-2 text-center border border-border bg-muted/30 min-w-[80px] max-w-[80px]">
-                      <span className="block truncate max-w-[76px]" title={p.name}>
+                    <th key={p.id} className="p-3 text-center font-bold border-r border-border/30 min-w-[80px] max-w-[80px] text-[10px]">
+                      <span className="block truncate max-w-[76px] text-foreground/80" title={p.name}>
                         {p.name.split(" ")[0]}
                       </span>
                     </th>
@@ -113,19 +280,40 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
               </thead>
               <tbody>
                 {participants.map((row) => (
-                  <tr key={row.id} className="hover:bg-muted/20">
-                    <td className="p-2 font-medium border border-border truncate max-w-[140px]" title={row.name}>
+                  <tr key={row.id} className="hover:bg-muted/20 border-b border-border/40 transition-colors">
+                    <td className="p-3 font-semibold text-foreground/90 border-r border-border/50 truncate max-w-[150px]" title={row.name}>
                       {row.name}
                     </td>
                     {participants.map((col) => {
                       if (row.id === col.id) {
-                        return <td key={col.id} className="p-2 text-center border border-border bg-muted/30">—</td>;
+                        return (
+                          <td key={col.id} className="p-3 text-center border-r border-border/30 bg-muted/30 text-muted-foreground/30 font-bold select-none">
+                            —
+                          </td>
+                        );
                       }
                       const res = resultMatrix[`${row.id}-${col.id}`];
-                      const won = res ? parseInt(res.split(":")[0]) > parseInt(res.split(":")[1]) : null;
+                      if (!res) {
+                        return (
+                          <td key={col.id} className="p-3 text-center border-r border-border/30 text-muted-foreground/30 font-mono">
+                            TBD
+                          </td>
+                        );
+                      }
+
                       return (
-                        <td key={col.id} className={`p-2 text-center border border-border font-mono ${won === true ? "text-green-400 bg-green-500/5" : won === false ? "text-red-400" : "text-muted-foreground"}`}>
-                          {res ?? "—"}
+                        <td
+                          key={col.id}
+                          className="p-2 text-center border-r border-border/30 font-mono transition-all duration-200"
+                        >
+                          <span className={cn(
+                            "inline-flex items-center justify-center px-2 py-1 rounded-lg text-[11px] font-bold font-mono border min-w-[44px]",
+                            res.outcome === "win" && "text-emerald-400 bg-emerald-500/10 border-emerald-500/15 shadow-sm shadow-emerald-500/5",
+                            res.outcome === "loss" && "text-rose-400 bg-rose-500/10 border-rose-500/15",
+                            res.outcome === "draw" && "text-amber-400 bg-amber-500/10 border-amber-500/15"
+                          )}>
+                            {res.score}
+                          </span>
                         </td>
                       );
                     })}

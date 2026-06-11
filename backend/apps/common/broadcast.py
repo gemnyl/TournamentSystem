@@ -3,6 +3,8 @@ import time
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
+MATCH_EVENT_TYPE = "match.event"
+
 
 def _tatami_group(match) -> str | None:
     if not match.tatami_id:
@@ -17,7 +19,7 @@ def broadcast_match_event(match, event) -> None:
 
     channel_layer = get_channel_layer()
     payload = {
-        "type": "match.event",
+        "type": MATCH_EVENT_TYPE,
         "match_id": match.id,
         "event": {
             "sequence": event.sequence,
@@ -72,5 +74,44 @@ def broadcast_tatami_state(tatami) -> None:
             "server_ts_ms": int(time.time() * 1000),
             "tatami": TatamiSerializer(tatami).data,
             "current_match": (MatchSerializer(current_match).data if current_match else None),
+        },
+    )
+
+
+def broadcast_match_update(match) -> None:
+    """Оновлення поєдинку для category group + tatami group (якщо є) без події."""
+    from apps.matches.serializers import MatchSerializer
+
+    channel_layer = get_channel_layer()
+    payload = {
+        "type": MATCH_EVENT_TYPE,
+        "match_id": match.id,
+        "event": {
+            "sequence": 0,
+            "event_type": "update",
+            "payload": {},
+        },
+        "match": MatchSerializer(match).data,
+    }
+    async_to_sync(channel_layer.group_send)(f"category_{match.category_id}", payload)
+    group = _tatami_group(match)
+    if group:
+        async_to_sync(channel_layer.group_send)(group, payload)
+
+
+def broadcast_category_results_update(category_id: int) -> None:
+    """Broadcast to category channel to trigger spectator/operator updates when results change."""
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"category_{category_id}",
+        {
+            "type": MATCH_EVENT_TYPE,
+            "match_id": 0,
+            "event": {
+                "sequence": 0,
+                "event_type": "results_update",
+                "payload": {},
+            },
+            "match": None,
         },
     )

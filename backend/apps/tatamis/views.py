@@ -21,28 +21,40 @@ class TatamiViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = TatamiSerializer
+    NOT_ASSIGNED_MESSAGE = "Ви не закріплені за цим татамі!"
 
     def get_queryset(self):
-        qs = Tatami.objects.select_related("tournament", "current_match")
+        qs = Tatami.objects.select_related("tournament", "current_match__category")
         tournament_id = self.request.query_params.get("tournament")
         if tournament_id:
             qs = qs.filter(tournament_id=tournament_id)
         return qs
 
     def get_permissions(self):
-        if self.action == "create":
+        if self.action in ("create", "update", "partial_update", "destroy"):
             from apps.accounts.permissions import IsOrganizer
 
             return [IsOrganizer()]
-        if self.action in ("assign_match", "release"):
-            from apps.accounts.permissions import IsJudge
+        if self.action in ("assign_match", "release", "set_active_results_category"):
+            from apps.accounts.permissions import IsJudgeOrOrganizer
 
-            return [IsJudge()]
+            return [IsJudgeOrOrganizer()]
         return [AllowAny()]
+
+    def _check_judge_assignment(self, request, tatami) -> Response | None:
+        if request.user.is_authenticated and request.user.role == "judge":
+            if tatami.assigned_judge_id != request.user.id:
+                return Response(
+                    {"detail": self.NOT_ASSIGNED_MESSAGE},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        return None
 
     @action(detail=True, methods=["post"], url_path="assign_match")
     def assign_match(self, request, pk=None):
         tatami = self.get_object()
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
         match_id = request.data.get("match_id")
         if not match_id:
             return Response(
@@ -59,13 +71,32 @@ class TatamiViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="release")
     def release(self, request, pk=None):
         tatami = self.get_object()
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
         TatamiService.release(tatami)
+        tatami.refresh_from_db()
+        return Response(TatamiSerializer(tatami).data)
+
+    @action(detail=True, methods=["post"], url_path="set_active_results_category")
+    def set_active_results_category(self, request, pk=None):
+        tatami = self.get_object()
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
+        category_id = request.data.get("category_id")
+        try:
+            TatamiService.set_active_results_category(
+                tatami, int(category_id) if category_id is not None else None
+            )
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         tatami.refresh_from_db()
         return Response(TatamiSerializer(tatami).data)
 
     @action(detail=True, methods=["get"], url_path="state")
     def state(self, request, pk=None):
         tatami = self.get_object()
+        if error_resp := self._check_judge_assignment(request, tatami):
+            return error_resp
         current_match = tatami.current_match
         return Response(
             {
