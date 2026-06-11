@@ -67,9 +67,9 @@ export default function KumiteOperatorControls({
     let reqBody = body;
     if (path === "pause") {
       const serverNow = Date.now() + serverTimeOffset;
-      const currentElapsed = timerState.started_at_ms !== null
-        ? timerState.elapsed_ms + (serverNow - timerState.started_at_ms)
-        : timerState.elapsed_ms;
+      const currentElapsed = timerState.started_at_ms === null
+        ? timerState.elapsed_ms
+        : timerState.elapsed_ms + (serverNow - timerState.started_at_ms);
       const elapsed_ms = Math.round(Math.max(0, currentElapsed));
       reqBody = { ...body, elapsed_ms };
 
@@ -274,7 +274,7 @@ export default function KumiteOperatorControls({
                   className="w-full h-7 text-xs px-1 border border-input rounded bg-zinc-950 text-white text-center font-mono"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      const val = parseInt((e.target as HTMLInputElement).value || "0");
+                      const val = Number.parseInt((e.target as HTMLInputElement).value || "0");
                       if (val !== 0) {
                         timerAction("add_time", { delta_ms: val * 1000 });
                         (e.target as HTMLInputElement).value = "";
@@ -285,7 +285,7 @@ export default function KumiteOperatorControls({
                 <Button size="sm" variant="secondary" className="h-7 text-xs font-bold shrink-0 px-2.5"
                   disabled={busy}
                   onClick={() => {
-                    const val = parseInt(customTimeInputRef.current?.value || "0");
+                    const val = Number.parseInt(customTimeInputRef.current?.value || "0");
                     if (val !== 0) {
                       timerAction("add_time", { delta_ms: val * 1000 });
                       if (customTimeInputRef.current) customTimeInputRef.current.value = "";
@@ -305,7 +305,7 @@ export default function KumiteOperatorControls({
                   className="w-full h-7 text-xs px-1 border border-input rounded bg-zinc-950 text-white text-center font-mono"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      const val = parseInt((e.target as HTMLInputElement).value || "0");
+                      const val = Number.parseInt((e.target as HTMLInputElement).value || "0");
                       if (val > 0) {
                         timerAction("set_duration", { duration_ms: val * 1000 });
                         (e.target as HTMLInputElement).value = "";
@@ -316,7 +316,7 @@ export default function KumiteOperatorControls({
                 <Button size="sm" variant="secondary" className="h-7 text-xs font-bold shrink-0 px-2.5"
                   disabled={busy}
                   onClick={() => {
-                    const val = parseInt(absoluteTimeInputRef.current?.value || "0");
+                    const val = Number.parseInt(absoluteTimeInputRef.current?.value || "0");
                     if (val > 0) {
                       timerAction("set_duration", { duration_ms: val * 1000 });
                       if (absoluteTimeInputRef.current) absoluteTimeInputRef.current.value = "";
@@ -330,7 +330,7 @@ export default function KumiteOperatorControls({
               <select
                 disabled={busy}
                 onChange={(e) => {
-                  const val = parseInt(e.target.value);
+                  const val = Number.parseInt(e.target.value);
                   if (val > 0) {
                     timerAction("set_duration", { duration_ms: val * 1000 });
                   }

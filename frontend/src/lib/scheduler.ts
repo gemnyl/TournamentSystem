@@ -11,6 +11,11 @@ export interface ScheduleEstimates {
   }>;
 }
 
+const DEFAULT_SCHEDULER_SETTINGS = {
+  athletePrepSeconds: SCHEDULER_SETTINGS.ATHLETE_PREP_SEC,
+  categoryChangeoverSeconds: SCHEDULER_SETTINGS.CATEGORY_CHANGEOVER_SEC
+};
+
 /**
  * Прораховує орієнтовний час початку поєдинків та категорій у реальному часі.
  */
@@ -18,10 +23,7 @@ export function estimateSchedule(
   tatamis: Tatami[],
   matches: Match[],
   categories: Category[],
-  settings = {
-    athletePrepSeconds: SCHEDULER_SETTINGS.ATHLETE_PREP_SEC,
-    categoryChangeoverSeconds: SCHEDULER_SETTINGS.CATEGORY_CHANGEOVER_SEC
-  }
+  settings = DEFAULT_SCHEDULER_SETTINGS
 ): ScheduleEstimates {
   const now = Date.now();
   const matchStarts: Record<number, number> = {};
@@ -96,7 +98,7 @@ export function estimateSchedule(
     const currentMatchId = tatami?.current_match && typeof tatami.current_match === "object"
       ? (tatami.current_match as { id: number }).id
       : tatami?.current_match;
-    const isLive = !!catMatches.find(m => m.status === "ongoing") || (currentMatchId === firstRemaining?.id && currentMatchId !== null && currentMatchId !== undefined);
+    const isLive = catMatches.some(m => m.status === "ongoing") || (currentMatchId === firstRemaining?.id && currentMatchId !== null && currentMatchId !== undefined);
 
     // Шукаємо найменший час початку серед незіграних матчів
     let minStart = Infinity;
@@ -108,7 +110,7 @@ export function estimateSchedule(
     categoryEstimates[cat.id] = {
       startTime: minStart === Infinity ? now : minStart,
       tatamiNumber: tatami ? tatami.number : null,
-      isLive: !!isLive,
+      isLive,
       isTatamiActive: tatami ? tatami.is_active : true
     };
   });

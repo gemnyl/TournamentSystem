@@ -29,6 +29,46 @@ interface PointsOperatorPanelProps {
   disabled?: boolean;
 }
 
+function getSuggestedWinner(
+  match: Match,
+  isRoundRobin: boolean
+): { suggestedWinner: "aka" | "ao" | "draw" | null; suggestionReason: string } {
+  let suggestedWinner: "aka" | "ao" | "draw" | null = null;
+  let suggestionReason = "";
+
+  const isWkf = match.ruleset_key === "karate_wkf";
+
+  if (match.score_first > match.score_second) {
+    suggestedWinner = "aka";
+    suggestionReason = `перевага за балами (${match.score_first}:${match.score_second})`;
+  } else if (match.score_second > match.score_first) {
+    suggestedWinner = "ao";
+    suggestionReason = `перевага за балами (${match.score_second}:${match.score_first})`;
+  } else if (match.score_first === match.score_second) {
+    if (isWkf && match.senshu === "aka") {
+      suggestedWinner = "aka";
+      suggestionReason = "рівний рахунок, перевага Senshu";
+    } else if (isWkf && match.senshu === "ao") {
+      suggestedWinner = "ao";
+      suggestionReason = "рівний рахунок, перевага Senshu";
+    } else {
+      if (isRoundRobin) {
+        suggestedWinner = "draw";
+        suggestionReason = match.score_first > 0
+          ? `рівний рахунок ${match.score_first}:${match.score_second}${isWkf ? " без Senshu" : ""} (нічия)`
+          : "рахунок 0:0 (нічия)";
+      } else {
+        suggestedWinner = null;
+        suggestionReason = match.score_first > 0
+          ? `рівний рахунок ${match.score_first}:${match.score_second}${isWkf ? " без Senshu" : ""} (Hantei)`
+          : "рахунок 0:0 (Hantei)";
+      }
+    }
+  }
+
+  return { suggestedWinner, suggestionReason };
+}
+
 export default function PointsOperatorPanel({
   match,
   timerState,
@@ -79,8 +119,8 @@ export default function PointsOperatorPanel({
       onMatchUpdate(data);
       toast({ title: "Зафіксовано нічию!" });
       setDrawDialogOpen(false);
-    } catch (exc: unknown) {
-      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення нічиєї";
+    } catch (error_: unknown) {
+      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення нічиєї";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -94,8 +134,8 @@ export default function PointsOperatorPanel({
       onMatchUpdate(data);
       toast({ title: "Поєдинок успішно скинуто!" });
       setResetDialogOpen(false);
-    } catch (exc: unknown) {
-      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
+    } catch (error_: unknown) {
+      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
       toast({
         title: "Не вдалося скинути поєдинок",
         description: msg,
@@ -109,39 +149,8 @@ export default function PointsOperatorPanel({
   const openScoreboard = () =>
     window.open(`/scoreboard/tournament/${tid}/tatami/${match.tatami}`, "_blank");
 
-  // Розрахунок рекомендованого переможця (suggestion)
-  let suggestedWinner: "aka" | "ao" | "draw" | null = null;
-  let suggestionReason = "";
-
-  const isWkf = match.ruleset_key === "karate_wkf";
-
-  if (match.score_first > match.score_second) {
-    suggestedWinner = "aka";
-    suggestionReason = `перевага за балами (${match.score_first}:${match.score_second})`;
-  } else if (match.score_second > match.score_first) {
-    suggestedWinner = "ao";
-    suggestionReason = `перевага за балами (${match.score_second}:${match.score_first})`;
-  } else if (match.score_first === match.score_second) {
-    if (isWkf && match.senshu === "aka") {
-      suggestedWinner = "aka";
-      suggestionReason = "рівний рахунок, перевага Senshu";
-    } else if (isWkf && match.senshu === "ao") {
-      suggestedWinner = "ao";
-      suggestionReason = "рівний рахунок, перевага Senshu";
-    } else {
-      if (isRoundRobin) {
-        suggestedWinner = "draw";
-        suggestionReason = match.score_first > 0
-          ? `рівний рахунок ${match.score_first}:${match.score_second}${isWkf ? " без Senshu" : ""} (нічия)`
-          : "рахунок 0:0 (нічия)";
-      } else {
-        suggestedWinner = null;
-        suggestionReason = match.score_first > 0
-          ? `рівний рахунок ${match.score_first}:${match.score_second}${isWkf ? " без Senshu" : ""} (Hantei)`
-          : "рахунок 0:0 (Hantei)";
-      }
-    }
-  }
+  // Розрахунок рекомендованого переможця (suggestion) через хелпер
+  const { suggestedWinner, suggestionReason } = getSuggestedWinner(match, isRoundRobin);
 
   const handleSuggestedComplete = async () => {
     if (!suggestedWinner) return;
@@ -171,6 +180,30 @@ export default function PointsOperatorPanel({
       }
     }
   };
+
+  // Local variables to avoid nested ternaries in JSX
+  let suggestedWinnerDisplayName = "Нічия";
+  if (suggestedWinner === "ao") {
+    suggestedWinnerDisplayName = "Перемога AO";
+  } else if (suggestedWinner === "aka") {
+    suggestedWinnerDisplayName = "Перемога AKA";
+  }
+
+  let suggestedWinnerClass = "text-amber-400";
+  if (suggestedWinner === "ao") {
+    suggestedWinnerClass = "text-blue-400";
+  } else if (suggestedWinner === "aka") {
+    suggestedWinnerClass = "text-red-400";
+  }
+
+  let winnerDisplayName = <span className="text-amber-400">Нічия</span>;
+  if (match.winner) {
+    if (match.winner === match.reg_first?.id) {
+      winnerDisplayName = <span className="text-red-400">AKA ({match.reg_first?.athlete?.full_name ?? "AKA"})</span>;
+    } else {
+      winnerDisplayName = <span className="text-blue-400">AO ({match.reg_second?.athlete?.full_name ?? "AO"})</span>;
+    }
+  }
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -215,8 +248,8 @@ export default function PointsOperatorPanel({
             <>
               <div className="text-lg font-black uppercase text-white tracking-wide">
                 Рекомендоване рішення:{" "}
-                <span className={cn(suggestedWinner === "ao" ? "text-blue-400" : suggestedWinner === "aka" ? "text-red-400" : "text-amber-400")}>
-                  {suggestedWinner === "draw" ? "Нічия" : suggestedWinner === "ao" ? "Перемога AO" : "Перемога AKA"}
+                <span className={suggestedWinnerClass}>
+                  {suggestedWinnerDisplayName}
                 </span>
               </div>
               <div className="text-xs opacity-75 font-medium italic">
@@ -254,16 +287,7 @@ export default function PointsOperatorPanel({
             <Trophy className="w-4 h-4 text-yellow-500 animate-bounce" /> Поєдинок завершено!
           </div>
           <div className="text-lg font-black uppercase text-white tracking-wide">
-            Переможець:{" "}
-            {match.winner ? (
-              match.winner === match.reg_first?.id ? (
-                <span className="text-red-400">AKA ({match.reg_first?.athlete?.full_name ?? "AKA"})</span>
-              ) : (
-                <span className="text-blue-400">AO ({match.reg_second?.athlete?.full_name ?? "AO"})</span>
-              )
-            ) : (
-              <span className="text-amber-400">Нічия</span>
-            )}
+            Переможець: {winnerDisplayName}
           </div>
           <div className="text-xs opacity-75 font-medium italic">
             Рахунок: {match.score_first} (Red/AKA) : {match.score_second} (Blue/AO)
@@ -286,7 +310,18 @@ export default function PointsOperatorPanel({
 
       {/* Bottom actions */}
       <div className="flex flex-wrap gap-2 pt-3 border-t border-border/40">
-        {!isCompleted ? (
+        {isCompleted ? (
+          /* Переграти бій (reset match) active when completed */
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            className="border-destructive/40 text-destructive hover:bg-destructive/10"
+            onClick={() => setResetDialogOpen(true)}
+          >
+            <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Переграти бій (Скинути)
+          </Button>
+        ) : (
           <>
             <Button
               variant="outline"
@@ -318,17 +353,6 @@ export default function PointsOperatorPanel({
               </Button>
             )}
           </>
-        ) : (
-          /* Переграти бій (reset match) active when completed */
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            className="border-destructive/40 text-destructive hover:bg-destructive/10"
-            onClick={() => setResetDialogOpen(true)}
-          >
-            <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Переграти бій (Скинути)
-          </Button>
         )}
 
         <div className="ml-auto flex gap-2">

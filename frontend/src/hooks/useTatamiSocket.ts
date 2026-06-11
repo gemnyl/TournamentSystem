@@ -44,33 +44,38 @@ export function useTatamiSocket(
     const channel = new BroadcastChannel(channelName);
     syncChannelRef.current = channel;
 
+    const handleRequestOffset = () => {
+      if (minRttRef.current < Infinity && clockOffsetRef.current !== 0) {
+        channel.postMessage({
+          type: "offset",
+          offset: clockOffsetRef.current,
+          minRtt: minRttRef.current,
+        });
+      }
+    };
+
+    const handleIncomingOffset = (offset: number, incomingMinRtt: number) => {
+      if (incomingMinRtt <= minRttRef.current || minRttRef.current === Infinity) {
+        if (incomingMinRtt < minRttRef.current) {
+          minRttRef.current = incomingMinRtt;
+        }
+        if (clockOffsetRef.current !== offset) {
+          clockOffsetRef.current = offset;
+          if (optsRef.current.onClockOffsetUpdate) {
+            optsRef.current.onClockOffsetUpdate(offset);
+          }
+        }
+      }
+    };
+
     channel.onmessage = (e) => {
       const msg = e.data as { type: string; offset?: number; minRtt?: number };
       if (!msg || typeof msg !== "object") return;
 
       if (msg.type === "request_offset") {
-        if (minRttRef.current < Infinity && clockOffsetRef.current !== 0) {
-          channel.postMessage({
-            type: "offset",
-            offset: clockOffsetRef.current,
-            minRtt: minRttRef.current,
-          });
-        }
+        handleRequestOffset();
       } else if (msg.type === "offset" && typeof msg.offset === "number") {
-        const incomingMinRtt = msg.minRtt ?? Infinity;
-        // Accept the offset if it's calibrated and has a better (or equal) RTT than ours,
-        // or if we are not calibrated yet.
-        if (incomingMinRtt <= minRttRef.current || minRttRef.current === Infinity) {
-          if (incomingMinRtt < minRttRef.current) {
-            minRttRef.current = incomingMinRtt;
-          }
-          if (clockOffsetRef.current !== msg.offset) {
-            clockOffsetRef.current = msg.offset;
-            if (optsRef.current.onClockOffsetUpdate) {
-              optsRef.current.onClockOffsetUpdate(msg.offset);
-            }
-          }
-        }
+        handleIncomingOffset(msg.offset, msg.minRtt ?? Infinity);
       }
     };
 
@@ -105,11 +110,85 @@ export function useTatamiSocket(
       }
     };
 
+    const handleSnapshot = (payload: { server_ts_ms?: unknown; data?: unknown }) => {
+      const serverTs = payload.server_ts_ms as number;
+      if (serverTs && clockOffsetRef.current === 0) {
+        clockOffsetRef.current = serverTs - Date.now();
+        if (optsRef.current.onClockOffsetUpdate) {
+          optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
+        }
+      }
+      optsRef.current.onSnapshot(payload.data as TatamiSnapshot);
+    };
+
+    const handleMatchEvent = (payload: { event?: unknown; match?: unknown }) => {
+      optsRef.current.onMatchEvent(
+        payload.event as { sequence: number; event_type: string; payload: unknown },
+        payload.match as Match,
+      );
+    };
+
+    const handlePong = (payload: { server_ts_ms?: unknown }) => {
+      if (lastPingSentAtRef.current !== null) {
+        const now = Date.now();
+        const rtt = now - lastPingSentAtRef.current;
+
+        if (rtt > 150) {
+          return;
+        }
+
+        const serverTs = payload.server_ts_ms as number;
+        const correctedOffset = serverTs - (lastPingSentAtRef.current + rtt / 2);
+
+        if (rtt < minRttRef.current) {
+          minRttRef.current = rtt;
+          clockOffsetRef.current = correctedOffset;
+        } else {
+          clockOffsetRef.current = Math.round(clockOffsetRef.current * 0.9 + correctedOffset * 0.1);
+        }
+
+        syncChannelRef.current?.postMessage({
+          type: "offset",
+          offset: clockOffsetRef.current,
+          minRtt: minRttRef.current,
+        });
+
+        if (optsRef.current.onClockOffsetUpdate) {
+          optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
+        }
+      }
+    };
+
+    const handleTimerState = (payload: { server_ts_ms?: unknown; state?: unknown }) => {
+      const serverTs = payload.server_ts_ms as number;
+      if (clockOffsetRef.current === 0) {
+        clockOffsetRef.current = serverTs - Date.now();
+        if (optsRef.current.onClockOffsetUpdate) {
+          optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
+        }
+      }
+
+      const correctedServerTs = Date.now() + clockOffsetRef.current;
+      optsRef.current.onTimerState(payload.state as TimerStatePayload, correctedServerTs);
+    };
+
+    const handleTatamiState = (payload: { server_ts_ms?: unknown }) => {
+      const serverTs = payload.server_ts_ms as number;
+      if (serverTs && clockOffsetRef.current === 0) {
+        clockOffsetRef.current = serverTs - Date.now();
+        if (optsRef.current.onClockOffsetUpdate) {
+          optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
+        }
+      }
+      optsRef.current.onTatamiState(
+        payload as unknown as { tatami: TatamiSnapshot["tatami"]; current_match: Match | null },
+      );
+    };
+
     ws.onopen = () => {
       retryDelay.current = 1000;
-      sendPing(); // Перший пінг одразу при з'єднанні
+      sendPing();
 
-      // Періодично пінгуємо кожні 15 секунд для підтримки з'єднання та синхронізації годинника
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
       pingIntervalRef.current = setInterval(sendPing, 15000);
     };
@@ -126,94 +205,16 @@ export function useTatamiSocket(
         return;
       }
 
-      switch (msg.type) {
-        case "tatami.snapshot": {
-          const serverTs = msg.server_ts_ms as number;
-          if (serverTs && clockOffsetRef.current === 0) {
-            clockOffsetRef.current = serverTs - Date.now();
-            if (optsRef.current.onClockOffsetUpdate) {
-              optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
-            }
-          }
-          optsRef.current.onSnapshot(msg.data as TatamiSnapshot);
-          break;
-        }
-
-        case "match.event":
-          optsRef.current.onMatchEvent(
-            msg.event as { sequence: number; event_type: string; payload: unknown },
-            msg.match as Match,
-          );
-          break;
-
-        case "pong": {
-          if (lastPingSentAtRef.current !== null) {
-            const now = Date.now();
-            const rtt = now - lastPingSentAtRef.current;
-
-            // RTT Throttling Guard: if RTT is abnormally high (> 150ms), it's highly likely
-            // that the browser's event loop was throttled (tab in background). Ignore it for NTP.
-            if (rtt > 150) {
-              break;
-            }
-
-            const serverTs = msg.server_ts_ms as number;
-            // NTP Algorithm: server_time - (client_send_time + RTT / 2)
-            const correctedOffset = serverTs - (lastPingSentAtRef.current + rtt / 2);
-
-            // Use minimum-RTT filter for highest stability
-            if (rtt < minRttRef.current) {
-              minRttRef.current = rtt;
-              clockOffsetRef.current = correctedOffset;
-            } else {
-              // Smooth exponential moving average to track slow clock drifts
-              clockOffsetRef.current = Math.round(clockOffsetRef.current * 0.9 + correctedOffset * 0.1);
-            }
-
-            // Broadcast the calibrated offset to all other tabs instantly!
-            syncChannelRef.current?.postMessage({
-              type: "offset",
-              offset: clockOffsetRef.current,
-              minRtt: minRttRef.current,
-            });
-
-            // Instantly update parent components with the robust NTP offset
-            if (optsRef.current.onClockOffsetUpdate) {
-              optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
-            }
-          }
-          break;
-        }
-
-        case "timer.state": {
-          const serverTs = msg.server_ts_ms as number;
-          // Якщо NTP-офсет ще не пораховано (перші секунди підключення), ініціалізуємо його одностороннім
-          if (clockOffsetRef.current === 0) {
-            clockOffsetRef.current = serverTs - Date.now();
-            if (optsRef.current.onClockOffsetUpdate) {
-              optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
-            }
-          }
-
-          // Передаємо батьківському компоненту скоригований високоточний timestamp
-          const correctedServerTs = Date.now() + clockOffsetRef.current;
-          optsRef.current.onTimerState(msg.state as TimerStatePayload, correctedServerTs);
-          break;
-        }
-
-        case "tatami.state": {
-          const serverTs = msg.server_ts_ms as number;
-          if (serverTs && clockOffsetRef.current === 0) {
-            clockOffsetRef.current = serverTs - Date.now();
-            if (optsRef.current.onClockOffsetUpdate) {
-              optsRef.current.onClockOffsetUpdate(clockOffsetRef.current);
-            }
-          }
-          optsRef.current.onTatamiState(
-            msg as unknown as { tatami: TatamiSnapshot["tatami"]; current_match: Match | null },
-          );
-          break;
-        }
+      if (msg.type === "tatami.snapshot") {
+        handleSnapshot(msg as unknown as { server_ts_ms?: unknown; data?: unknown });
+      } else if (msg.type === "match.event") {
+        handleMatchEvent(msg as unknown as { event?: unknown; match?: unknown });
+      } else if (msg.type === "pong") {
+        handlePong(msg as unknown as { server_ts_ms?: unknown });
+      } else if (msg.type === "timer.state") {
+        handleTimerState(msg as unknown as { server_ts_ms?: unknown; state?: unknown });
+      } else if (msg.type === "tatami.state") {
+        handleTatamiState(msg as unknown as { server_ts_ms?: unknown });
       }
     };
 

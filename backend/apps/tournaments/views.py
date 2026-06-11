@@ -46,6 +46,7 @@ class TournamentViewSet(viewsets.ModelViewSet):
             "complete",
             "generate_all_brackets",
             "auto_distribute_tatamis",
+            "import_categories",
         ):
             return [IsOrganizer()]
         from rest_framework.permissions import AllowAny
@@ -201,8 +202,6 @@ class TournamentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        import re
-
         from django.db import transaction
 
         created_categories = []
@@ -213,130 +212,17 @@ class TournamentViewSet(viewsets.ModelViewSet):
                     if not isinstance(name_str, str) or not name_str.strip():
                         continue
 
-                    name_clean = name_str.strip()
-                    lower_name = name_clean.lower()
-
-                    # 1. Parse gender
-                    allowed_gender = Category.AllowedGender.MIXED
-                    if any(w in lower_name for w in ["хлоп", "чол", "boy", "man", "men", "male"]):
-                        allowed_gender = Category.AllowedGender.MALE
-                    elif any(
-                        w in lower_name
-                        for w in ["дівчат", "жін", "girl", "woman", "women", "female"]
-                    ):
-                        allowed_gender = Category.AllowedGender.FEMALE
-
-                    # 2. Parse age
-                    min_age = 0
-                    max_age = 99
-
-                    # Extract patterns and replace them in the search string for weight
-                    range_match = re.search(
-                        r"(\d+)\s*[-–]\s*(\d+)\s*(?:років|р\.|р|року|years|yo|y\.?o\.?|років|року)?",
-                        name_clean,
-                        re.IGNORECASE,
-                    )
-                    u_match = re.search(r"\bU\s*(\d+)\b", name_clean, re.IGNORECASE)
-                    plus_match = re.search(
-                        r"(\d+)\s*(?:років|р\.|р|years|\+)\s*(?:\+|і старше|понад|and older)",
-                        name_clean,
-                        re.IGNORECASE,
-                    )
-                    if not plus_match:
-                        plus_match = re.search(r"(\d+)\s*\+", name_clean)
-
-                    under_match = re.search(
-                        r"(?:до|under)\s*(\d+)\s*(?:років|р\.|р|years|yo)?",
-                        name_clean,
-                        re.IGNORECASE,
-                    )
-
-                    weight_search_str = name_clean
-
-                    if range_match:
-                        min_age = int(range_match.group(1))
-                        max_age = int(range_match.group(2))
-                        weight_search_str = weight_search_str.replace(range_match.group(0), "")
-                    elif u_match:
-                        min_age = 0
-                        max_age = int(u_match.group(1))
-                        weight_search_str = weight_search_str.replace(u_match.group(0), "")
-                    elif plus_match:
-                        min_age = int(plus_match.group(1))
-                        max_age = 99
-                        weight_search_str = weight_search_str.replace(plus_match.group(0), "")
-                    elif under_match:
-                        min_age = 0
-                        max_age = int(under_match.group(1))
-                        weight_search_str = weight_search_str.replace(under_match.group(0), "")
-                    else:
-                        simple_age = re.search(
-                            r"(\d+)\s*(?:років|р\.|р|року|years|yo)\b", name_clean, re.IGNORECASE
-                        )
-                        if simple_age:
-                            min_age = int(simple_age.group(1))
-                            max_age = int(simple_age.group(1))
-                            weight_search_str = weight_search_str.replace(simple_age.group(0), "")
-
-                    # 3. Parse weight
-                    min_weight = None
-                    max_weight = None
-
-                    w_range = re.search(
-                        r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
-                        weight_search_str,
-                        re.IGNORECASE,
-                    )
-                    w_under = re.search(
-                        r"(?:до|under|-)\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)",
-                        weight_search_str,
-                        re.IGNORECASE,
-                    )
-                    if not w_under:
-                        w_under = re.search(
-                            r"(?:до|under)\s*(\d+(?:\.\d+)?)", weight_search_str, re.IGNORECASE
-                        )
-                        if not w_under:
-                            w_under = re.search(
-                                r"-\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
-                                weight_search_str,
-                                re.IGNORECASE,
-                            )
-
-                    w_over = re.search(
-                        r"(?:від|понад|over|\+)\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
-                        weight_search_str,
-                        re.IGNORECASE,
-                    )
-                    if not w_over:
-                        w_over = re.search(
-                            r"(\d+(?:\.\d+)?)\s*(?:\+|\bplus\b)", weight_search_str, re.IGNORECASE
-                        )
-
-                    if w_range:
-                        min_weight = float(w_range.group(1))
-                        max_weight = float(w_range.group(2))
-                    elif w_under:
-                        max_weight = float(w_under.group(1))
-                    elif w_over:
-                        min_weight = float(w_over.group(1))
-
-                    # 4. Map default ruleset based on tournament's sport type
-                    ruleset_key = "karate_wkf"
-                    sport_lower = tournament.sport_type.lower() if tournament.sport_type else ""
-                    if "ippon" in sport_lower or "shobu" in sport_lower:
-                        ruleset_key = "shobu_ippon"
-
+                    parsed = parse_category_name(name_str, tournament.sport_type)
                     category = Category.objects.create(
                         tournament=tournament,
-                        name=name_clean,
-                        allowed_gender=allowed_gender,
-                        min_age=min_age,
-                        max_age=max_age,
-                        min_weight=min_weight,
-                        max_weight=max_weight,
-                        ruleset_key=ruleset_key,
-                        bracket_format=Category.BracketFormat.SINGLE_ELIMINATION,
+                        name=parsed["name"],
+                        allowed_gender=parsed["allowed_gender"],
+                        min_age=parsed["min_age"],
+                        max_age=parsed["max_age"],
+                        min_weight=parsed["min_weight"],
+                        max_weight=parsed["max_weight"],
+                        ruleset_key=parsed["ruleset_key"],
+                        bracket_format=parsed["bracket_format"],
                     )
                     created_categories.append(category)
         except Exception as exc:
@@ -349,6 +235,128 @@ class TournamentViewSet(viewsets.ModelViewSet):
             CategorySerializer(created_categories, many=True).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+def parse_category_name(name_str: str, sport_type: str) -> dict:
+    import re
+
+    name_clean = name_str.strip()
+    lower_name = name_clean.lower()
+
+    # 1. Parse gender
+    allowed_gender = Category.AllowedGender.MIXED
+    if any(w in lower_name for w in ["хлоп", "чол", "boy", "man", "men", "male"]):
+        allowed_gender = Category.AllowedGender.MALE
+    elif any(w in lower_name for w in ["дівчат", "жін", "girl", "woman", "women", "female"]):
+        allowed_gender = Category.AllowedGender.FEMALE
+
+    # 2. Parse age
+    min_age = 0
+    max_age = 99
+
+    # Extract patterns and replace them in the search string for weight
+    range_match = re.search(
+        r"(\d+)\s*[-–]\s*(\d+)\s*(?:років|року|р\.?|years|y\.?o\.?)?",
+        name_clean,
+        re.IGNORECASE,
+    )
+    u_match = re.search(r"\bU\s*(\d+)\b", name_clean, re.IGNORECASE)
+    plus_match = re.search(
+        r"(\d+)\s*(?:років|р\.|р|years|\+)\s*(?:\+|і старше|понад|and older)",
+        name_clean,
+        re.IGNORECASE,
+    )
+    if not plus_match:
+        plus_match = re.search(r"(\d+)\s*\+", name_clean)
+
+    under_match = re.search(
+        r"(?:до|under)\s*(\d+)\s*(?:років|р\.|р|years|yo)?",
+        name_clean,
+        re.IGNORECASE,
+    )
+
+    weight_search_str = name_clean
+
+    if range_match:
+        min_age = int(range_match.group(1))
+        max_age = int(range_match.group(2))
+        weight_search_str = weight_search_str.replace(range_match.group(0), "")
+    elif u_match:
+        min_age = 0
+        max_age = int(u_match.group(1))
+        weight_search_str = weight_search_str.replace(u_match.group(0), "")
+    elif plus_match:
+        min_age = int(plus_match.group(1))
+        max_age = 99
+        weight_search_str = weight_search_str.replace(plus_match.group(0), "")
+    elif under_match:
+        min_age = 0
+        max_age = int(under_match.group(1))
+        weight_search_str = weight_search_str.replace(under_match.group(0), "")
+    else:
+        simple_age = re.search(
+            r"(\d+)\s*(?:років|р\.|р|року|years|yo)\b", name_clean, re.IGNORECASE
+        )
+        if simple_age:
+            min_age = int(simple_age.group(1))
+            max_age = int(simple_age.group(1))
+            weight_search_str = weight_search_str.replace(simple_age.group(0), "")
+
+    # 3. Parse weight
+    min_weight = None
+    max_weight = None
+
+    w_range = re.search(
+        r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
+        weight_search_str,
+        re.IGNORECASE,
+    )
+    w_under = re.search(
+        r"(?:до|under|-)\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)",
+        weight_search_str,
+        re.IGNORECASE,
+    )
+    if not w_under:
+        w_under = re.search(r"(?:до|under)\s*(\d+(?:\.\d+)?)", weight_search_str, re.IGNORECASE)
+        if not w_under:
+            w_under = re.search(
+                r"-\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
+                weight_search_str,
+                re.IGNORECASE,
+            )
+
+    w_over = re.search(
+        r"(?:від|понад|over|\+)\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
+        weight_search_str,
+        re.IGNORECASE,
+    )
+    if not w_over:
+        w_over = re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|\bplus\b)", weight_search_str, re.IGNORECASE)
+
+    if w_range:
+        min_weight = float(w_range.group(1))
+        max_weight = float(w_range.group(2))
+    elif w_under:
+        max_weight = float(w_under.group(1))
+    elif w_over:
+        min_weight = float(w_over.group(1))
+
+    # 4. Map default ruleset based on tournament's sport type
+    ruleset_key = "karate_wkf"
+    sport_lower = sport_type.lower() if sport_type else ""
+    if "ippon" in sport_lower or "shobu" in sport_lower:
+        ruleset_key = "shobu_ippon"
+
+    return {
+        "name": name_clean,
+        "allowed_gender": allowed_gender,
+        "min_age": min_age,
+        "max_age": max_age,
+        "min_weight": min_weight,
+        "max_weight": max_weight,
+        "ruleset_key": ruleset_key,
+        "bracket_format": Category.BracketFormat.SINGLE_ELIMINATION,
+    }
 
 
 class CategoryViewSet(viewsets.ModelViewSet):

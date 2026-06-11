@@ -87,6 +87,38 @@ const formatLocalDateTime = (dateStr: string | null) => {
   return `${year}-${month}-${day}T${hh}:${mm}`;
 };
 
+interface RegistrationStatusInfo {
+  status: "opened" | "not_started" | "closed";
+  label: string;
+}
+
+const getRegistrationStatus = (tournament: Tournament): RegistrationStatusInfo => {
+  if (!tournament.registration_start && !tournament.registration_end) {
+    return { status: "opened", label: "Реєстрація відкрита (без обмежень)" };
+  }
+  const now = new Date().getTime();
+  const start = tournament.registration_start ? new Date(tournament.registration_start).getTime() : null;
+  const end = tournament.registration_end ? new Date(tournament.registration_end).getTime() : null;
+
+  if (start && now < start) {
+    return { status: "not_started", label: `Реєстрація не розпочалась (відкриється ${new Date(start).toLocaleString("uk-UA")})` };
+  }
+  if (end && now > end) {
+    return { status: "closed", label: `Реєстрація закрита (завершилась ${new Date(end).toLocaleString("uk-UA")})` };
+  }
+  return { status: "opened", label: "Реєстрація відкрита" };
+};
+
+const getRegInfoClass = (status: "opened" | "not_started" | "closed") => {
+  if (status === "opened") {
+    return "bg-green-500/10 text-green-400 border border-green-500/20";
+  }
+  if (status === "not_started") {
+    return "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20";
+  }
+  return "bg-red-500/10 text-red-400 border border-red-500/20";
+};
+
 export default function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isOrganizer, user } = useAuth();
@@ -178,7 +210,7 @@ export default function TournamentDetailPage() {
       await api.delete(`/tournaments/${id}/`);
       toast({ title: "Турнір успішно видалено!" });
       setDeleteDialogOpen(false);
-      window.location.href = "/tournaments";
+      globalThis.window.location.href = "/tournaments";
     } catch {
       toast({ title: "Помилка видалення турніру", variant: "destructive" });
     } finally {
@@ -314,24 +346,7 @@ export default function TournamentDetailPage() {
   const canStart    = tournament.status === "registration";
   const canComplete = tournament.status === "active";
 
-  const getRegistrationStatus = () => {
-    if (!tournament.registration_start && !tournament.registration_end) {
-      return { status: "opened", label: "Реєстрація відкрита (без обмежень)" };
-    }
-    const now = new Date().getTime();
-    const start = tournament.registration_start ? new Date(tournament.registration_start).getTime() : null;
-    const end = tournament.registration_end ? new Date(tournament.registration_end).getTime() : null;
-
-    if (start && now < start) {
-      return { status: "not_started", label: `Реєстрація не розпочалась (відкриється ${new Date(start).toLocaleString("uk-UA")})` };
-    }
-    if (end && now > end) {
-      return { status: "closed", label: `Реєстрація закрита (завершилась ${new Date(end).toLocaleString("uk-UA")})` };
-    }
-    return { status: "opened", label: "Реєстрація відкрита" };
-  };
-
-  const regInfo = getRegistrationStatus();
+  const regInfo = getRegistrationStatus(tournament);
 
   return (
     <div className="container py-8 space-y-6">
@@ -354,11 +369,7 @@ export default function TournamentDetailPage() {
             <p className="text-sm text-muted-foreground/80 max-w-2xl">{formatSportType(tournament.sport_type)}</p>
           )}
           {isOrganizer || isCoach ? (
-            <div className={`mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-              regInfo.status === "opened" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
-              regInfo.status === "not_started" ? "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20" :
-              "bg-red-500/10 text-red-400 border border-red-500/20"
-            }`}>
+            <div className={cn("mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold", getRegInfoClass(regInfo.status))}>
               {regInfo.label}
             </div>
           ) : null}

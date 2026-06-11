@@ -101,12 +101,12 @@ class TatamiService:
                                     "match": None,
                                 },
                             )
-                        except Exception as e:
+                        except Exception:
                             import logging
 
                             logger = logging.getLogger(__name__)
-                            logger.error(
-                                f"Error auto-finalizing results for category {category.id}: {e}"
+                            logger.exception(
+                                f"Error auto-finalizing results for category {category.id}"
                             )
 
         tatami.current_match = None

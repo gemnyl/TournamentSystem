@@ -20,30 +20,24 @@ interface ParticipantStats {
   scores_conceded: number;
 }
 
-/**
- * Таблиця round-robin — показує учасників, їх W/D/L та очки.
- * Також рендерить сітку результатів (матриця учасник × учасник).
- */
-export function RoundRobinTable({ matches }: RoundRobinTableProps) {
-  // Збираємо унікальних учасників
-  const participantsMap = new Map<number, string>();
-  const placesMap = new Map<number, number | null>();
-  matches.forEach((m) => {
-    if (m.reg_first) {
-      participantsMap.set(m.reg_first.id, m.reg_first.athlete?.full_name ?? `#${m.reg_first.id}`);
-      placesMap.set(m.reg_first.id, m.reg_first.place ?? null);
-    }
-    if (m.reg_second) {
-      participantsMap.set(m.reg_second.id, m.reg_second.athlete?.full_name ?? `#${m.reg_second.id}`);
-      placesMap.set(m.reg_second.id, m.reg_second.place ?? null);
-    }
-  });
-  const participants = Array.from(participantsMap.entries()).map(([id, name]) => ({ id, name }));
-
-  // Статистика
+function computeParticipantsStats(
+  participants: { id: number; name: string }[],
+  matches: Match[],
+  placesMap: Map<number, number | null>
+): Record<number, ParticipantStats> {
   const stats: Record<number, ParticipantStats> = {};
   participants.forEach(({ id, name }) => {
-    stats[id] = { regId: id, name, place: placesMap.get(id) ?? null, wins: 0, draws: 0, losses: 0, points: 0, scores_scored: 0, scores_conceded: 0 };
+    stats[id] = {
+      regId: id,
+      name,
+      place: placesMap.get(id) ?? null,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      points: 0,
+      scores_scored: 0,
+      scores_conceded: 0,
+    };
   });
 
   matches.forEach((m) => {
@@ -83,23 +77,15 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
     }
   });
 
-  // Групуємо за (points, wins) для точного відтворення бекенд-сортування
-  const groups: Record<string, number[]> = {};
-  Object.values(stats).forEach((s) => {
-    const key = `${s.points}-${s.wins}`;
-    if (!groups[key]) {
-      groups[key] = [];
-    }
-    groups[key].push(s.regId);
-  });
+  return stats;
+}
 
-  // Сортуємо групи за спаданням очок та перемог
-  const sortedGroupKeys = Object.keys(groups).sort((a, b) => {
-    const [ptsA, winsA] = a.split("-").map(Number);
-    const [ptsB, winsB] = b.split("-").map(Number);
-    return ptsB - ptsA || winsB - winsA;
-  });
-
+function resolveTies(
+  sortedGroupKeys: string[],
+  groups: Record<string, number[]>,
+  matches: Match[],
+  stats: Record<number, ParticipantStats>
+): number[] {
   const sortedIds: number[] = [];
   sortedGroupKeys.forEach((key) => {
     const groupIds = groups[key];
@@ -122,15 +108,15 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
         // Нічия або немає зустрічі. Порівнюємо різницю балів, потім набрані бали
         const diff1 = stats[id1].scores_scored - stats[id1].scores_conceded;
         const diff2 = stats[id2].scores_scored - stats[id2].scores_conceded;
-        if (diff1 !== diff2) {
-          if (diff1 > diff2) sortedIds.push(id1, id2);
-          else sortedIds.push(id2, id1);
-        } else {
+        if (diff1 === diff2) {
           if (stats[id1].scores_scored >= stats[id2].scores_scored) {
             sortedIds.push(id1, id2);
           } else {
             sortedIds.push(id2, id1);
           }
+        } else {
+          if (diff1 > diff2) sortedIds.push(id1, id2);
+          else sortedIds.push(id2, id1);
         }
       }
     } else {
@@ -138,18 +124,18 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
       const subSorted = [...groupIds].sort((idA, idB) => {
         const diffA = stats[idA].scores_scored - stats[idA].scores_conceded;
         const diffB = stats[idB].scores_scored - stats[idB].scores_conceded;
-        if (diffA !== diffB) {
-          return diffB - diffA;
+        if (diffA === diffB) {
+          return stats[idB].scores_scored - stats[idA].scores_scored;
         }
-        return stats[idB].scores_scored - stats[idA].scores_scored;
+        return diffB - diffA;
       });
       sortedIds.push(...subSorted);
     }
   });
+  return sortedIds;
+}
 
-  const sorted = sortedIds.map((id) => stats[id]);
-
-  // Матриця результатів
+function buildResultMatrix(matches: Match[]): Record<string, { score: string; outcome: "win" | "loss" | "draw" }> {
   const resultMatrix: Record<string, { score: string; outcome: "win" | "loss" | "draw" }> = {};
   matches.forEach((m) => {
     if (!m.reg_first || !m.reg_second) return;
@@ -169,6 +155,62 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
       };
     }
   });
+  return resultMatrix;
+}
+
+function getMedalOrRank(displayRank: number): string {
+  if (displayRank === 1) return "🥇";
+  if (displayRank === 2) return "🥈";
+  if (displayRank === 3) return "🥉";
+  return `${displayRank}`;
+}
+
+/**
+ * Таблиця round-robin — показує учасників, їх W/D/L та очки.
+ * Також рендерить сітку результатів (матриця учасник × учасник).
+ */
+export function RoundRobinTable({ matches }: RoundRobinTableProps) {
+  // Збираємо унікальних учасників
+  const participantsMap = new Map<number, string>();
+  const placesMap = new Map<number, number | null>();
+  matches.forEach((m) => {
+    if (m.reg_first) {
+      participantsMap.set(m.reg_first.id, m.reg_first.athlete?.full_name ?? `#${m.reg_first.id}`);
+      placesMap.set(m.reg_first.id, m.reg_first.place ?? null);
+    }
+    if (m.reg_second) {
+      participantsMap.set(m.reg_second.id, m.reg_second.athlete?.full_name ?? `#${m.reg_second.id}`);
+      placesMap.set(m.reg_second.id, m.reg_second.place ?? null);
+    }
+  });
+  const participants = Array.from(participantsMap.entries()).map(([id, name]) => ({ id, name }));
+
+  // Розраховуємо статистику через хелпер
+  const stats = computeParticipantsStats(participants, matches, placesMap);
+
+  // Групуємо за (points, wins) для точного відтворення бекенд-сортування
+  const groups: Record<string, number[]> = {};
+  Object.values(stats).forEach((s) => {
+    const key = `${s.points}-${s.wins}`;
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(s.regId);
+  });
+
+  // Сортуємо групи за спаданням очок та перемог
+  const sortedGroupKeys = Object.keys(groups).sort((a, b) => {
+    const [ptsA, winsA] = a.split("-").map(Number);
+    const [ptsB, winsB] = b.split("-").map(Number);
+    return ptsB - ptsA || winsB - winsA;
+  });
+
+  // Вирішуємо нічиї/особисті зустрічі
+  const sortedIds = resolveTies(sortedGroupKeys, groups, matches, stats);
+  const sorted = sortedIds.map((id) => stats[id]);
+
+  // Матриця результатів
+  const resultMatrix = buildResultMatrix(matches);
 
   return (
     <div className="space-y-8 select-none">
@@ -190,14 +232,7 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
             <TableBody>
               {sorted.map((s, i) => {
                 const displayRank = s.place ?? (i + 1);
-                const medal =
-                  displayRank === 1
-                    ? "🥇"
-                    : displayRank === 2
-                    ? "🥈"
-                    : displayRank === 3
-                    ? "🥉"
-                    : `${displayRank}`;
+                const medal = getMedalOrRank(displayRank);
 
                 return (
                   <TableRow key={s.regId} className="hover:bg-muted/25 border-b border-border/50 transition-colors">

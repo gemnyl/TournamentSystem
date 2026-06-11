@@ -11,7 +11,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { toast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, formatSportType } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,11 +21,107 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { formatSportType } from "@/lib/utils";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
+
+interface CategoryResultRowProps {
+  res: CategoryResult;
+  resultsPersisted: boolean;
+  canFinalizeOrUnlock: boolean | undefined;
+  placeOverrides: Record<number, number | null>;
+  onPlaceOverrideChange: (regId: number, val: number | null) => void;
+}
+
+function CategoryResultRow({
+  res,
+  resultsPersisted,
+  canFinalizeOrUnlock,
+  placeOverrides,
+  onPlaceOverrideChange,
+}: Readonly<CategoryResultRowProps>) {
+  const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
+  const medal =
+    placeVal === 1
+      ? "🥇"
+      : placeVal === 2
+      ? "🥈"
+      : placeVal === 3
+      ? "🥉"
+      : placeVal != null
+      ? `${placeVal}`
+      : "—";
+
+  return (
+    <TableRow className="hover:bg-muted/10">
+      <TableCell className="text-center py-2">
+        {resultsPersisted ? (
+          <span
+            className={cn(
+              "font-black text-lg",
+              placeVal === 1 && "text-yellow-400 scale-110",
+              placeVal === 2 && "text-slate-300 scale-105",
+              placeVal === 3 && "text-amber-600",
+              (placeVal ?? 0) > 3 && "text-muted-foreground text-sm font-normal"
+            )}
+          >
+            {medal}
+          </span>
+        ) : canFinalizeOrUnlock ? (
+          <select
+            value={placeOverrides[res.registration.id] ?? ""}
+            onChange={(e) => {
+              const val = e.target.value === "" ? null : Number(e.target.value);
+              onPlaceOverrideChange(res.registration.id, val);
+            }}
+            className="bg-background text-foreground border border-input rounded px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-amber-500 w-16 text-center"
+          >
+            <option value="">—</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5">5</option>
+          </select>
+        ) : (
+          <span className="text-muted-foreground text-sm font-semibold">
+            {medal}
+          </span>
+        )}
+      </TableCell>
+      <TableCell className="font-bold text-foreground">
+        {res.registration.athlete.full_name}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-sm">
+        {res.registration.athlete.club ? (
+          <span>
+            {res.registration.athlete.club.name}
+            {res.registration.athlete.club.region && (
+              <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
+                {res.registration.athlete.club.region}
+              </span>
+            )}
+          </span>
+        ) : (
+          "—"
+        )}
+      </TableCell>
+      <TableCell className="text-center font-semibold text-sm">
+        <span className="text-green-500 font-bold">{res.wins}</span>
+        <span className="text-muted-foreground mx-1">/</span>
+        <span className="text-amber-500 font-bold">{res.draws}</span>
+        <span className="text-muted-foreground mx-1">/</span>
+        <span className="text-red-500 font-bold">{res.losses}</span>
+      </TableCell>
+      <TableCell className="text-center font-black text-amber-500 bg-amber-500/5">
+        {res.points}
+      </TableCell>
+      <TableCell className="text-center font-mono text-xs text-muted-foreground">
+        {res.scores_scored} : {res.scores_conceded}
+      </TableCell>
+    </TableRow>
+  );
+}
 import type { Category, Registration, Athlete, PaginatedResponse, Tournament, Tatami, Match } from "@/types/api";
 
 const weighInSchema = z.object({ weight: z.coerce.number().min(20).max(300) });
@@ -147,14 +243,14 @@ export default function CategoryDetailPage() {
       setRegistrations(Array.isArray(regRes.data) ? regRes.data : regRes.data.results);
 
       const [tatamiRes, tournRes, matchRes] = await Promise.all([
-        api.get<Tatami[]>(`/tatamis/?tournament=${catRes.data.tournament}`),
+        api.get<Tatami[] | { results: Tatami[] }>(`/tatamis/?tournament=${catRes.data.tournament}`),
         api.get<Tournament>(`/tournaments/${catRes.data.tournament}/`),
         api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${catRes.data.tournament}`),
       ]);
       setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as { results: Tatami[] }).results || []);
       setTournament(tournRes.data);
 
-      const allMatches = Array.isArray(matchRes.data) ? matchRes.data : (matchRes.data as { results: Match[] }).results || [];
+      const allMatches = Array.isArray(matchRes.data) ? matchRes.data : matchRes.data.results || [];
       setMatches(allMatches);
 
       const categoryMatches = allMatches.filter((m: Match) => m.category === Number(id));
@@ -228,7 +324,7 @@ export default function CategoryDetailPage() {
     }
     editCategoryForm.reset({
       name: category.name,
-      allowed_gender: category.allowed_gender as "male" | "female" | "mixed",
+      allowed_gender: category.allowed_gender,
       min_age: category.min_age,
       max_age: category.max_age,
       min_weight: category.min_weight ?? undefined,
@@ -649,52 +745,54 @@ export default function CategoryDetailPage() {
                   {/* Банери статусу */}
                   {canFinalizeOrUnlock && (
                     <>
-                      {!allMatchesCompleted ? (
+                      {allMatchesCompleted ? (
+                        resultsPersisted ? (
+                          <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-500 text-sm font-semibold select-none">
+                            <div className="flex items-center gap-3">
+                              <CheckCircle className="w-5 h-5 shrink-0" />
+                              <span>Результати змагань зафіксовано в базі даних та внесено до загального заліку.</span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={handleUnlockResults}
+                              disabled={isSavingResults}
+                              className="shadow-sm"
+                            >
+                              {isSavingResults ? (
+                                <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                              ) : (
+                                <Unlock className="w-4 h-4 mr-1" />
+                              )}
+                              Скасувати фіксацію
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-500 text-sm font-semibold select-none">
+                            <div className="flex items-center gap-3">
+                              <Award className="w-5 h-5 shrink-0" />
+                              <span>Всі сутички завершено! Організатор або призначений суддя може зафіксувати результати.</span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="sport"
+                              onClick={handleSaveResults}
+                              disabled={isSavingResults}
+                              className="shadow-sm shadow-amber-500/10"
+                            >
+                              {isSavingResults ? (
+                                <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                              ) : (
+                                <Trophy className="w-4 h-4 mr-1" />
+                              )}
+                              Зафіксувати результати
+                            </Button>
+                          </div>
+                        )
+                      ) : (
                         <div className="flex items-center gap-3 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-500 text-sm font-semibold select-none">
                           <Clock className="w-5 h-5 shrink-0" />
                           <span>Сутички в категорії ще тривають. Відображено поточні проміжні результати.</span>
-                        </div>
-                      ) : resultsPersisted ? (
-                        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-500 text-sm font-semibold select-none">
-                          <div className="flex items-center gap-3">
-                            <CheckCircle className="w-5 h-5 shrink-0" />
-                            <span>Результати змагань зафіксовано в базі даних та внесено до загального заліку.</span>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={handleUnlockResults}
-                            disabled={isSavingResults}
-                            className="shadow-sm"
-                          >
-                            {isSavingResults ? (
-                              <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                            ) : (
-                              <Unlock className="w-4 h-4 mr-1" />
-                            )}
-                            Скасувати фіксацію
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-500 text-sm font-semibold select-none">
-                          <div className="flex items-center gap-3">
-                            <Award className="w-5 h-5 shrink-0" />
-                            <span>Всі сутички завершено! Організатор або призначений суддя може зафіксувати результати.</span>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="sport"
-                            onClick={handleSaveResults}
-                            disabled={isSavingResults}
-                            className="shadow-sm shadow-amber-500/10"
-                          >
-                            {isSavingResults ? (
-                              <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                            ) : (
-                              <Trophy className="w-4 h-4 mr-1" />
-                            )}
-                            Зафіксувати результати
-                          </Button>
                         </div>
                       )}
                     </>
@@ -720,89 +818,18 @@ export default function CategoryDetailPage() {
                               Немає даних для заліку
                             </TableCell>
                           </TableRow>
-                        ) : results.map((res: CategoryResult) => {
-                            const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
-                            const medal =
-                              placeVal === 1
-                                ? "🥇"
-                                : placeVal === 2
-                                ? "🥈"
-                                : placeVal === 3
-                                ? "🥉"
-                                : placeVal != null
-                                ? `${placeVal}`
-                                : "—";
-
-                            return (
-                              <TableRow key={res.registration.id} className="hover:bg-muted/10">
-                                <TableCell className="text-center py-2">
-                                  {resultsPersisted ? (
-                                    <span
-                                      className={cn(
-                                        "font-black text-lg",
-                                        placeVal === 1 && "text-yellow-400 scale-110",
-                                        placeVal === 2 && "text-slate-300 scale-105",
-                                        placeVal === 3 && "text-amber-600",
-                                        (placeVal ?? 0) > 3 && "text-muted-foreground text-sm font-normal"
-                                      )}
-                                    >
-                                      {medal}
-                                    </span>
-                                  ) : canFinalizeOrUnlock ? (
-                                    <select
-                                      value={placeOverrides[res.registration.id] ?? ""}
-                                      onChange={(e) => {
-                                        const val = e.target.value === "" ? null : Number(e.target.value);
-                                        setPlaceOverrides((prev) => ({ ...prev, [res.registration.id]: val }));
-                                      }}
-                                      className="bg-background text-foreground border border-input rounded px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-amber-500 w-16 text-center"
-                                    >
-                                      <option value="">—</option>
-                                      <option value="1">1</option>
-                                      <option value="2">2</option>
-                                      <option value="3">3</option>
-                                      <option value="5">5</option>
-                                    </select>
-                                  ) : (
-                                    <span className="text-muted-foreground text-sm font-semibold">
-                                      {medal}
-                                    </span>
-                                  )}
-                                </TableCell>
-                                <TableCell className="font-bold text-foreground">
-                                  {res.registration.athlete.full_name}
-                                </TableCell>
-                                <TableCell className="text-muted-foreground text-sm">
-                                  {res.registration.athlete.club ? (
-                                    <span>
-                                      {res.registration.athlete.club.name}
-                                      {res.registration.athlete.club.region && (
-                                        <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
-                                          {res.registration.athlete.club.region}
-                                        </span>
-                                      )}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-center font-semibold text-sm">
-                                  <span className="text-green-500 font-bold">{res.wins}</span>
-                                  <span className="text-muted-foreground mx-1">/</span>
-                                  <span className="text-amber-500 font-bold">{res.draws}</span>
-                                  <span className="text-muted-foreground mx-1">/</span>
-                                  <span className="text-red-500 font-bold">{res.losses}</span>
-                                </TableCell>
-                                <TableCell className="text-center font-black text-amber-500 bg-amber-500/5">
-                                  {res.points}
-                                </TableCell>
-                                <TableCell className="text-center font-mono text-xs text-muted-foreground">
-                                  {res.scores_scored} : {res.scores_conceded}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
-                        }
+                        ) : results.map((res: CategoryResult) => (
+                          <CategoryResultRow
+                            key={res.registration.id}
+                            res={res}
+                            resultsPersisted={resultsPersisted}
+                            canFinalizeOrUnlock={canFinalizeOrUnlock}
+                            placeOverrides={placeOverrides}
+                            onPlaceOverrideChange={(regId, val) => {
+                              setPlaceOverrides((prev) => ({ ...prev, [regId]: val }));
+                            }}
+                          />
+                        ))}
                       </TableBody>
                     </Table>
                   </div>

@@ -380,10 +380,10 @@ class CategoryResultsTestCase(TournamentAPITestCase):
         from apps.tournaments.services import calculate_category_standings
 
         # Створюємо 4 атлетів (вони автоматично реєструються у self.category)
-        a1, r1 = self._create_athlete(1)
-        a2, r2 = self._create_athlete(2)
-        a3, r3 = self._create_athlete(3)
-        a4, r4 = self._create_athlete(4)
+        _, r1 = self._create_athlete(1)
+        _, r2 = self._create_athlete(2)
+        _, r3 = self._create_athlete(3)
+        _, r4 = self._create_athlete(4)
 
         # Генерація сітки
         matches = BracketGenerator(self.category).generate()
@@ -439,9 +439,9 @@ class CategoryResultsTestCase(TournamentAPITestCase):
         self.category.save()
 
         # Створюємо 3 атлетів
-        a1, r1 = self._create_athlete(1)
-        a2, r2 = self._create_athlete(2)
-        a3, r3 = self._create_athlete(3)
+        _, r1 = self._create_athlete(1)
+        _, r2 = self._create_athlete(2)
+        _, r3 = self._create_athlete(3)
 
         matches = BracketGenerator(self.category).generate()
         self.assertEqual(len(matches), 3)  # кожен з кожним = 3 матчі

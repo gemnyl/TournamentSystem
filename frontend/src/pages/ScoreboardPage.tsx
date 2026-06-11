@@ -52,12 +52,8 @@ export default function ScoreboardPage() {
       try {
         const res = await api.get<Record<string, unknown>[]>(`/categories/${activeResultsCatId}/results/`);
         setCategoryResults(res.data);
-        if (activeResultsCatName) {
-          setResultsCategoryName(activeResultsCatName);
-        } else {
-          const catRes = await api.get(`/categories/${activeResultsCatId}/`);
-          setResultsCategoryName(catRes.data.name);
-        }
+        const nameVal = activeResultsCatName ?? (await api.get<{ name: string }>(`/categories/${activeResultsCatId}/`)).data.name;
+        setResultsCategoryName(nameVal ?? "");
       } catch {
         setCategoryResults([]);
       }
@@ -79,7 +75,7 @@ export default function ScoreboardPage() {
         if (matchingTatami) {
           setTatami(matchingTatami);
           fetchTatamiMatches(matchingTatami);
-          if (matchingTatami.current_match) {
+          if (matchingTatami.current_match && typeof matchingTatami.current_match === "object") {
             const matchObj = matchingTatami.current_match as unknown as Match;
             setCurrentMatch(matchObj);
             setTimerState(matchToTimerState(matchObj));
@@ -103,7 +99,7 @@ export default function ScoreboardPage() {
     return () => clearInterval(interval);
   }, [fetchTatamiMatches]);
 
-  useTatamiSocket(tid!, n!, {
+  useTatamiSocket(tid || "", n || "", {
     onClockOffsetUpdate: setServerTimeOffset,
     onSnapshot(data) {
       if (data.current_match) {
@@ -149,7 +145,7 @@ export default function ScoreboardPage() {
       match={currentMatch}
       timerState={timerState}
       remainingMs={remainingMs}
-      tatamiNumber={n!}
+      tatamiNumber={n || ""}
       categoryResults={categoryResults}
       resultsCategoryName={resultsCategoryName}
     />

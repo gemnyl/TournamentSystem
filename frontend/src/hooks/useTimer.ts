@@ -9,7 +9,7 @@ export interface TimerState {
 }
 
 export function useTimer(initial: TimerState, serverTimeOffset: number) {
-  const [state, setStateRaw] = useState<TimerState>(initial);
+  const [state, setState] = useState<TimerState>(initial);
   const [remainingMs, setRemainingMs] = useState(
     initial.duration_ms - initial.elapsed_ms,
   );
@@ -70,7 +70,7 @@ export function useTimer(initial: TimerState, serverTimeOffset: number) {
   }, [state]);
 
   const setTimerState = (next: TimerState | ((prev: TimerState) => TimerState)) => {
-    setStateRaw(prev => {
+    setState(prev => {
       const newState = typeof next === "function" ? next(prev) : next;
 
       const startedAtSame =
@@ -136,7 +136,7 @@ export function useTimer(initial: TimerState, serverTimeOffset: number) {
 
         const raw = Math.max(0, s.duration_ms - elapsed);
         const last = lastDisplayedRef.current;
-        const displayed = last !== null ? Math.min(raw, last) : raw;
+        const displayed = last === null ? raw : Math.min(raw, last);
         lastDisplayedRef.current = displayed;
 
         // Only update remainingMs and trigger a re-render when the second boundary changes

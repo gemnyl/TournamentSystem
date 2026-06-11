@@ -58,6 +58,79 @@ function getTatamiMatchId(currentMatch: Match | null | number | Record<string, u
   return currentMatch;
 }
 
+function updateBracketRounds(rounds: Match[][], updatedMatch: Match): Match[][] {
+  return rounds.map((round) =>
+    round.map((m) => m.id === updatedMatch.id ? updatedMatch : m)
+  );
+}
+
+interface OperatorResultRowProps {
+  readonly res: CategoryResult;
+  readonly resultsPersisted: boolean;
+  readonly placeOverride: number | null;
+  readonly onOverrideChange: (regId: number, val: number | null) => void;
+}
+
+function OperatorResultRow({
+  res,
+  resultsPersisted,
+  placeOverride,
+  onOverrideChange,
+}: OperatorResultRowProps) {
+  const placeVal = resultsPersisted ? res.registration?.place : placeOverride;
+
+  const medal =
+    placeVal === 1
+      ? "🥇"
+      : placeVal === 2
+      ? "🥈"
+      : placeVal === 3
+      ? "🥉"
+      : placeVal != null
+      ? `${placeVal}`
+      : "—";
+
+  return (
+    <div className="flex items-center justify-between p-3 text-xs hover:bg-muted/10 transition-colors">
+      <div className="flex items-center gap-3">
+        {resultsPersisted ? (
+          <span className={cn(
+            "font-black text-base w-8 text-center",
+            placeVal === 1 && "text-yellow-400",
+            placeVal === 2 && "text-slate-300",
+            placeVal === 3 && "text-amber-600"
+          )}>{medal}</span>
+        ) : (
+          <select
+            value={placeOverride ?? ""}
+            onChange={(e) => {
+              const val = e.target.value === "" ? null : Number(e.target.value);
+              onOverrideChange(res.registration.id, val);
+            }}
+            className="bg-zinc-800 text-foreground border border-zinc-700 rounded px-1 py-0.5 text-xs font-semibold focus:outline-none focus:border-amber-500 w-10 text-center shrink-0"
+          >
+            <option value="">—</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5">5</option>
+          </select>
+        )}
+        <div className="flex flex-col">
+          <span className="font-semibold text-foreground">{res.registration.athlete.full_name}</span>
+          <span className="text-[10px] text-muted-foreground">{res.registration.athlete.club?.name || "Без клубу"}</span>
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-0.5">
+        <span className="font-bold text-amber-500">{res.points} очок</span>
+        <span className="text-[9px] text-muted-foreground font-mono">
+          {res.wins}В / {res.draws}Н / {res.losses}П
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const DEFAULT_TIMER: TimerState = {
   status: "not_started",
   started_at_ms: null,
@@ -250,7 +323,7 @@ export default function OperatorPanelPage() {
     return () => clearInterval(interval);
   }, [fetchMatches]);
 
-  useTatamiSocket(tid!, n!, {
+  useTatamiSocket(tid || "", n || "", {
     onClockOffsetUpdate: setServerTimeOffset,
     onSnapshot(data) {
       setConnected(true);
@@ -304,9 +377,7 @@ export default function OperatorPanelPage() {
         if (!prev) return prev;
         return {
           ...prev,
-          rounds: prev.rounds.map((round) =>
-            round.map((m) => m.id === match.id ? match : m)
-          ),
+          rounds: updateBracketRounds(prev.rounds, match),
         };
       });
       fetchCategories();
@@ -578,7 +649,7 @@ export default function OperatorPanelPage() {
       cat.results_finalized = dbCat?.results_finalized ?? false;
     });
 
-    return cats.sort((a, b) => a.schedule_order - b.schedule_order || a.id - b.id);
+    return [...cats].sort((a, b) => a.schedule_order - b.schedule_order || a.id - b.id);
   }, [tatamiMatches, categories]);
 
   // Ref to track last active match ID, so we only auto-focus category when the match changes
@@ -627,7 +698,7 @@ export default function OperatorPanelPage() {
 
     // Sort matches in each round by match_order
     Object.keys(roundsMap).forEach((r) => {
-      roundsMap[Number(r)].sort((a, b) => a.match_order - b.match_order);
+      roundsMap[Number(r)] = [...roundsMap[Number(r)]].sort((a, b) => a.match_order - b.match_order);
     });
 
     return roundsMap;
@@ -637,7 +708,7 @@ export default function OperatorPanelPage() {
   const nextUpcomingMatches = useMemo(() => {
     const activeMatchId = getTatamiMatchId(tatami?.current_match ?? null);
     const scheduled = tatamiMatches.filter((m) => m.status === "scheduled" && m.id !== activeMatchId);
-    return scheduled
+    return [...scheduled]
       .sort((a, b) => {
         const orderA = a.category_order ?? 0;
         const orderB = b.category_order ?? 0;
@@ -735,10 +806,10 @@ export default function OperatorPanelPage() {
           Ви авторизовані як суддя, проте ви не закріплені за цим татамі (Татамі №{n}). Зверніться до організатора для призначення.
         </p>
         <div className="flex gap-3 mt-8">
-          <Button variant="outline" onClick={() => window.history.back()}>
+          <Button variant="outline" onClick={() => globalThis.window.history.back()}>
             Назад
           </Button>
-          <Button variant="sport" onClick={() => window.location.reload()}>
+          <Button variant="sport" onClick={() => globalThis.window.location.reload()}>
             Оновити сторінку
           </Button>
         </div>
@@ -771,7 +842,7 @@ export default function OperatorPanelPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => window.open(`/categories/${selectedCategoryId}/bracket`, "_blank")}
+              onClick={() => globalThis.window.open(`/categories/${selectedCategoryId}/bracket`, "_blank")}
               className="text-xs font-medium"
             >
               <GitBranch className="w-3.5 h-3.5 mr-1 text-amber-500" /> Публічна сітка
@@ -780,7 +851,7 @@ export default function OperatorPanelPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => window.open(`/scoreboard/tournament/${tid}/tatami/${n}?spectator=true`, "_blank")}
+            onClick={() => globalThis.window.open(`/scoreboard/tournament/${tid}/tatami/${n}?spectator=true`, "_blank")}
             className="text-xs font-medium"
           >
             <ExternalLink className="w-3.5 h-3.5 mr-1 text-blue-400" /> Глядацьке табло
@@ -788,7 +859,7 @@ export default function OperatorPanelPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => window.open(`/scoreboard/tournament/${tid}/tatami/${n}`, "_blank")}
+            onClick={() => globalThis.window.open(`/scoreboard/tournament/${tid}/tatami/${n}`, "_blank")}
             className="text-xs font-medium"
           >
             <ExternalLink className="w-3.5 h-3.5 mr-1 text-red-400" /> Табло проектора
@@ -1088,60 +1159,17 @@ export default function OperatorPanelPage() {
                         const dbCat = categories.find(c => c.id === selectedCategoryId);
                         const resultsPersisted = dbCat?.results_finalized ?? false;
 
-                        return categoryResults.map((res: CategoryResult) => {
-                          const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
-
-                          const medal =
-                            placeVal === 1
-                              ? "🥇"
-                              : placeVal === 2
-                              ? "🥈"
-                              : placeVal === 3
-                              ? "🥉"
-                              : placeVal != null
-                              ? `${placeVal}`
-                              : "—";
-
-                          return (
-                            <div key={res.registration.id} className="flex items-center justify-between p-3 text-xs hover:bg-muted/10 transition-colors">
-                              <div className="flex items-center gap-3">
-                                {resultsPersisted ? (
-                                  <span className={cn(
-                                    "font-black text-base w-8 text-center",
-                                    placeVal === 1 && "text-yellow-400",
-                                    placeVal === 2 && "text-slate-300",
-                                    placeVal === 3 && "text-amber-600"
-                                  )}>{medal}</span>
-                                ) : (
-                                  <select
-                                    value={placeOverrides[res.registration.id] ?? ""}
-                                    onChange={(e) => {
-                                      const val = e.target.value === "" ? null : Number(e.target.value);
-                                      setPlaceOverrides(prev => ({ ...prev, [res.registration.id]: val }));
-                                    }}
-                                    className="bg-zinc-800 text-foreground border border-zinc-700 rounded px-1 py-0.5 text-xs font-semibold focus:outline-none focus:border-amber-500 w-10 text-center shrink-0"
-                                  >
-                                    <option value="">—</option>
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3">3</option>
-                                    <option value="5">5</option>
-                                  </select>
-                                )}
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-foreground">{res.registration.athlete.full_name}</span>
-                                  <span className="text-[10px] text-muted-foreground">{res.registration.athlete.club?.name || "Без клубу"}</span>
-                                </div>
-                              </div>
-                              <div className="flex flex-col items-end gap-0.5">
-                                <span className="font-bold text-amber-500">{res.points} очок</span>
-                                <span className="text-[9px] text-muted-foreground font-mono">
-                                  {res.wins}В / {res.draws}Н / {res.losses}П
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        });
+                        return categoryResults.map((res: CategoryResult) => (
+                          <OperatorResultRow
+                            key={res.registration.id}
+                            res={res}
+                            resultsPersisted={resultsPersisted}
+                            placeOverride={placeOverrides[res.registration.id] ?? null}
+                            onOverrideChange={(regId, val) => {
+                              setPlaceOverrides((prev) => ({ ...prev, [regId]: val }));
+                            }}
+                          />
+                        ));
                       })()}
                     </div>
                   </div>

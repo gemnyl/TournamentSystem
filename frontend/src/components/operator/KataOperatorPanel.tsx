@@ -64,8 +64,8 @@ export default function KataOperatorPanel({
       setSelectedAka(null);
       setSelectedAo(null);
       toast({ title: `Категорію налаштовано на ${count} суддів.` });
-    } catch (exc: unknown) {
-      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+    } catch (error_: unknown) {
+      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -83,8 +83,8 @@ export default function KataOperatorPanel({
       setSelectedAo(null);
       toast({ title: `Поєдинок налаштовано на ${count} суддів.` });
       setChangeJudgesOpen(false);
-    } catch (exc: unknown) {
-      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+    } catch (error_: unknown) {
+      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -103,8 +103,8 @@ export default function KataOperatorPanel({
       setSelectedAo(null);
       toast({ title: `Категорію налаштовано на ${count} суддів.` });
       setChangeJudgesOpen(false);
-    } catch (exc: unknown) {
-      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
+    } catch (error_: unknown) {
+      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка встановлення кількості суддів";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -183,8 +183,8 @@ export default function KataOperatorPanel({
       });
       onMatchUpdate(data);
       toast({ title: "Результат Ката зафіксовано!" });
-    } catch (exc: unknown) {
-      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка фіксації результату";
+    } catch (error_: unknown) {
+      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка фіксації результату";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setBusy(false);
@@ -200,8 +200,8 @@ export default function KataOperatorPanel({
       setSelectedAo(null);
       toast({ title: "Поєдинок успішно скинуто!" });
       setResetDialogOpen(false);
-    } catch (exc: unknown) {
-      const msg = (exc as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
+    } catch (error_: unknown) {
+      const msg = (error_ as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Помилка скидання поєдинку";
       toast({
         title: "Не вдалося скинути поєдинок",
         description: msg,
@@ -239,36 +239,7 @@ export default function KataOperatorPanel({
         )}
       </div>
 
-      {!judgesCount ? (
-        /* Setup Screen */
-        <div className="flex flex-col items-center justify-center py-16 px-4 border border-border bg-zinc-900/40 backdrop-blur-md rounded-2xl shadow-xl space-y-6">
-          <div className="text-center space-y-2">
-            <Trophy className="w-12 h-12 text-yellow-500 mx-auto opacity-80" />
-            <h3 className="text-lg font-bold text-white uppercase tracking-wider">Налаштування Карате Ката</h3>
-            <p className="text-xs text-muted-foreground max-w-md">
-              Оберіть кількість суддів для цієї категорії. Це рішення буде застосовано до всіх поєдинків у цій категорії.
-            </p>
-          </div>
-          <div className="flex gap-4">
-            <Button
-              size="lg"
-              disabled={busy || disabled}
-              className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-bold px-8 py-6 rounded-xl text-base transition-all duration-200 hover:scale-105"
-              onClick={() => handleSetJudgesCount(3)}
-            >
-              3 судді
-            </Button>
-            <Button
-              size="lg"
-              disabled={busy || disabled}
-              className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-bold px-8 py-6 rounded-xl text-base transition-all duration-200 hover:scale-105"
-              onClick={() => handleSetJudgesCount(5)}
-            >
-              5 суддів
-            </Button>
-          </div>
-        </div>
-      ) : (
+      {judgesCount && judgesCount > 0 ? (
         /* Scoring Screen */
         <div className="space-y-6">
           {/* Header scoring bar with Judges count and change button */}
@@ -373,7 +344,7 @@ export default function KataOperatorPanel({
                     const active = flagsAka === k;
                     return (
                       <Button
-                        key={k}
+                        key={`aka-flag-${k}`}
                         type="button"
                         variant={active ? "destructive" : "outline"}
                         className={cn(
@@ -411,7 +382,7 @@ export default function KataOperatorPanel({
                     const active = flagsAo === m;
                     return (
                       <Button
-                        key={m}
+                        key={`ao-flag-${m}`}
                         type="button"
                         variant={active ? "default" : "outline"}
                         className={cn(
@@ -493,9 +464,9 @@ export default function KataOperatorPanel({
           <div className="bg-zinc-900/20 border border-border/20 rounded-xl p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <label className="text-xs font-bold text-white uppercase tracking-wider">
+                <div className="text-xs font-bold text-white uppercase tracking-wider">
                   Таймер на табло
-                </label>
+                </div>
                 <p className="text-[10px] text-muted-foreground">
                   Відображати таймер для виступу на глядацькому табло
                 </p>
@@ -637,7 +608,7 @@ export default function KataOperatorPanel({
                           className="w-full h-7 text-xs px-1 border border-input rounded bg-zinc-950 text-white text-center font-mono"
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
-                              const val = parseInt((e.target as HTMLInputElement).value || "0");
+                              const val = Number.parseInt((e.target as HTMLInputElement).value || "0");
                               if (val !== 0) {
                                 timerAction("add_time", { delta_ms: val * 1000 });
                                 (e.target as HTMLInputElement).value = "";
@@ -651,7 +622,7 @@ export default function KataOperatorPanel({
                           className="h-7 text-xs font-bold shrink-0 px-2.5"
                           disabled={busy}
                           onClick={() => {
-                            const val = parseInt(customTimeInputRef.current?.value || "0");
+                            const val = Number.parseInt(customTimeInputRef.current?.value || "0");
                             if (val !== 0) {
                               timerAction("add_time", { delta_ms: val * 1000 });
                               if (customTimeInputRef.current) customTimeInputRef.current.value = "";
@@ -672,7 +643,7 @@ export default function KataOperatorPanel({
                           className="w-full h-7 text-xs px-1 border border-input rounded bg-zinc-950 text-white text-center font-mono"
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
-                              const val = parseInt((e.target as HTMLInputElement).value || "0");
+                              const val = Number.parseInt((e.target as HTMLInputElement).value || "0");
                               if (val > 0) {
                                 timerAction("set_duration", { duration_ms: val * 1000 });
                                 (e.target as HTMLInputElement).value = "";
@@ -686,7 +657,7 @@ export default function KataOperatorPanel({
                           className="h-7 text-xs font-bold shrink-0 px-2.5"
                           disabled={busy}
                           onClick={() => {
-                            const val = parseInt(absoluteTimeInputRef.current?.value || "0");
+                            const val = Number.parseInt(absoluteTimeInputRef.current?.value || "0");
                             if (val > 0) {
                               timerAction("set_duration", { duration_ms: val * 1000 });
                               if (absoluteTimeInputRef.current) absoluteTimeInputRef.current.value = "";
@@ -725,6 +696,35 @@ export default function KataOperatorPanel({
                 <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Scoreboard
               </Button>
             </div>
+          </div>
+        </div>
+      ) : (
+        /* Setup Screen */
+        <div className="flex flex-col items-center justify-center py-16 px-4 border border-border bg-zinc-900/40 backdrop-blur-md rounded-2xl shadow-xl space-y-6">
+          <div className="text-center space-y-2">
+            <Trophy className="w-12 h-12 text-yellow-500 mx-auto opacity-80" />
+            <h3 className="text-lg font-bold text-white uppercase tracking-wider">Налаштування Карате Ката</h3>
+            <p className="text-xs text-muted-foreground max-w-md">
+              Оберіть кількість суддів для цієї категорії. Це рішення буде застосовано до всіх поєдинків у цій категорії.
+            </p>
+          </div>
+          <div className="flex gap-4">
+            <Button
+              size="lg"
+              disabled={busy || disabled}
+              className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-bold px-8 py-6 rounded-xl text-base transition-all duration-200 hover:scale-105"
+              onClick={() => handleSetJudgesCount(3)}
+            >
+              3 судді
+            </Button>
+            <Button
+              size="lg"
+              disabled={busy || disabled}
+              className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-bold px-8 py-6 rounded-xl text-base transition-all duration-200 hover:scale-105"
+              onClick={() => handleSetJudgesCount(5)}
+            >
+              5 суддів
+            </Button>
           </div>
         </div>
       )}

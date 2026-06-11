@@ -45,20 +45,7 @@ class BracketGenerator:
         registrations = self._get_confirmed_registrations()
         self._assign_seeds_if_missing(registrations)
 
-        # Визначаємо тривалість таймера з категорії або рулсету
-        duration_sec = self.category.match_duration_seconds
-        if not duration_sec:
-            try:
-                from apps.rulesets.registry import get_ruleset
-
-                ruleset = get_ruleset(self.category.ruleset_key)
-                from apps.rulesets.base import PointsRuleSet
-
-                if isinstance(ruleset, PointsRuleSet):
-                    duration_sec = ruleset.get_default_duration_seconds()
-            except Exception:
-                pass
-        duration_ms = (duration_sec * 1000) if duration_sec else 180000
+        duration_ms = self._get_match_duration_ms()
 
         participants = [self._to_participant(r) for r in registrations]
         reg_by_id = {r.id: r for r in registrations}
@@ -105,20 +92,7 @@ class BracketGenerator:
         self._validate_preconditions()
         registrations = self._get_confirmed_registrations()
 
-        # Визначаємо тривалість таймера з категорії або рулсету
-        duration_sec = self.category.match_duration_seconds
-        if not duration_sec:
-            try:
-                from apps.rulesets.registry import get_ruleset
-
-                ruleset = get_ruleset(self.category.ruleset_key)
-                from apps.rulesets.base import PointsRuleSet
-
-                if isinstance(ruleset, PointsRuleSet):
-                    duration_sec = ruleset.get_default_duration_seconds()
-            except Exception:
-                pass
-        duration_ms = (duration_sec * 1000) if duration_sec else 180000
+        duration_ms = self._get_match_duration_ms()
 
         participants = [self._to_participant(r) for r in registrations]
         reg_by_id = {r.id: r for r in registrations}
@@ -145,9 +119,20 @@ class BracketGenerator:
                 order_idx += 1
         return created
 
-    # ------------------------------------------------------------------
-    # Приватні хелпери
-    # ------------------------------------------------------------------
+    def _get_match_duration_ms(self) -> int:
+        duration_sec = self.category.match_duration_seconds
+        if not duration_sec:
+            try:
+                from apps.rulesets.registry import get_ruleset
+
+                ruleset = get_ruleset(self.category.ruleset_key)
+                from apps.rulesets.base import PointsRuleSet
+
+                if isinstance(ruleset, PointsRuleSet):
+                    duration_sec = ruleset.get_default_duration_seconds()
+            except Exception:
+                pass
+        return (duration_sec * 1000) if duration_sec else 180000
 
     def _validate_preconditions(self):
         if Match.objects.filter(category=self.category).exists():

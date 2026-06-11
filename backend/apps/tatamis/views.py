@@ -21,6 +21,7 @@ class TatamiViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = TatamiSerializer
+    NOT_ASSIGNED_MESSAGE = "Ви не закріплені за цим татамі!"
 
     def get_queryset(self):
         qs = Tatami.objects.select_related("tournament", "current_match__category")
@@ -46,7 +47,7 @@ class TatamiViewSet(viewsets.ModelViewSet):
         if request.user.is_authenticated and request.user.role == "judge":
             if tatami.assigned_judge_id != request.user.id:
                 return Response(
-                    {"detail": "Ви не закріплені за цим татамі!"},
+                    {"detail": self.NOT_ASSIGNED_MESSAGE},
                     status=status.HTTP_403_FORBIDDEN,
                 )
         match_id = request.data.get("match_id")
@@ -68,7 +69,7 @@ class TatamiViewSet(viewsets.ModelViewSet):
         if request.user.is_authenticated and request.user.role == "judge":
             if tatami.assigned_judge_id != request.user.id:
                 return Response(
-                    {"detail": "Ви не закріплені за цим татамі!"},
+                    {"detail": self.NOT_ASSIGNED_MESSAGE},
                     status=status.HTTP_403_FORBIDDEN,
                 )
         TatamiService.release(tatami)
@@ -81,7 +82,7 @@ class TatamiViewSet(viewsets.ModelViewSet):
         if request.user.is_authenticated and request.user.role == "judge":
             if tatami.assigned_judge_id != request.user.id:
                 return Response(
-                    {"detail": "Ви не закріплені за цим татамі!"},
+                    {"detail": self.NOT_ASSIGNED_MESSAGE},
                     status=status.HTTP_403_FORBIDDEN,
                 )
         category_id = request.data.get("category_id")
@@ -100,7 +101,7 @@ class TatamiViewSet(viewsets.ModelViewSet):
         if request.user.is_authenticated and request.user.role == "judge":
             if tatami.assigned_judge_id != request.user.id:
                 return Response(
-                    {"detail": "Ви не закріплені за цим татамі!"},
+                    {"detail": self.NOT_ASSIGNED_MESSAGE},
                     status=status.HTTP_403_FORBIDDEN,
                 )
         current_match = tatami.current_match

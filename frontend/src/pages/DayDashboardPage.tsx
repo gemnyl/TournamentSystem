@@ -22,8 +22,19 @@ const DEFAULT_TIMER = {
 };
 
 interface TatamiCardProps {
-  tatami: Tatami;
-  tid: string;
+  readonly tatami: Tatami;
+  readonly tid: string;
+}
+
+function mapMatchTimerState(match: Match) {
+  return {
+    status: match.timer_status,
+    started_at_ms: match.timer_started_at
+      ? new Date(match.timer_started_at).getTime()
+      : null,
+    elapsed_ms: match.timer_elapsed_ms,
+    duration_ms: match.timer_duration_ms,
+  };
 }
 
 function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
@@ -45,14 +56,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
       setTatami(data.tatami);
       if (data.current_match) {
         setCurrentMatch(data.current_match);
-        setTimerState({
-          status: data.current_match.timer_status,
-          started_at_ms: data.current_match.timer_started_at
-            ? new Date(data.current_match.timer_started_at).getTime()
-            : null,
-          elapsed_ms: data.current_match.timer_elapsed_ms,
-          duration_ms: data.current_match.timer_duration_ms,
-        });
+        setTimerState(mapMatchTimerState(data.current_match));
       } else {
         setCurrentMatch(null);
         setTimerState(DEFAULT_TIMER);
@@ -60,14 +64,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
     },
     onMatchEvent(_event, match) {
       setCurrentMatch(match);
-      setTimerState({
-        status: match.timer_status,
-        started_at_ms: match.timer_started_at
-          ? new Date(match.timer_started_at).getTime()
-          : null,
-        elapsed_ms: match.timer_elapsed_ms,
-        duration_ms: match.timer_duration_ms,
-      });
+      setTimerState(mapMatchTimerState(match));
     },
     onTimerState(state) {
       setTimerState({
@@ -81,14 +78,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
       setTatami(data.tatami);
       if (data.current_match) {
         setCurrentMatch(data.current_match);
-        setTimerState({
-          status: data.current_match.timer_status,
-          started_at_ms: data.current_match.timer_started_at
-            ? new Date(data.current_match.timer_started_at).getTime()
-            : null,
-          elapsed_ms: data.current_match.timer_elapsed_ms,
-          duration_ms: data.current_match.timer_duration_ms,
-        });
+        setTimerState(mapMatchTimerState(data.current_match));
       } else {
         setCurrentMatch(null);
         setTimerState(DEFAULT_TIMER);
@@ -106,11 +96,11 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
     }`}>
       {/* Top Banner / Color Accent */}
       <div className={`h-1.5 w-full shrink-0 ${
-        !isActive
-          ? "bg-slate-700"
-          : currentMatch?.status === "ongoing"
+        isActive
+          ? currentMatch?.status === "ongoing"
             ? "bg-green-500 animate-pulse"
             : "bg-amber-500/60"
+          : "bg-slate-700"
       }`} />
 
       <CardHeader className="pb-3 pt-4">
@@ -134,7 +124,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
                 )}
               </div>
             )}
-            {!isActive && (
+            {isActive ? null : (
               <Badge variant="outline" className="border-red-500/30 text-red-500 bg-red-500/5 text-[10px] px-1.5 py-0">
                 Неактивне
               </Badge>
@@ -356,7 +346,7 @@ export default function DayDashboardPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {tatamis.map((t) => (
-            <TatamiDashboardCard key={t.id} tatami={t} tid={tid!} />
+            <TatamiDashboardCard key={t.id} tatami={t} tid={tid || ""} />
           ))}
         </div>
       )}

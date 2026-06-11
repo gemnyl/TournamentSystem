@@ -29,6 +29,206 @@ interface JudgeUser {
   email: string;
 }
 
+function compareTatamiMatches(
+  a: Match,
+  b: Match,
+  currentId: number | null,
+  categories: Category[]
+): number {
+  if (a.id === currentId) return -1;
+  if (b.id === currentId) return 1;
+  if (a.status === "ongoing" && b.status !== "ongoing") return -1;
+  if (b.status === "ongoing" && a.status !== "ongoing") return 1;
+  if (a.category !== b.category) {
+    const catA = categories.find((c) => c.id === a.category);
+    const catB = categories.find((c) => c.id === b.category);
+    const orderA = catA?.schedule_order ?? 0;
+    const orderB = catB?.schedule_order ?? 0;
+    if (orderA !== orderB) return orderA - orderB;
+    return a.category - b.category;
+  }
+  return a.round_index === b.round_index
+    ? a.match_order - b.match_order
+    : a.round_index - b.round_index;
+}
+
+interface TatamiWorkloadCardProps {
+  readonly tatami: Tatami;
+  readonly durationMs: number;
+  readonly finishTime: number;
+  readonly tatamiCats: Category[];
+  readonly matchCount: number;
+  readonly maxDurationMs: number;
+  readonly matches: Match[];
+  readonly tatamis: Tatami[];
+  readonly isReassigning: number | null;
+  readonly handleMoveCategory: (catId: number, direction: "up" | "down", currentTatamiCats: Category[]) => Promise<void>;
+  readonly handleReassignCategory: (catId: number, newTatamiIdStr: string) => Promise<void>;
+  readonly formatFinishTime: (timestamp: number) => string;
+  readonly formatDuration: (ms: number) => string;
+}
+
+function TatamiWorkloadCard({
+  tatami,
+  durationMs,
+  finishTime,
+  tatamiCats,
+  matchCount,
+  maxDurationMs,
+  matches,
+  tatamis,
+  isReassigning,
+  handleMoveCategory,
+  handleReassignCategory,
+  formatFinishTime,
+  formatDuration,
+}: TatamiWorkloadCardProps) {
+  const isOverloaded = durationMs > 3 * 3600 * 1000; // > 3 годин
+  const progressPercent = maxDurationMs > 0 ? (durationMs / maxDurationMs) * 100 : 0;
+  const isActive = tatami.is_active;
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border p-5 flex flex-col justify-between space-y-4 transition-all duration-300",
+        isActive
+          ? "border-border bg-card/10"
+          : "border-muted-foreground/25 bg-muted/5 opacity-75 border-dashed"
+      )}
+    >
+      <div className="space-y-3">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-lg">Татамі {tatami.number}</h3>
+              {!isActive && (
+                <Badge variant="outline" className="border-red-500/30 text-red-500 bg-red-500/5 text-[10px] px-1.5 py-0 font-normal shrink-0">
+                  Неактивне
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">{tatami.name || `Килим ${tatami.number}`}</p>
+          </div>
+          <Badge variant={isOverloaded && isActive ? "destructive" : "secondary"} className="font-mono font-semibold">
+            {matchCount} {matchCount === 1 ? "матч" : [2, 3, 4].includes(matchCount % 10) && ![12, 13, 14].includes(matchCount % 100) ? "матчі" : "матців"}
+          </Badge>
+        </div>
+
+        {/* Час завершення */}
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground flex items-center gap-1.5">
+            <Clock className="w-4 h-4 text-muted-foreground" />
+            Орієнтовний фініш:
+          </span>
+          <span className="font-bold text-foreground">
+            {isActive ? (durationMs > 0 ? formatFinishTime(finishTime) : "Завершено") : "Призупинено"}
+          </span>
+        </div>
+
+        {/* Навантаження у годинах */}
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Загальний час роботи:</span>
+          <span className="font-medium text-foreground">{formatDuration(durationMs)}</span>
+        </div>
+
+        {/* Візуальний таймлайн */}
+        <div className="space-y-1">
+          <div className="w-full bg-secondary h-2.5 rounded-full overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                isActive ? (isOverloaded ? "bg-gradient-to-r from-red-500 to-orange-500" : (durationMs > 0 ? "bg-gradient-to-r from-amber-500 to-yellow-400" : "bg-muted")) : "bg-muted-foreground/30"
+              )}
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Список категорій */}
+      <div className="space-y-2 pt-2 border-t border-border/60">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+          Категорії на татамі
+        </h4>
+        {tatamiCats.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic py-2">Немає призначених категорій</p>
+        ) : (
+          <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+            {tatamiCats.map((cat) => {
+              const catMatches = matches.filter(
+                (m) => m.category === cat.id && m.status !== "completed"
+              );
+              const catMatchesCount = catMatches.length;
+
+              return (
+                <div
+                  key={cat.id}
+                  className="flex items-center justify-between gap-2 p-2 rounded-lg bg-muted/40 border border-border text-xs animate-in fade-in duration-200"
+                >
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <Link
+                      to={`/categories/${cat.id}`}
+                      className="font-semibold text-foreground hover:text-amber-500 hover:underline truncate"
+                    >
+                      {cat.name}
+                    </Link>
+                    <span className="text-[10px] text-muted-foreground">
+                      {catMatchesCount} {catMatchesCount === 1 ? "матч" : [2, 3, 4].includes(catMatchesCount % 10) && ![12, 13, 14].includes(catMatchesCount % 100) ? "матчі" : "матців"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {tatamiCats.length > 1 && (
+                      <div className="flex items-center gap-0.5 border border-input bg-background/50 rounded-md px-1 h-8 shrink-0">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          disabled={isReassigning === cat.id || tatamiCats.indexOf(cat) === 0}
+                          onClick={() => handleMoveCategory(cat.id, "up", tatamiCats)}
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-20 transition-all"
+                          title="Перемістити вгору"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </Button>
+                        <div className="w-px h-4 bg-border" />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          disabled={isReassigning === cat.id || tatamiCats.indexOf(cat) === tatamiCats.length - 1}
+                          onClick={() => handleMoveCategory(cat.id, "down", tatamiCats)}
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-20 transition-all"
+                          title="Перемістити вниз"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                    <select
+                      value={tatami.id}
+                      disabled={isReassigning === cat.id}
+                      onChange={(e) => handleReassignCategory(cat.id, e.target.value)}
+                      className="h-8 text-xs rounded-md border border-input bg-background px-2 py-1 focus-visible:ring-1 focus-visible:ring-amber-500 font-medium text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      {tatamis.map((tat) => (
+                        <option key={tat.id} value={tat.id}>
+                          {tat.id === tatami.id
+                            ? `Татамі ${tat.number}`
+                            : `→ Татамі ${tat.number}`}
+                          {!tat.is_active ? " (Неактивне)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const tatamiSchema = z.object({
   number: z.coerce.number().min(1, "Номер татамі має бути не менше 1"),
@@ -83,23 +283,7 @@ export default function TatamiAdminPage() {
 
       // Сортуємо поєдинки за чергою
       const currentId = t.current_match;
-      const sorted = [...tatamiMatches].sort((a, b) => {
-        if (a.id === currentId) return -1;
-        if (b.id === currentId) return 1;
-        if (a.status === "ongoing" && b.status !== "ongoing") return -1;
-        if (b.status === "ongoing" && a.status !== "ongoing") return 1;
-        if (a.category !== b.category) {
-          const catA = categories.find(c => c.id === a.category);
-          const catB = categories.find(c => c.id === b.category);
-          const orderA = catA?.schedule_order ?? 0;
-          const orderB = catB?.schedule_order ?? 0;
-          if (orderA !== orderB) return orderA - orderB;
-          return a.category - b.category;
-        }
-        return a.round_index === b.round_index
-          ? a.match_order - b.match_order
-          : a.round_index - b.round_index;
-      });
+      const sorted = [...tatamiMatches].sort((a, b) => compareTatamiMatches(a, b, currentId, categories));
 
       let durationMs = 0;
       sorted.forEach((match, idx) => {
@@ -119,7 +303,7 @@ export default function TatamiAdminPage() {
 
       // Категорії на цьому татамі (ті, що мають незіграні поєдинки тут)
       const catIds = Array.from(new Set(tatamiMatches.map(m => m.category)));
-      const tatamiCats = categories
+      const tatamiCats = [...categories]
         .filter(c => catIds.includes(c.id))
         .sort((a, b) => (a.schedule_order ?? 0) - (b.schedule_order ?? 0) || a.name.localeCompare(b.name));
 
@@ -502,164 +686,24 @@ export default function TatamiAdminPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {tatamiWorkloads.map(({ tatami, durationMs, finishTime, categories: tatamiCats, matchCount }) => {
-              const isOverloaded = durationMs > 3 * 3600 * 1000; // > 3 годин
-              const progressPercent = maxDurationMs > 0 ? (durationMs / maxDurationMs) * 100 : 0;
-              const isActive = tatami.is_active;
-
-              return (
-                <div
-                  key={tatami.id}
-                  className={cn(
-                    "rounded-xl border p-5 flex flex-col justify-between space-y-4 transition-all duration-300",
-                    isActive
-                      ? "border-border bg-card/10"
-                      : "border-muted-foreground/25 bg-muted/5 opacity-75 border-dashed"
-                  )}
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-lg">Татамі {tatami.number}</h3>
-                          {!isActive && (
-                            <Badge variant="outline" className="border-red-500/30 text-red-500 bg-red-500/5 text-[10px] px-1.5 py-0 font-normal shrink-0">
-                              Неактивне
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground">{tatami.name || `Килим ${tatami.number}`}</p>
-                      </div>
-                      <Badge variant={isOverloaded && isActive ? "destructive" : "secondary"} className="font-mono font-semibold">
-                        {matchCount} {matchCount === 1 ? "матч" : [2, 3, 4].includes(matchCount % 10) && ![12, 13, 14].includes(matchCount % 100) ? "матчі" : "матців"}
-                      </Badge>
-                    </div>
-
-                    {/* Час завершення */}
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground flex items-center gap-1.5">
-                        <Clock className="w-4 h-4 text-muted-foreground" />
-                        Орієнтовний фініш:
-                      </span>
-                      <span className="font-bold text-foreground">
-                        {!isActive
-                          ? "Призупинено"
-                          : durationMs > 0
-                          ? formatFinishTime(finishTime)
-                          : "Завершено"}
-                      </span>
-                    </div>
-
-                    {/* Навантаження у годинах */}
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Загальний час роботи:</span>
-                      <span className="font-medium text-foreground">{formatDuration(durationMs)}</span>
-                    </div>
-
-                    {/* Візуальний таймлайн */}
-                    <div className="space-y-1">
-                      <div className="w-full bg-secondary h-2.5 rounded-full overflow-hidden">
-                        <div
-                          className={cn(
-                            "h-full rounded-full transition-all duration-500",
-                            !isActive
-                              ? "bg-muted-foreground/30"
-                              : isOverloaded
-                              ? "bg-gradient-to-r from-red-500 to-orange-500"
-                              : durationMs > 0
-                              ? "bg-gradient-to-r from-amber-500 to-yellow-400"
-                              : "bg-muted"
-                          )}
-                          style={{ width: `${progressPercent}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Список категорій */}
-                  <div className="space-y-2 pt-2 border-t border-border/60">
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                      Категорії на татамі
-                    </h4>
-                    {tatamiCats.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-2">Немає призначених категорій</p>
-                    ) : (
-                      <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                        {tatamiCats.map((cat) => {
-                          const catMatches = matches.filter(
-                            (m) => m.category === cat.id && m.status !== "completed"
-                          );
-                          const catMatchesCount = catMatches.length;
-
-                          return (
-                            <div
-                              key={cat.id}
-                              className="flex items-center justify-between gap-2 p-2 rounded-lg bg-muted/40 border border-border text-xs animate-in fade-in duration-200"
-                            >
-                              <div className="flex flex-col min-w-0 flex-1">
-                                <Link
-                                  to={`/categories/${cat.id}`}
-                                  className="font-semibold text-foreground hover:text-amber-500 hover:underline truncate"
-                                >
-                                  {cat.name}
-                                </Link>
-                                <span className="text-[10px] text-muted-foreground">
-                                  {catMatchesCount} {catMatchesCount === 1 ? "матч" : [2, 3, 4].includes(catMatchesCount % 10) && ![12, 13, 14].includes(catMatchesCount % 100) ? "матчі" : "матців"}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {tatamiCats.length > 1 && (
-                                  <div className="flex items-center gap-0.5 border border-input bg-background/50 rounded-md px-1 h-8 shrink-0">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      disabled={isReassigning === cat.id || tatamiCats.indexOf(cat) === 0}
-                                      onClick={() => handleMoveCategory(cat.id, "up", tatamiCats)}
-                                      className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-20 transition-all"
-                                      title="Перемістити вгору"
-                                    >
-                                      <ArrowUp className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <div className="w-px h-4 bg-border" />
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      disabled={isReassigning === cat.id || tatamiCats.indexOf(cat) === tatamiCats.length - 1}
-                                      onClick={() => handleMoveCategory(cat.id, "down", tatamiCats)}
-                                      className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-20 transition-all"
-                                      title="Перемістити вниз"
-                                    >
-                                      <ArrowDown className="w-3.5 h-3.5" />
-                                    </Button>
-                                  </div>
-                                )}
-                                <select
-                                  value={tatami.id}
-                                  disabled={isReassigning === cat.id}
-                                  onChange={(e) => handleReassignCategory(cat.id, e.target.value)}
-                                  className="h-8 text-xs rounded-md border border-input bg-background px-2 py-1 focus-visible:ring-1 focus-visible:ring-amber-500 font-medium text-muted-foreground hover:text-foreground cursor-pointer"
-                                >
-                                  {tatamis.map((tat) => (
-                                    <option key={tat.id} value={tat.id}>
-                                      {tat.id === tatami.id
-                                        ? `Татамі ${tat.number}`
-                                        : `→ Татамі ${tat.number}`}
-                                      {!tat.is_active ? " (Неактивне)" : ""}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {tatamiWorkloads.map(({ tatami, durationMs, finishTime, categories: tatamiCats, matchCount }) => (
+              <TatamiWorkloadCard
+                key={tatami.id}
+                tatami={tatami}
+                durationMs={durationMs}
+                finishTime={finishTime}
+                tatamiCats={tatamiCats}
+                matchCount={matchCount}
+                maxDurationMs={maxDurationMs}
+                matches={matches}
+                tatamis={tatamis}
+                isReassigning={isReassigning}
+                handleMoveCategory={handleMoveCategory}
+                handleReassignCategory={handleReassignCategory}
+                formatFinishTime={formatFinishTime}
+                formatDuration={formatDuration}
+              />
+            ))}
 
             {/* Нерозподілені категорії */}
             {unassignedCategories.length > 0 && (
@@ -798,7 +842,7 @@ export default function TatamiAdminPage() {
       </Dialog>
 
       {/* Діалог підтвердження видалення */}
-      <Dialog open={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)}>
+      <Dialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="text-destructive flex items-center gap-1.5">

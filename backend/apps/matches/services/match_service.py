@@ -59,7 +59,6 @@ class MatchService:
     @transaction.atomic
     def apply_score(self, corner: str, action_key: str, judge=None, is_undo=False) -> Match:
         """Застосовує ігрову подію (бал або попередження) через активний рулсет або скасовує її."""
-        m = self.match
         if corner not in ("aka", "ao"):
             raise ValueError(f"Invalid corner: '{corner}'. Must be 'aka' or 'ao'.")
 
@@ -69,126 +68,133 @@ class MatchService:
             raise ValueError(f"Unknown action_key: '{action_key}'.")
 
         if is_undo:
-            if action.is_warning:
-                if corner == "aka":
-                    m.warnings_first = max(0, m.warnings_first - 1)
-                else:
-                    m.warnings_second = max(0, m.warnings_second - 1)
+            return self._apply_score_undo(corner, action_key, action, judge)
+        else:
+            return self._apply_score_normal(corner, action_key, action, judge)
+
+    def _apply_score_undo(self, corner: str, action_key: str, action, judge) -> Match:
+        m = self.match
+        if action.is_warning:
+            if corner == "aka":
+                m.warnings_first = max(0, m.warnings_first - 1)
             else:
-                if corner == "aka":
-                    m.score_first = max(0, m.score_first - action.points)
-                else:
-                    m.score_second = max(0, m.score_second - action.points)
+                m.warnings_second = max(0, m.warnings_second - 1)
+        else:
+            if corner == "aka":
+                m.score_first = max(0, m.score_first - action.points)
+            else:
+                m.score_second = max(0, m.score_second - action.points)
 
-            update_fields = [
-                "score_first",
-                "score_second",
-                "warnings_first",
-                "warnings_second",
+        update_fields = [
+            "score_first",
+            "score_second",
+            "warnings_first",
+            "warnings_second",
+        ]
+
+        # Автоматичне скидання сеншу для WKF при обнуленні рахунку
+        if m.category.ruleset_key == "karate_wkf" and m.senshu == corner:
+            if m.score_first == 0 and m.score_second == 0:
+                m.senshu = Match.Senshu.NONE
+                update_fields.append("senshu")
+            if m.next_match:
+                nxt = m.next_match
+                nxt_updated = False
+                if m.winner == nxt.reg_first:
+                    nxt.reg_first = None
+                    nxt_updated = True
+                elif m.winner == nxt.reg_second:
+                    nxt.reg_second = None
+                    nxt_updated = True
+                if nxt_updated:
+                    nxt.save(update_fields=["reg_first", "reg_second"])
+                    from apps.common.broadcast import broadcast_match_update
+
+                    broadcast_match_update(nxt)
+
+            m.status = Match.Status.ONGOING
+            m.winner = None
+            m.win_method = ""
+            m.completed_at = None
+            update_fields += ["status", "winner", "win_method", "completed_at"]
+
+        m.save(update_fields=update_fields)
+
+        event_type = (
+            MatchEvent.EventType.WARNING if action.is_warning else MatchEvent.EventType.SCORE
+        )
+        self._write_event(
+            event_type, {"corner": corner, "action_key": action_key, "is_undo": True}, judge
+        )
+
+        return m
+
+    def _apply_score_normal(self, corner: str, action_key: str, action, judge) -> Match:
+        m = self.match
+        state = self._build_state()
+        score_event = ScoreEvent(corner=corner, action_key=action_key)
+        new_state = self.ruleset.apply_score_event(state, score_event)
+
+        # Автоматичне призначення сеншу для карате WKF за перший набраний бал
+        if m.category.ruleset_key == "karate_wkf" and state.senshu == "none":
+            actions = {a.key: a for a in self.ruleset.get_score_actions()}
+            act = actions.get(action_key)
+            if act and not act.is_warning and act.points > 0:
+                if state.score_aka == 0 and state.score_ao == 0:
+                    new_state = replace(new_state, senshu=corner)
+
+        new_state = self.ruleset.check_auto_finish(new_state)
+
+        m.score_first = new_state.score_aka
+        m.score_second = new_state.score_ao
+        m.warnings_first = new_state.warnings_aka
+        m.warnings_second = new_state.warnings_ao
+
+        old_senshu = m.senshu
+        m.senshu = new_state.senshu
+
+        if m.status == Match.Status.SCHEDULED:
+            m.status = Match.Status.ONGOING
+
+        update_fields = [
+            "score_first",
+            "score_second",
+            "warnings_first",
+            "warnings_second",
+            "status",
+        ]
+        if m.senshu != old_senshu:
+            update_fields.append("senshu")
+
+        if new_state.is_finished:
+            winner_reg = m.reg_first if new_state.winner == "aka" else m.reg_second
+            m.winner = winner_reg
+            m.win_method = new_state.win_method
+            m.status = Match.Status.COMPLETED
+            m.completed_at = timezone.now()
+
+            # Примусово зупиняємо таймер при авто-завершенні
+            m.timer_status = Match.TimerStatus.PAUSED
+            m.timer_started_at = None
+            update_fields += [
+                "winner",
+                "win_method",
+                "completed_at",
+                "timer_status",
+                "timer_started_at",
             ]
-
-            # Автоматичне скидання сеншу для WKF при обнуленні рахунку
-            if m.category.ruleset_key == "karate_wkf" and m.senshu == corner:
-                if m.score_first == 0 and m.score_second == 0:
-                    m.senshu = Match.Senshu.NONE
-                    update_fields.append("senshu")
-                if m.next_match:
-                    nxt = m.next_match
-                    nxt_updated = False
-                    if m.winner == nxt.reg_first:
-                        nxt.reg_first = None
-                        nxt_updated = True
-                    elif m.winner == nxt.reg_second:
-                        nxt.reg_second = None
-                        nxt_updated = True
-                    if nxt_updated:
-                        nxt.save(update_fields=["reg_first", "reg_second"])
-                        from apps.common.broadcast import broadcast_match_update
-
-                        broadcast_match_update(nxt)
-
-                m.status = Match.Status.ONGOING
-                m.winner = None
-                m.win_method = ""
-                m.completed_at = None
-                update_fields += ["status", "winner", "win_method", "completed_at"]
 
             m.save(update_fields=update_fields)
-
-            event_type = (
-                MatchEvent.EventType.WARNING if action.is_warning else MatchEvent.EventType.SCORE
-            )
-            self._write_event(
-                event_type, {"corner": corner, "action_key": action_key, "is_undo": True}, judge
-            )
-
-            return m
-
+            m.advance_participant()
         else:
-            state = self._build_state()
-            score_event = ScoreEvent(corner=corner, action_key=action_key)
-            new_state = self.ruleset.apply_score_event(state, score_event)
+            m.save(update_fields=update_fields)
 
-            # Автоматичне призначення сеншу для карате WKF за перший набраний бал
-            if m.category.ruleset_key == "karate_wkf" and state.senshu == "none":
-                actions = {a.key: a for a in self.ruleset.get_score_actions()}
-                act = actions.get(action_key)
-                if act and not act.is_warning and act.points > 0:
-                    if state.score_aka == 0 and state.score_ao == 0:
-                        new_state = replace(new_state, senshu=corner)
+        event_type = (
+            MatchEvent.EventType.WARNING if action.is_warning else MatchEvent.EventType.SCORE
+        )
+        self._write_event(event_type, {"corner": corner, "action_key": action_key}, judge)
 
-            new_state = self.ruleset.check_auto_finish(new_state)
-
-            m.score_first = new_state.score_aka
-            m.score_second = new_state.score_ao
-            m.warnings_first = new_state.warnings_aka
-            m.warnings_second = new_state.warnings_ao
-
-            old_senshu = m.senshu
-            m.senshu = new_state.senshu
-
-            if m.status == Match.Status.SCHEDULED:
-                m.status = Match.Status.ONGOING
-
-            update_fields = [
-                "score_first",
-                "score_second",
-                "warnings_first",
-                "warnings_second",
-                "status",
-            ]
-            if m.senshu != old_senshu:
-                update_fields.append("senshu")
-
-            if new_state.is_finished:
-                winner_reg = m.reg_first if new_state.winner == "aka" else m.reg_second
-                m.winner = winner_reg
-                m.win_method = new_state.win_method
-                m.status = Match.Status.COMPLETED
-                m.completed_at = timezone.now()
-
-                # Примусово зупиняємо таймер при авто-завершенні
-                m.timer_status = Match.TimerStatus.PAUSED
-                m.timer_started_at = None
-                update_fields += [
-                    "winner",
-                    "win_method",
-                    "completed_at",
-                    "timer_status",
-                    "timer_started_at",
-                ]
-
-                m.save(update_fields=update_fields)
-                m.advance_participant()
-            else:
-                m.save(update_fields=update_fields)
-
-            event_type = (
-                MatchEvent.EventType.WARNING if action.is_warning else MatchEvent.EventType.SCORE
-            )
-            self._write_event(event_type, {"corner": corner, "action_key": action_key}, judge)
-
-            return m
+        return m
 
     @transaction.atomic
     def set_senshu(self, value: str, judge=None) -> Match:
