@@ -396,6 +396,83 @@ class TestMatchService(MatchAPITestCase):
         with self.assertRaises(ValidationError):
             match.advance_participant()
 
+    def test_apply_score_undo(self):
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # 1. Warning undo
+        svc.apply_score("aka", "penalty")
+        match.refresh_from_db()
+        self.assertEqual(match.warnings_first, 1)
+
+        svc.apply_score("aka", "penalty", is_undo=True)
+        match.refresh_from_db()
+        self.assertEqual(match.warnings_first, 0)
+
+        # 2. Score undo
+        svc.apply_score("ao", "yuko")
+        match.refresh_from_db()
+        self.assertEqual(match.score_second, 1)
+
+        svc.apply_score("ao", "yuko", is_undo=True)
+        match.refresh_from_db()
+        self.assertEqual(match.score_second, 0)
+
+        # 3. WKF Senshu reset & rollback of next match slot on undo
+        match.category.ruleset_key = "karate_wkf"
+        match.category.save()
+        match.refresh_from_db()
+
+        svc.apply_score("aka", "yuko")
+        match.refresh_from_db()
+        self.assertEqual(match.senshu, "aka")
+        self.assertEqual(match.score_first, 1)
+
+        svc.set_winner("aka", Match.WinMethod.POINTS)
+        match.refresh_from_db()
+        self.assertEqual(match.status, Match.Status.COMPLETED)
+        self.assertEqual(match.winner, match.reg_first)
+
+        nxt = match.next_match
+        nxt.refresh_from_db()
+        self.assertEqual(nxt.reg_first, match.reg_first)
+
+        svc.apply_score("aka", "yuko", is_undo=True)
+        match.refresh_from_db()
+        self.assertEqual(match.score_first, 0)
+        self.assertEqual(match.senshu, "none")
+        self.assertEqual(match.status, Match.Status.ONGOING)
+        self.assertIsNone(match.winner)
+
+        nxt.refresh_from_db()
+        self.assertIsNone(nxt.reg_first)
+
+        # Cover the `elif m.winner == nxt.reg_second` branch:
+        match.score_first = 0
+        match.score_second = 0
+        match.senshu = "none"
+        match.status = Match.Status.SCHEDULED
+        match.winner = None
+        match.save()
+
+        nxt.reg_first = self.registrations[4]
+        nxt.reg_second = None
+        nxt.save()
+
+        svc.apply_score("aka", "yuko")
+        match.refresh_from_db()
+        self.assertEqual(match.senshu, "aka")
+
+        svc.set_winner("aka", Match.WinMethod.POINTS)
+        match.refresh_from_db()
+        nxt.refresh_from_db()
+        self.assertEqual(nxt.reg_second, match.reg_first)
+
+        svc.apply_score("aka", "yuko", is_undo=True)
+        match.refresh_from_db()
+        nxt.refresh_from_db()
+        self.assertIsNone(nxt.reg_second)
+
 
 class TestSetSenshuEndpoint(MatchAPITestCase):
     """Тест ендпоінту set_senshu через HTTP."""

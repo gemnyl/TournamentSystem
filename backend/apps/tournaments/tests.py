@@ -519,6 +519,161 @@ class CategoryResultsTestCase(TournamentAPITestCase):
         self.assertEqual(r3.place, 2)
         self.assertEqual(r2.place, 3)
 
+    def test_single_elimination_one_third_place(self):
+        from apps.brackets.services import BracketGenerator
+        from apps.matches.models import Match
+        from apps.tournaments.services import calculate_category_standings
+
+        # Set two_third_places to False
+        self.category.two_third_places = False
+        self.category.save()
+
+        # Create 4 athletes
+        _, r1 = self._create_athlete(1)
+        _, r2 = self._create_athlete(2)
+        _, r3 = self._create_athlete(3)
+        _, r4 = self._create_athlete(4)
+
+        matches = BracketGenerator(self.category).generate()
+        self.assertEqual(len(matches), 3)
+
+        semi_1 = [m for m in matches if m.round_index == 1 and m.match_order == 1][0]
+        semi_2 = [m for m in matches if m.round_index == 1 and m.match_order == 2][0]
+        final = [m for m in matches if m.round_index == 2][0]
+
+        # semi_1: r1 vs r2. Winner r1, score 5:1 (r2 gets 1 score)
+        semi_1.reg_first = r1
+        semi_1.reg_second = r2
+        semi_1.winner = r1
+        semi_1.score_first = 5
+        semi_1.score_second = 1
+        semi_1.status = Match.Status.COMPLETED
+        semi_1.save()
+
+        # semi_2: r3 vs r4. Winner r3, score 5:0 (r4 gets 0 score)
+        semi_2.reg_first = r3
+        semi_2.reg_second = r4
+        semi_2.winner = r3
+        semi_2.score_first = 5
+        semi_2.score_second = 0
+        semi_2.status = Match.Status.COMPLETED
+        semi_2.save()
+
+        # Final
+        final.reg_first = r1
+        final.reg_second = r3
+        final.winner = r1
+        final.status = Match.Status.COMPLETED
+        final.save()
+
+        calculate_category_standings(self.category, persist=True)
+
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+        r3.refresh_from_db()
+        r4.refresh_from_db()
+
+        self.assertEqual(r1.place, 1)
+        self.assertEqual(r3.place, 2)
+        # r2 has 1 score_scored vs r4 has 0 score_scored.
+        # r2 should get place 3, and r4 should get place 5.
+        self.assertEqual(r2.place, 3)
+        self.assertEqual(r4.place, 5)
+
+    def test_round_robin_two_way_tie_breaker(self):
+        from apps.brackets.services import BracketGenerator
+        from apps.matches.models import Match
+        from apps.tournaments.services import calculate_category_standings
+
+        self.category.bracket_format = Category.BracketFormat.ROUND_ROBIN
+        self.category.save()
+
+        # 3 participants
+        _, r1 = self._create_athlete(1)
+        _, r2 = self._create_athlete(2)
+        _, r3 = self._create_athlete(3)
+
+        matches = BracketGenerator(self.category).generate()
+
+        # Match 1: r1 vs r2. Winner r1, score 1:0
+        m1 = [
+            m
+            for m in matches
+            if (m.reg_first_id == r1.id and m.reg_second_id == r2.id)
+            or (m.reg_first_id == r2.id and m.reg_second_id == r1.id)
+        ][0]
+        m1.status = Match.Status.COMPLETED
+        if m1.reg_first_id == r1.id:
+            m1.winner = r1
+            m1.score_first = 1
+            m1.score_second = 0
+        else:
+            m1.winner = r1
+            m1.score_first = 0
+            m1.score_second = 1
+        m1.save()
+
+        # Match 2: r2 vs r3. Winner r2, score 1:0
+        m2 = [
+            m
+            for m in matches
+            if (m.reg_first_id == r2.id and m.reg_second_id == r3.id)
+            or (m.reg_first_id == r3.id and m.reg_second_id == r2.id)
+        ][0]
+        m2.status = Match.Status.COMPLETED
+        if m2.reg_first_id == r2.id:
+            m2.winner = r2
+            m2.score_first = 1
+            m2.score_second = 0
+        else:
+            m2.winner = r2
+            m2.score_first = 0
+            m2.score_second = 1
+        m2.save()
+
+        # Match 3: r3 vs r1. Winner r3, score 1:0
+        m3 = [
+            m
+            for m in matches
+            if (m.reg_first_id == r3.id and m.reg_second_id == r1.id)
+            or (m.reg_first_id == r1.id and m.reg_second_id == r3.id)
+        ][0]
+        m3.status = Match.Status.COMPLETED
+        if m3.reg_first_id == r3.id:
+            m3.winner = r3
+            m3.score_first = 1
+            m3.score_second = 0
+        else:
+            m3.winner = r3
+            m3.score_first = 0
+            m3.score_second = 1
+        m3.save()
+
+        calculate_category_standings(self.category, persist=True)
+
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+        r3.refresh_from_db()
+
+        # Everyone has 1 win, 3 points, same score difference (+0), same scores scored (1).
+        # H2H is a cycle, so they tie completely.
+        self.assertIn(r1.place, [1, 2, 3])
+        self.assertIn(r2.place, [1, 2, 3])
+        self.assertIn(r3.place, [1, 2, 3])
+
+    def test_unknown_bracket_format_fallback(self):
+        from apps.tournaments.services import calculate_category_standings
+
+        self.category.bracket_format = "unknown_format"
+        self.category.save()
+
+        _, r1 = self._create_athlete(1)
+        _, r2 = self._create_athlete(2)
+
+        results = calculate_category_standings(self.category, persist=True)
+        # Should not crash, and should return stats dicts
+        self.assertEqual(len(results), 2)
+
     def test_category_results_endpoints(self):
         # 1. GET /api/categories/{id}/results/ without login is allowed (AllowAny)
         response = self.client.get(f"/api/categories/{self.category.pk}/results/")

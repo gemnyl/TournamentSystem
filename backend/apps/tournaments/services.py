@@ -61,56 +61,75 @@ def _calculate_basic_stats(
     return stats
 
 
-def _calculate_single_elimination_standings(
-    category: Category, matches: list[Match], stats: dict[int, dict]
-) -> list[dict]:
+def _find_final_match(matches: list[Match]) -> Match | None:
     final_match = None
     for m in matches:
         if m.next_match_id is None:
             if final_match is None or m.round_index > final_match.round_index:
                 final_match = m
+    return final_match
+
+
+def _assign_semi_losers_places(
+    final_match_id: int, matches: list[Match], category: Category, stats: dict[int, dict]
+) -> None:
+    semi_final_matches = [m for m in matches if m.next_match_id == final_match_id]
+    semi_losers = []
+    for sf in semi_final_matches:
+        if sf.status == Match.Status.COMPLETED and sf.winner_id:
+            sf_winner = sf.winner_id
+            sf_loser = sf.reg_second_id if sf_winner == sf.reg_first_id else sf.reg_first_id
+            if sf_loser in stats:
+                semi_losers.append(sf_loser)
+
+    if not semi_losers:
+        return
+
+    if category.two_third_places:
+        for sl in semi_losers:
+            stats[sl]["place"] = 3
+    else:
+
+        def loser_sort_key(r_id):
+            s = stats[r_id]
+            return (
+                s["points"],
+                s["wins"],
+                s["scores_scored"] - s["scores_conceded"],
+                s["scores_scored"],
+            )
+
+        semi_losers.sort(key=loser_sort_key, reverse=True)
+        stats[semi_losers[0]]["place"] = 3
+        if len(semi_losers) > 1:
+            stats[semi_losers[1]]["place"] = 5
+
+
+def _assign_top_places_single_elimination(
+    final_match: Match, matches: list[Match], category: Category, stats: dict[int, dict]
+) -> None:
+    winner_id = final_match.winner_id
+    loser_id = (
+        final_match.reg_second_id
+        if winner_id == final_match.reg_first_id
+        else final_match.reg_first_id
+    )
+
+    if winner_id in stats:
+        stats[winner_id]["place"] = 1
+    if loser_id in stats:
+        stats[loser_id]["place"] = 2
+
+    _assign_semi_losers_places(final_match.id, matches, category, stats)
+
+
+def _calculate_single_elimination_standings(
+    category: Category, matches: list[Match], stats: dict[int, dict]
+) -> list[dict]:
+    final_match = _find_final_match(matches)
 
     if final_match and final_match.status == Match.Status.COMPLETED:
-        winner_id = final_match.winner_id
-        loser_id = (
-            final_match.reg_second_id
-            if winner_id == final_match.reg_first_id
-            else final_match.reg_first_id
-        )
-
-        if winner_id in stats:
-            stats[winner_id]["place"] = 1
-        if loser_id in stats:
-            stats[loser_id]["place"] = 2
-
-        semi_final_matches = [m for m in matches if m.next_match_id == final_match.id]
-        semi_losers = []
-        for sf in semi_final_matches:
-            if sf.status == Match.Status.COMPLETED and sf.winner_id:
-                sf_winner = sf.winner_id
-                sf_loser = sf.reg_second_id if sf_winner == sf.reg_first_id else sf.reg_first_id
-                if sf_loser in stats:
-                    semi_losers.append(sf_loser)
-
-        if len(semi_losers) > 0:
-            if category.two_third_places:
-                for sl in semi_losers:
-                    stats[sl]["place"] = 3
-            else:
-
-                def loser_sort_key(r_id):
-                    s = stats[r_id]
-                    return (
-                        s["points"],
-                        s["wins"],
-                        s["scores_scored"] - s["scores_conceded"],
-                        s["scores_scored"],
-                    )
-
-                semi_losers.sort(key=loser_sort_key, reverse=True)
-                stats[semi_losers[0]]["place"] = 3
-                if len(semi_losers) > 1:
-                    stats[semi_losers[1]]["place"] = 5
+        _assign_top_places_single_elimination(final_match, matches, category, stats)
 
     placed = []
     unplaced = []
@@ -125,9 +144,37 @@ def _calculate_single_elimination_standings(
     return placed + unplaced
 
 
-def _calculate_round_robin_standings(
-    category: Category, matches: list[Match], stats: dict[int, dict]
-) -> list[dict]:
+def _find_h2h_match(id1: int, id2: int, completed_matches: list[Match]) -> Match | None:
+    for m in completed_matches:
+        if (m.reg_first_id == id1 and m.reg_second_id == id2) or (
+            m.reg_first_id == id2 and m.reg_second_id == id1
+        ):
+            return m
+    return None
+
+
+def _resolve_round_robin_group(
+    group_ids: list[int], completed_matches: list[Match], stats: dict[int, dict]
+) -> list[int]:
+    if len(group_ids) == 1:
+        return group_ids
+    if len(group_ids) == 2:
+        id1, id2 = group_ids
+        h2h = _find_h2h_match(id1, id2, completed_matches)
+        if h2h and h2h.winner_id in (id1, id2):
+            if h2h.winner_id == id1:
+                return [id1, id2]
+            else:
+                return [id2, id1]
+
+    def score_key(r_id):
+        s = stats[r_id]
+        return (s["scores_scored"] - s["scores_conceded"], s["scores_scored"])
+
+    return sorted(group_ids, key=score_key, reverse=True)
+
+
+def _calculate_round_robin_standings(matches: list[Match], stats: dict[int, dict]) -> list[dict]:
     completed_matches = [m for m in matches if m.status == Match.Status.COMPLETED]
     groups = {}
     for r_id, s in stats.items():
@@ -138,53 +185,11 @@ def _calculate_round_robin_standings(
 
     sorted_ids = []
     for key in sorted_group_keys:
-        group_ids = groups[key]
-        if len(group_ids) == 1:
-            sorted_ids.append(group_ids[0])
-        elif len(group_ids) == 2:
-            id1, id2 = group_ids
-            h2h = [
-                m
-                for m in completed_matches
-                if (m.reg_first_id == id1 and m.reg_second_id == id2)
-                or (m.reg_first_id == id2 and m.reg_second_id == id1)
-            ]
-            id1_won = False
-            id2_won = False
-            if h2h:
-                m = h2h[0]
-                if m.winner_id == id1:
-                    id1_won = True
-                elif m.winner_id == id2:
-                    id2_won = True
-
-            if id1_won:
-                sorted_ids.extend([id1, id2])
-            elif id2_won:
-                sorted_ids.extend([id2, id1])
-            else:
-
-                def score_key(r_id):
-                    s = stats[r_id]
-                    return (s["scores_scored"] - s["scores_conceded"], s["scores_scored"])
-
-                sub_sorted = sorted(group_ids, key=score_key, reverse=True)
-                sorted_ids.extend(sub_sorted)
-        else:
-
-            def score_key(r_id):
-                s = stats[r_id]
-                return (s["scores_scored"] - s["scores_conceded"], s["scores_scored"])
-
-            sub_sorted = sorted(group_ids, key=score_key, reverse=True)
-            sorted_ids.extend(sub_sorted)
+        sorted_ids.extend(_resolve_round_robin_group(groups[key], completed_matches, stats))
 
     for idx, r_id in enumerate(sorted_ids):
         place = idx + 1
-        if place <= 3:
-            stats[r_id]["place"] = place
-        else:
-            stats[r_id]["place"] = None
+        stats[r_id]["place"] = place if place <= 3 else None
 
     return [stats[r_id] for r_id in sorted_ids]
 
@@ -208,7 +213,7 @@ def calculate_category_standings(category: Category, persist: bool = False):
     if category.bracket_format == Category.BracketFormat.SINGLE_ELIMINATION:
         sorted_results = _calculate_single_elimination_standings(category, matches, stats)
     elif category.bracket_format == Category.BracketFormat.ROUND_ROBIN:
-        sorted_results = _calculate_round_robin_standings(category, matches, stats)
+        sorted_results = _calculate_round_robin_standings(matches, stats)
     else:
         sorted_results = list(stats.values())
 
