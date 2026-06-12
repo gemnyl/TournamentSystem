@@ -10,6 +10,7 @@ from apps.accounts.views import (
     MeView,
     RegisterView,
     UserViewSet,
+    VerifyPassView,
 )
 
 router = DefaultRouter()
@@ -22,6 +23,7 @@ urlpatterns = [
     path("logout/", LogoutView.as_view(), name="auth-logout"),
     path("me/", MeView.as_view(), name="auth-me"),
     path("register/", RegisterView.as_view(), name="auth-register"),
+    path("verify-pass/", VerifyPassView.as_view(), name="verify-pass"),
     # Router-маршрути (clubs/, users/) монтуються у config/urls.py через /api/
     # Включаємо тут щоб router.urls діставалися через цей include
     path("", include(router.urls)),

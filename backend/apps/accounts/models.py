@@ -9,6 +9,36 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 
+UKRAINIAN_REGIONS = [
+    ("vinnytsia", "Вінницька область"),
+    ("volyn", "Волинська область"),
+    ("dnipro", "Дніпропетровська область"),
+    ("donetsk", "Донецька область"),
+    ("zhytomyr", "Житомирська область"),
+    ("zakarpattia", "Закарпатська область"),
+    ("zaporizhzhia", "Запорізька область"),
+    ("ivano-frankivsk", "Івано-Франківська область"),
+    ("kyiv_oblast", "Київська область"),
+    ("kyiv_city", "м. Київ"),
+    ("kirovohrad", "Кіровоградська область"),
+    ("luhansk", "Луганська область"),
+    ("lviv", "Львівська область"),
+    ("mykolaiv", "Миколаївська область"),
+    ("odesa", "Одеська область"),
+    ("poltava", "Полтавська область"),
+    ("rivne", "Рівненська область"),
+    ("sumy", "Сумська область"),
+    ("ternopil", "Тернопільська область"),
+    ("kharkiv", "Харківська область"),
+    ("kherson", "Херсонська область"),
+    ("khmelnytskyi", "Хмельницька область"),
+    ("cherkasy", "Черкаська область"),
+    ("chernivtsi", "Чернівецька область"),
+    ("chernihiv", "Чернігівська область"),
+    ("crimea", "АР Крим"),
+    ("sevastopol", "м. Севастополь"),
+]
+
 
 class Club(models.Model):
     """Спортивний клуб або федерація (довідкова сутність).
@@ -18,7 +48,12 @@ class Club(models.Model):
     """
 
     name = models.CharField(max_length=200, unique=True, verbose_name="Назва")
-    region = models.CharField(max_length=150, blank=True, verbose_name="Регіон")
+    region = models.CharField(
+        max_length=150,
+        choices=UKRAINIAN_REGIONS,
+        blank=True,
+        verbose_name="Регіон",
+    )
 
     class Meta:
         db_table = "club"
@@ -58,10 +93,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         JUDGE = "judge", "Суддя"
         ADMIN = "admin", "Адміністратор"
         SPECTATOR = "spectator", "Глядач"
+        STAFF = "staff", "Персонал"
 
     email = models.EmailField(max_length=254, unique=True, verbose_name="Email")
     first_name = models.CharField(max_length=150, verbose_name="Ім'я")
     last_name = models.CharField(max_length=150, verbose_name="Прізвище")
+    patronymic = models.CharField(max_length=150, blank=True, verbose_name="По-батькові")
     role = models.CharField(
         max_length=50, choices=Role.choices, default=Role.SPECTATOR, verbose_name="Роль"
     )
@@ -73,6 +110,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         related_name="members",
         verbose_name="Клуб",
     )
+    photo = models.ImageField(upload_to="photos/", null=True, blank=True, verbose_name="Фото")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
@@ -91,7 +129,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         return f"{self.get_full_name()} ({self.get_role_display()})"
 
     def get_full_name(self):
-        return f"{self.first_name} {self.last_name}".strip()
+        return f"{self.last_name} {self.first_name} {self.patronymic}".strip()
 
     def get_short_name(self):
         return self.first_name
