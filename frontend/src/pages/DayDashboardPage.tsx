@@ -11,8 +11,9 @@ import { MatchCard } from "@/components/bracket/MatchCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { Tatami, Match } from "@/types/api";
+import type { Tatami, Match, Tournament } from "@/types/api";
 import { useAuth } from "@/hooks/useAuth";
+import { formatRegistrationName } from "@/lib/utils";
 
 const DEFAULT_TIMER = {
   status: "not_started" as const,
@@ -24,6 +25,7 @@ const DEFAULT_TIMER = {
 interface TatamiCardProps {
   readonly tatami: Tatami;
   readonly tid: string;
+  readonly isCompleted: boolean;
 }
 
 function mapMatchTimerState(match: Match) {
@@ -37,7 +39,7 @@ function mapMatchTimerState(match: Match) {
   };
 }
 
-function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
+function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted }: TatamiCardProps) {
   const { isOrganizer, user } = useAuth();
   const [tatami, setTatami] = useState<Tatami>(initialTatami);
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
@@ -190,8 +192,8 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
                     </p>
                     <div className="space-y-1">
                       {upcoming.slice(0, 3).map((nm) => {
-                        const ao = nm.reg_second?.athlete?.full_name ?? "TBD";
-                        const aka = nm.reg_first?.athlete?.full_name ?? "TBD";
+                        const ao = formatRegistrationName(nm.reg_second) || "TBD";
+                        const aka = formatRegistrationName(nm.reg_first) || "TBD";
                         return (
                           <div key={nm.id} className="text-[10px] py-1 px-2 rounded bg-card/60 border border-border/30 flex flex-col gap-0.5">
                             <div className="flex items-center justify-between text-[8px] text-muted-foreground font-semibold">
@@ -226,7 +228,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid }: TatamiCardProps) {
             </div>
 
             {/* Open operator panel link for organizer/judge, scoreboard for spectator */}
-            {isOrganizer || (user?.role === "judge" && tatami.assigned_judge === user.id) ? (
+            {!isCompleted && (isOrganizer || (user?.role === "judge" && tatami.assigned_judge === user.id)) ? (
               <Link
                 to={`/operator/tournament/${tid}/tatami/${tatami.number}`}
                 className="block mt-auto text-center text-xs font-semibold text-amber-500 hover:text-amber-400 hover:underline pt-2"
@@ -261,6 +263,7 @@ export default function DayDashboardPage() {
   const { isOrganizer } = useAuth();
 
   const [tatamis, setTatamis] = useState<Tatami[]>([]);
+  const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchTatamis = async () => {
@@ -278,6 +281,7 @@ export default function DayDashboardPage() {
 
   useEffect(() => {
     fetchTatamis();
+    api.get<Tournament>(`/tournaments/${tid}/`).then(({ data }) => setTournament(data)).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tid]);
 
@@ -309,7 +313,7 @@ export default function DayDashboardPage() {
           <Button variant="outline" size="sm" onClick={fetchTatamis}>
             <RefreshCw className="w-4 h-4 mr-1" /> Оновити
           </Button>
-          {isOrganizer && (
+          {isOrganizer && tournament?.status !== "completed" && (
             <Button variant="outline" size="sm" asChild>
               <Link to={`/tournaments/${tid}/tatamis`}>
                 <Layers className="w-4 h-4 mr-1" /> Керування татамі
@@ -337,7 +341,7 @@ export default function DayDashboardPage() {
                 : "Організатор ще не додав жодного татамі для цього турніру"}
             </p>
           </div>
-          {isOrganizer && (
+          {isOrganizer && tournament?.status !== "completed" && (
             <Button variant="sport" size="sm" asChild>
               <Link to={`/tournaments/${tid}/tatamis`}>Додати татамі</Link>
             </Button>
@@ -346,7 +350,7 @@ export default function DayDashboardPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {tatamis.map((t) => (
-            <TatamiDashboardCard key={t.id} tatami={t} tid={tid || ""} />
+            <TatamiDashboardCard key={t.id} tatami={t} tid={tid || ""} isCompleted={tournament?.status === "completed"} />
           ))}
         </div>
       )}

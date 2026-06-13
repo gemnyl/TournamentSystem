@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Play, Pause, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn, getOptimisticTimerUpdate } from "@/lib/utils";
+import { cn, getOptimisticTimerUpdate, formatRegistrationName, formatAthleteName } from "@/lib/utils";
 import api from "@/lib/api";
 import type { Match, ScoreAction } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
@@ -118,10 +118,16 @@ export default function KumiteOperatorControls({
       )}>
         <div className="text-center">
           <p className="text-xs font-bold uppercase tracking-widest text-blue-400 mb-0.5">AO</p>
-          <p className="font-semibold text-sm truncate text-white/90">
-            {match.reg_second?.athlete?.full_name ?? "—"}
+          <p className="font-semibold text-sm text-white/90 whitespace-normal break-words leading-tight">
+            {match.athlete_second
+              ? formatAthleteName(match.athlete_second)
+              : (formatRegistrationName(match.reg_second) || "—")}
           </p>
-          <p className="text-xs text-muted-foreground">{match.reg_second?.athlete?.club?.name}</p>
+          <p className="text-xs text-muted-foreground">
+            {match.athlete_second
+              ? match.reg_second?.team?.name
+              : (match.reg_second?.athlete?.club?.name ?? match.reg_second?.team?.club?.name)}
+          </p>
         </div>
 
         <div className="text-center">
@@ -350,10 +356,16 @@ export default function KumiteOperatorControls({
       )}>
         <div className="text-center">
           <p className="text-xs font-bold uppercase tracking-widest text-red-400 mb-0.5">AKA</p>
-          <p className="font-semibold text-sm truncate text-white/90">
-            {match.reg_first?.athlete?.full_name ?? "—"}
+          <p className="font-semibold text-sm text-white/90 whitespace-normal break-words leading-tight">
+            {match.athlete_first
+              ? formatAthleteName(match.athlete_first)
+              : (formatRegistrationName(match.reg_first) || "—")}
           </p>
-          <p className="text-xs text-muted-foreground">{match.reg_first?.athlete?.club?.name}</p>
+          <p className="text-xs text-muted-foreground">
+            {match.athlete_first
+              ? match.reg_first?.team?.name
+              : (match.reg_first?.athlete?.club?.name ?? match.reg_first?.team?.club?.name)}
+          </p>
         </div>
 
         <div className="text-center">

@@ -30,6 +30,22 @@ class TatamiViewSet(viewsets.ModelViewSet):
             qs = qs.filter(tournament_id=tournament_id)
         return qs
 
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            if obj.tournament.status == obj.tournament.Status.COMPLETED:
+                from rest_framework.exceptions import PermissionDenied
+
+                raise PermissionDenied("Турнір завершено. Модифікація татамі заборонена.")
+
+    def perform_create(self, serializer):
+        tournament = serializer.validated_data["tournament"]
+        if tournament.status == tournament.Status.COMPLETED:
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied("Турнір завершено. Створення татамі заборонене.")
+        serializer.save()
+
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
             from apps.accounts.permissions import IsOrganizer

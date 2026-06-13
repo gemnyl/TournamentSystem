@@ -13,6 +13,7 @@ from rest_framework.response import Response
 
 from apps.accounts.permissions import IsOrganizer
 from apps.brackets.services import BracketGenerator
+from apps.common.pagination import OptionalPageNumberPagination
 from apps.matches.serializers import MatchSerializer
 from apps.tournaments.models import Category, Registration, Tournament
 from apps.tournaments.serializers import (
@@ -29,6 +30,28 @@ class TournamentViewSet(viewsets.ModelViewSet):
     """Турніри: список, деталі, CRUD та управління станом."""
 
     queryset = Tournament.objects.select_related("organizer").prefetch_related("categories").all()
+    pagination_class = OptionalPageNumberPagination
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if request.method not in ("GET", "HEAD", "OPTIONS") and self.action != "pay_platform_fee":
+            if obj.status == obj.Status.COMPLETED:
+                from rest_framework.exceptions import PermissionDenied
+
+                raise PermissionDenied("Турнір завершено. Редагування турніру заборонене.")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        staff_member = self.request.query_params.get("staff_member")
+        if staff_member == "me" and self.request.user.is_authenticated:
+            from django.db.models import Q
+
+            qs = qs.filter(
+                Q(staff_members=self.request.user) | Q(organizer=self.request.user)
+            ).distinct()
+        elif staff_member:
+            qs = qs.filter(staff_members__id=staff_member)
+        return qs
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -47,6 +70,7 @@ class TournamentViewSet(viewsets.ModelViewSet):
             "generate_all_brackets",
             "auto_distribute_tatamis",
             "import_categories",
+            "pay_platform_fee",
         ):
             return [IsOrganizer()]
         from rest_framework.permissions import AllowAny
@@ -89,6 +113,19 @@ class TournamentViewSet(viewsets.ModelViewSet):
             tournament.complete_tournament()
         except DjangoValidationError as exc:
             return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(TournamentSerializer(tournament).data)
+
+    @action(detail=True, methods=["post"], url_path="pay_platform_fee")
+    def pay_platform_fee(self, request, pk=None):
+        """POST /api/tournaments/{id}/pay_platform_fee/"""
+        tournament = self.get_object()
+        if request.user != tournament.organizer and request.user.role != "admin":
+            return Response(
+                {"detail": "Лише організатор турніру може сплатити комісію."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        tournament.platform_fee_status = "paid"
+        tournament.save(update_fields=["platform_fee_status"])
         return Response(TournamentSerializer(tournament).data)
 
     @action(detail=True, methods=["post"], url_path="generate_all_brackets")
@@ -430,9 +467,21 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
         return [AllowAny()]
 
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            if obj.tournament.status == obj.tournament.Status.COMPLETED:
+                from rest_framework.exceptions import PermissionDenied
+
+                raise PermissionDenied("Турнір завершено. Модифікація категорії заборонена.")
+
     def perform_create(self, serializer):
         # tournament передається у тілі запиту; перевіряємо, що організатор — власник
         tournament = serializer.validated_data["tournament"]
+        if tournament.status == tournament.Status.COMPLETED:
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied("Турнір завершено. Створення категорії заборонене.")
         if tournament.organizer != self.request.user and not self.request.user.is_staff:
             from rest_framework.exceptions import PermissionDenied
 
@@ -648,25 +697,76 @@ class RegistrationViewSet(viewsets.ModelViewSet):
     """Реєстрації спортсменів на категорії."""
 
     serializer_class = RegistrationSerializer
+    from apps.common.pagination import OptionalPageNumberPagination
+
+    pagination_class = OptionalPageNumberPagination
 
     def get_queryset(self):
-        qs = Registration.objects.select_related("athlete", "athlete__club", "category")
-        # Фільтр за категорією (опціонально)
+        user = self.request.user
+        qs = Registration.objects.select_related("athlete", "athlete__club", "category", "team")
+        if user.is_authenticated and user.role == "coach" and self.action == "list":
+            from django.db.models import Q
+
+            qs = qs.filter(Q(athlete__coach=user) | Q(team__coach=user))
         category_id = self.request.query_params.get("category")
         if category_id:
             qs = qs.filter(category_id=category_id)
+        tournament_id = self.request.query_params.get("tournament")
+        if tournament_id:
+            qs = qs.filter(category__tournament_id=tournament_id)
         return qs
 
     def get_permissions(self):
-        if self.action == "confirm_weigh_in":
-            return [IsOrganizer()]
-        if self.action in ("create", "destroy"):
-            from apps.accounts.permissions import IsCoach
+        if self.action in ("confirm_weigh_in", "check_in", "update", "partial_update"):
+            from apps.accounts.permissions import IsTournamentStaffOrOrganizer
 
-            return [IsCoach()]
+            return [IsTournamentStaffOrOrganizer()]
+        if self.action in ("create", "destroy", "bulk_pay"):
+            from apps.accounts.permissions import IsCoachOrOrganizer
+
+            return [IsCoachOrOrganizer()]
         from rest_framework.permissions import AllowAny
 
         return [AllowAny()]
+
+    def perform_update(self, serializer):
+        from rest_framework.exceptions import ValidationError
+
+        instance = serializer.instance
+        if instance and instance.category.tournament.status == "completed":
+            raise ValidationError("Редагування реєстрацій завершеного турніру заблоковано.")
+        instance = serializer.save()
+        from apps.common.broadcast import broadcast_registration_update
+
+        broadcast_registration_update(instance)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.category.tournament.status == "completed":
+            return Response(
+                {"detail": "Видалення реєстрацій завершеного турніру заблоковано."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Security check: coach can only delete their own athletes' / teams' registrations
+        if request.user.role == "coach":
+            coach = None
+            if instance.athlete:
+                coach = instance.athlete.coach
+            elif instance.team:
+                coach = instance.team.coach
+
+            if coach != request.user:
+                return Response(
+                    {"detail": "Ви можете видаляти тільки власні заявки."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if instance.category.matches.exists():
+            return Response(
+                {"detail": "Неможливо видалити реєстрацію, оскільки сітка змагань уже сформована."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], url_path="confirm_weigh_in")
     def confirm_weigh_in(self, request, pk=None):
@@ -674,12 +774,20 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         Тіло: {"weight": 74.5}
         """
         registration = self.get_object()
-        weight = request.data.get("weight")
-        if weight is None:
+        if registration.category.tournament.status == "completed":
             return Response(
-                {"detail": "Поле weight є обов'язковим."},
+                {"detail": "Зважування заблоковано, оскільки турнір уже завершено."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        weight = request.data.get("weight")
+        if weight is None:
+            if registration.category.is_team:
+                weight = 0.0
+            else:
+                return Response(
+                    {"detail": "Поле weight є обов'язковим."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         try:
             registration.confirm_weigh_in(float(weight))
         except (ValueError, TypeError):
@@ -687,4 +795,74 @@ class RegistrationViewSet(viewsets.ModelViewSet):
                 {"detail": "Некоректне значення ваги."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.message if hasattr(exc, "message") else str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.common.broadcast import broadcast_registration_update
+
+        broadcast_registration_update(registration)
+
         return Response(RegistrationSerializer(registration).data)
+
+    @action(detail=True, methods=["post"], url_path="check_in")
+    def check_in(self, request, pk=None):
+        """POST /api/registrations/{id}/check_in/
+        Перемикає checked_in статус реєстрації.
+        """
+        registration = self.get_object()
+        if registration.category.tournament.status == "completed":
+            return Response(
+                {"detail": "Реєстрація на турнірі заблокована, оскільки турнір уже завершено."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        registration.checked_in = not registration.checked_in
+        registration.save(update_fields=["checked_in"])
+
+        from apps.common.broadcast import broadcast_registration_update
+
+        broadcast_registration_update(registration)
+
+        return Response(RegistrationSerializer(registration).data)
+
+    @action(detail=False, methods=["post"], url_path="bulk_pay")
+    def bulk_pay(self, request):
+        """POST /api/registrations/bulk_pay/
+        Тіло: {"registration_ids": [1, 2, 3], "payment_method": "online"}
+        """
+        registration_ids = request.data.get("registration_ids", [])
+        payment_method = request.data.get("payment_method", "online")
+
+        if not isinstance(registration_ids, list):
+            return Response(
+                {"detail": "registration_ids має бути списком."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        registrations = Registration.objects.filter(id__in=registration_ids)
+        if registrations.filter(category__tournament__status="completed").exists():
+            return Response(
+                {"detail": "Недійсний запит: один або кілька турнірів завершено."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if request.user.role == "coach":
+            for reg in registrations:
+                if reg.athlete and reg.athlete.coach != request.user:
+                    return Response(
+                        {"detail": "Ви можете оплачувати лише власні реєстрації."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                if reg.team and reg.team.coach != request.user:
+                    return Response(
+                        {"detail": "Ви можете оплачувати лише власні реєстрації."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+        updated_count = registrations.update(payment_status="paid", payment_method=payment_method)
+        return Response(
+            {"detail": f"Успішно оновлено {updated_count} реєстрацій."},
+            status=status.HTTP_200_OK,
+        )

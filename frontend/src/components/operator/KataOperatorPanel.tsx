@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import api from "@/lib/api";
-import { cn, getErrorMessage, getOptimisticTimerUpdate } from "@/lib/utils";
+import { cn, getErrorMessage, getOptimisticTimerUpdate, formatRegistrationName } from "@/lib/utils";
 import type { Match } from "@/types/api";
 import { formatTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
@@ -245,10 +245,10 @@ export default function KataOperatorPanel({
             <div className="rounded-xl border border-blue-600/30 bg-blue-950/10 p-4 flex flex-col justify-between space-y-4">
               <div className="text-center">
                 <p className="text-xs font-bold uppercase tracking-widest text-blue-400 mb-1">AO</p>
-                <p className="font-semibold text-sm truncate text-white/90">
-                  {match.reg_second?.athlete?.full_name ?? "—"}
+                <p className="font-semibold text-sm text-white/90 whitespace-normal break-words leading-tight">
+                  {formatRegistrationName(match.reg_second) || "—"}
                 </p>
-                <p className="text-xs text-muted-foreground">{match.reg_second?.athlete?.club?.name}</p>
+                <p className="text-xs text-muted-foreground">{match.reg_second?.athlete?.club?.name ?? match.reg_second?.team?.club?.name}</p>
               </div>
               <div className="text-center py-4">
                 <span
@@ -274,10 +274,10 @@ export default function KataOperatorPanel({
             <div className="rounded-xl border border-red-600/30 bg-red-950/10 p-4 flex flex-col justify-between space-y-4">
               <div className="text-center">
                 <p className="text-xs font-bold uppercase tracking-widest text-red-400 mb-1">AKA</p>
-                <p className="font-semibold text-sm truncate text-white/90">
-                  {match.reg_first?.athlete?.full_name ?? "—"}
+                <p className="font-semibold text-sm text-white/90 whitespace-normal break-words leading-tight">
+                  {formatRegistrationName(match.reg_first) || "—"}
                 </p>
-                <p className="text-xs text-muted-foreground">{match.reg_first?.athlete?.club?.name}</p>
+                <p className="text-xs text-muted-foreground">{match.reg_first?.athlete?.club?.name ?? match.reg_first?.team?.club?.name}</p>
               </div>
               <div className="text-center py-4">
                 <span
@@ -414,9 +414,9 @@ export default function KataOperatorPanel({
               <div className="text-lg font-black uppercase text-white tracking-wide">
                 Переможець:{" "}
                 {match.winner === match.reg_first?.id ? (
-                  <span className="text-red-400">AKA ({match.reg_first?.athlete?.full_name ?? "AKA"})</span>
+                  <span className="text-red-400">AKA ({formatRegistrationName(match.reg_first) || "AKA"})</span>
                 ) : (
-                  <span className="text-blue-400">AO ({match.reg_second?.athlete?.full_name ?? "AO"})</span>
+                  <span className="text-blue-400">AO ({formatRegistrationName(match.reg_second) || "AO"})</span>
                 )}
               </div>
               <div className="text-xs opacity-75 font-medium italic">
