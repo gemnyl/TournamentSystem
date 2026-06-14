@@ -276,6 +276,7 @@ try:
                     seed_number=i,
                     recorded_weight=73,
                     status=Registration.Status.CONFIRMED,
+                    payment_status="paid",
                 )
                 regs.append(reg)
             return regs

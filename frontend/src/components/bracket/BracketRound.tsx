@@ -40,19 +40,23 @@ export function BracketRound({ roundIndex, totalRounds, matches, onMatchClick }:
     return `Раунд ${roundIndex + 1}`;
   };
 
-  // Висота картки H = 108px, базовий проміжок g0 = 16px
-  const cardHeight = 108;
+  // Висота картки H: 108px для індивідуальних, 140px або 180px для командних
+  const isTeam = matches.some(m => m.category_is_team);
+  const maxBouts = matches.reduce((max, m) => Math.max(max, m.team_bouts?.length ?? 0), 0);
+  const cardHeight = isTeam ? (maxBouts > 3 ? 180 : 140) : 108;
   const baseGap = 16;
   const { gap: gapBetween, paddingTop } = getRoundSpacing(roundIndex, cardHeight, baseGap);
 
   return (
-    <div className="flex flex-col items-center w-56 select-none">
+    <div className="flex flex-col items-center w-72 select-none">
       {/* Заголовок раунду */}
-      <div className="mb-6 px-4 py-1.5 rounded-full bg-card/60 border border-border/80 shadow-sm backdrop-blur-md">
-        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-          {roundLabel()}
-        </span>
-      </div>
+      {!isTeam && (
+        <div className="mb-6 px-4 py-1.5 rounded-full bg-card/60 border border-border/80 shadow-sm backdrop-blur-md">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            {roundLabel()}
+          </span>
+        </div>
+      )}
 
       {/* Матчі */}
       <div className="flex flex-col w-full" style={{ gap: gapBetween, paddingTop }}>

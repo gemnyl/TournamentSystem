@@ -31,7 +31,18 @@ class BracketGenerator:
         """Генерує сітку відповідно до bracket_format категорії."""
         self._validate_preconditions()
 
-        fmt = self.category.bracket_format
+        if self.category.is_team:
+            registrations = self._get_confirmed_registrations()
+            count = registrations.count()
+            if count >= 6:
+                fmt = Category.BracketFormat.SINGLE_ELIMINATION
+            else:
+                fmt = Category.BracketFormat.ROUND_ROBIN
+            self.category.bracket_format = fmt
+            self.category.save(update_fields=["bracket_format"])
+        else:
+            fmt = self.category.bracket_format
+
         if fmt == Category.BracketFormat.SINGLE_ELIMINATION:
             return self.generate_single_elimination()
         if fmt == Category.BracketFormat.ROUND_ROBIN:
@@ -151,7 +162,8 @@ class BracketGenerator:
         return Registration.objects.filter(
             category=self.category,
             status=Registration.Status.CONFIRMED,
-        ).select_related("athlete", "athlete__club")
+            payment_status="paid",
+        ).select_related("athlete", "athlete__club", "team", "team__club")
 
     def _assign_seeds_if_missing(self, registrations):
         for idx, r in enumerate(registrations, start=1):
@@ -159,6 +171,13 @@ class BracketGenerator:
                 r.assign_seed(idx)
 
     def _to_participant(self, registration) -> utils.Participant:
+        if registration.team:
+            return utils.Participant(
+                id=registration.id,
+                full_name=registration.team.name,
+                club_id=registration.team.club_id,
+                seed=registration.seed_number,
+            )
         return utils.Participant(
             id=registration.id,
             full_name=registration.athlete.get_full_name(),
