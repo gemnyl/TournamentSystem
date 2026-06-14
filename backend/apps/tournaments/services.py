@@ -11,7 +11,9 @@ from apps.tournaments.models import Category, Registration
 def _calculate_basic_stats(
     category: Category, registrations: list[Registration], matches: list[Match]
 ) -> dict[int, dict]:
-    completed_matches = [m for m in matches if m.status == Match.Status.COMPLETED]
+    completed_matches = [
+        m for m in matches if m.status == Match.Status.COMPLETED and m.parent_team_match_id is None
+    ]
     stats = {}
     for r in registrations:
         stats[r.id] = {

@@ -16,6 +16,7 @@ class CategoryInline(admin.TabularInline):
         "min_weight",
         "max_weight",
         "bracket_format",
+        "registration_fee",
     ]
     show_change_link = True
 
@@ -48,6 +49,7 @@ class CategoryAdmin(admin.ModelAdmin):
         "min_weight",
         "max_weight",
         "bracket_format",
+        "registration_fee",
     ]
     list_filter = ["bracket_format", "allowed_gender", "tournament"]
     search_fields = ["name", "tournament__title"]

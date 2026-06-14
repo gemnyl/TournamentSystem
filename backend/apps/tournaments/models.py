@@ -47,6 +47,43 @@ class Tournament(models.Model):
         help_text="Якщо вимкнено, учасники автоматично "
         "підтверджуються при реєстрації без зважування",
     )
+    # Фінансові налаштування
+    online_payment_enabled = models.BooleanField(default=True, verbose_name="Онлайн оплата")
+    payment_details = models.TextField(blank=True, verbose_name="Реквізити для оплати")
+    base_registration_fee = models.PositiveIntegerField(default=500, verbose_name="Базова вартість")
+    ruleset_prices = models.JSONField(default=dict, blank=True, verbose_name="Ціни за рулсети")
+    base_team_registration_fee = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name="Базова вартість за учасника у командних категоріях"
+    )
+    ruleset_team_prices = models.JSONField(
+        default=dict, blank=True, verbose_name="Ціни для командних категорій за рулсетами"
+    )
+    commission_payer = models.CharField(
+        max_length=20,
+        choices=[("buyer", "Покупець"), ("organizer", "Організатор")],
+        default="buyer",
+        verbose_name="Хто сплачує комісію",
+    )
+    platform_fee_status = models.CharField(
+        max_length=20,
+        choices=[("paid", "Сплачено"), ("unpaid", "Не сплачено")],
+        default="paid",
+        verbose_name="Статус оплати комісії",
+    )
+    platform_fee_amount = models.PositiveIntegerField(
+        default=0, verbose_name="Сума комісії за офлайн-заявки"
+    )
+    staff_members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="staff_tournaments",
+        verbose_name="Робочий персонал",
+    )
+    use_check_in = models.BooleanField(
+        default=False,
+        verbose_name="Відмічати явку",
+        help_text="Секретар може відмічати прибуття спортсменів на місці",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -57,6 +94,17 @@ class Tournament(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.start_date.date()})"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            old = Tournament.objects.get(pk=self.pk)
+            if old.weigh_in_required and not self.weigh_in_required:
+                from apps.tournaments.models import Registration
+
+                Registration.objects.filter(
+                    category__tournament=self, status=Registration.Status.PENDING
+                ).update(status=Registration.Status.CONFIRMED)
+        super().save(*args, **kwargs)
 
     def clean(self):
         if self.start_date and self.end_date and self.end_date < self.start_date:
@@ -81,7 +129,42 @@ class Tournament(models.Model):
             raise ValidationError("Завершити можна лише активний турнір")
         self.status = self.Status.COMPLETED
         self.completed_at = timezone.now()
-        self.save(update_fields=["status", "completed_at"])
+
+        # 1. Clear staff assignments
+        self.staff_members.clear()
+
+        # 2. Clear assigned judges on all tatamis of this tournament
+        self.tatamis.update(assigned_judge=None)
+
+        # 3. Calculate platform fee amount for all offline paid registrations (5%)
+        from apps.tournaments.models import Registration
+
+        offline_regs = Registration.objects.filter(
+            category__tournament=self,
+            payment_status="paid",
+            payment_method="offline",
+        )
+        total_offline_debt = 0
+        for reg in offline_regs:
+            price = reg.category.get_athlete_fee()
+            if reg.category.is_team:
+                price = price * (reg.category.team_size or 3)
+            total_offline_debt += int(price * 0.05)
+
+        self.platform_fee_amount = total_offline_debt
+        if total_offline_debt > 0:
+            self.platform_fee_status = "unpaid"
+        else:
+            self.platform_fee_status = "paid"
+
+        self.save(
+            update_fields=[
+                "status",
+                "completed_at",
+                "platform_fee_amount",
+                "platform_fee_status",
+            ]
+        )
 
 
 class Category(models.Model):
@@ -123,6 +206,17 @@ class Category(models.Model):
     allowed_skill_level = models.CharField(
         max_length=50, blank=True, verbose_name="Допустимий рівень майстерності"
     )
+    is_team = models.BooleanField(default=False, verbose_name="Групова категорія")
+    team_size = models.PositiveSmallIntegerField(
+        default=3, verbose_name="Кількість бійців у команді"
+    )
+    registration_fee = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Спеціальна вартість за учасника",
+        help_text="Якщо вказано, перевизначає базову вартість турніру для цієї категорії",
+    )
+
     bracket_format = models.CharField(
         max_length=50,
         choices=BracketFormat.choices,
@@ -215,6 +309,19 @@ class Category(models.Model):
 
         return (len(reasons) == 0, reasons)
 
+    def get_athlete_fee(self):
+        """Повертає вартість участі за одного спортсмена."""
+        if self.registration_fee is not None:
+            return self.registration_fee
+        if self.is_team:
+            if self.ruleset_key in self.tournament.ruleset_team_prices:
+                return self.tournament.ruleset_team_prices[self.ruleset_key]
+            if self.tournament.base_team_registration_fee is not None:
+                return self.tournament.base_team_registration_fee
+        return self.tournament.ruleset_prices.get(
+            self.ruleset_key, self.tournament.base_registration_fee
+        )
+
 
 class Registration(models.Model):
     """Заявка спортсмена на участь у категорії."""
@@ -228,8 +335,18 @@ class Registration(models.Model):
     athlete = models.ForeignKey(
         "athletes.Athlete",
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="registrations",
         verbose_name="Спортсмен",
+    )
+    team = models.ForeignKey(
+        "athletes.Team",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="registrations",
+        verbose_name="Команда",
     )
     category = models.ForeignKey(
         Category, on_delete=models.CASCADE, related_name="registrations", verbose_name="Категорія"
@@ -250,11 +367,28 @@ class Registration(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING, verbose_name="Статус"
     )
+    payment_status = models.CharField(
+        max_length=20,
+        choices=[("unpaid", "Не сплачено"), ("paid", "Сплачено")],
+        default="unpaid",
+        verbose_name="Статус оплати",
+    )
+    payment_method = models.CharField(
+        max_length=20,
+        choices=[("online", "Онлайн"), ("offline", "Офлайн (Готівка)")],
+        default="offline",
+        verbose_name="Спосіб оплати",
+    )
     place = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
         verbose_name="Місце в категорії",
         help_text="Отримане призове місце (1, 2, 3, 5 тощо) після закінчення змагань у категорії",
+    )
+    checked_in = models.BooleanField(
+        default=False,
+        verbose_name="Явка підтверджена",
+        help_text="Спортсмен фізично прибув на місце проведення",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -264,21 +398,71 @@ class Registration(models.Model):
         verbose_name_plural = "Реєстрації"
         constraints = [
             models.UniqueConstraint(
-                fields=["athlete", "category"], name="uq_registration_athlete_category"
-            )
+                fields=["athlete", "category"],
+                condition=models.Q(athlete__isnull=False),
+                name="uq_registration_athlete_category",
+            ),
+            models.UniqueConstraint(
+                fields=["team", "category"],
+                condition=models.Q(team__isnull=False),
+                name="uq_registration_team_category",
+            ),
         ]
         indexes = [
             models.Index(fields=["category", "status"], name="idx_reg_category_status"),
         ]
 
     def __str__(self):
-        return f"{self.athlete} → {self.category.name}"
+        participant = self.athlete if self.athlete else self.team
+        return f"{participant} → {self.category.name}"
+
+    def clean(self):
+        super().clean()
+        if self.category:
+            if self.category.is_team:
+                if not self.team:
+                    raise ValidationError("Для групової категорії необхідно вказати команду.")
+                if self.athlete:
+                    raise ValidationError(
+                        "Для групової категорії не можна вказувати окремого спортсмена."
+                    )
+            else:
+                if not self.athlete:
+                    raise ValidationError(
+                        "Для індивідуальної категорії необхідно вказати спортсмена."
+                    )
+                if self.team:
+                    raise ValidationError(
+                        "Для індивідуальної категорії не можна вказувати команду."
+                    )
 
     def confirm_weigh_in(self, weight):
         """Підтверджує зважування та переводить заявку у статус CONFIRMED."""
+        category = self.category
+        if category.min_weight is not None and weight < float(category.min_weight):
+            raise ValidationError(
+                f"Вага {weight} кг менша за мінімально допустиму для цієї "
+                f"категорії ({category.min_weight} кг)."
+            )
+        if category.max_weight is not None and weight > float(category.max_weight):
+            raise ValidationError(
+                f"Вага {weight} кг більша за максимально допустиму для цієї "
+                f"категорії ({category.max_weight} кг)."
+            )
+
         self.recorded_weight = weight
         self.status = self.Status.CONFIRMED
         self.save(update_fields=["recorded_weight", "status"])
+
+        # Log weight in weight history
+        if self.athlete:
+            from apps.athletes.models import AthleteWeightLog
+
+            AthleteWeightLog.objects.create(
+                athlete=self.athlete,
+                weight=weight,
+                notes=f"Офіційне зважування: {category.tournament.title}",
+            )
 
     def assign_seed(self, number):
         self.seed_number = number

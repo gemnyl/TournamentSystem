@@ -104,6 +104,7 @@ class TournamentAPITestCase(TestCase):
             seed_number=idx,
             recorded_weight=73,
             status=Registration.Status.CONFIRMED,
+            payment_status="paid",
         )
         return athlete, reg
 
@@ -204,6 +205,139 @@ class TestAthleteRegistration(TournamentAPITestCase):
         response = self.client.post(
             f"/api/registrations/{reg.pk}/confirm_weigh_in/",
             {"weight": 73.4},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Registration.Status.CONFIRMED)
+
+    def test_staff_can_check_in_and_confirm_weigh_in(self):
+        """Персонал турніру може відмічати явку та підтверджувати зважування."""
+        # Create staff user
+        staff_user = User.objects.create_user(
+            email="staff@test.local",
+            password="test12345",
+            first_name="Секретар",
+            last_name="Турнірний",
+            role=User.Role.STAFF,
+        )
+        # Assign staff to tournament
+        self.tournament.staff_members.add(staff_user)
+
+        athlete = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_a,
+            first_name="Тест",
+            last_name="Явка",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 3, 3),
+            base_weight=73,
+        )
+        reg = Registration.objects.create(
+            athlete=athlete,
+            category=self.category,
+            status=Registration.Status.PENDING,
+        )
+
+        # Login as staff
+        self._login(staff_user)
+
+        # Test check-in toggle
+        response = self.client.post(f"/api/registrations/{reg.pk}/check_in/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["checked_in"])
+
+        # Test check-in toggle off
+        response = self.client.post(f"/api/registrations/{reg.pk}/check_in/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["checked_in"])
+
+        # Test weigh-in confirm by staff
+        response = self.client.post(
+            f"/api/registrations/{reg.pk}/confirm_weigh_in/",
+            {"weight": 74.2},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Registration.Status.CONFIRMED)
+        self.assertEqual(float(response.data["recorded_weight"]), 74.2)
+
+    def test_unauthorized_user_cannot_check_in(self):
+        """Інший тренер або сторонній персонал не може відмітити явку."""
+        other_coach = User.objects.create_user(
+            email="other_coach@test.local",
+            password="test12345",
+            first_name="Інший",
+            last_name="Тренер",
+            role=User.Role.COACH,
+        )
+        athlete = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_a,
+            first_name="Тест",
+            last_name="Явка",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 3, 3),
+            base_weight=73,
+        )
+        reg = Registration.objects.create(
+            athlete=athlete,
+            category=self.category,
+            status=Registration.Status.PENDING,
+        )
+
+        self._login(other_coach)
+        response = self.client.post(f"/api/registrations/{reg.pk}/check_in/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_validate_status_change_weight_constraints(self):
+        """Зміна статусу на confirmed через PATCH перевіряє вагу, якщо weigh-in обов'язкове."""
+        athlete = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_a,
+            first_name="Тест",
+            last_name="Вага",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 3, 3),
+            base_weight=73,
+        )
+        reg = Registration.objects.create(
+            athlete=athlete,
+            category=self.category,
+            status=Registration.Status.PENDING,
+        )
+
+        self._login(self.organizer)
+
+        # 1. No weight set (should fail)
+        response = self.client.patch(
+            f"/api/registrations/{reg.pk}/",
+            {"status": Registration.Status.CONFIRMED},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        data = response.data
+        error_msg = data[0] if isinstance(data, list) else data.get("non_field_errors", [""])[0]
+        self.assertIn("без проходження зважування", error_msg)
+
+        # 2. Invalid weight (65.0 < 70)
+        reg.recorded_weight = 65.0
+        reg.save(update_fields=["recorded_weight"])
+        response = self.client.patch(
+            f"/api/registrations/{reg.pk}/",
+            {"status": Registration.Status.CONFIRMED},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        data = response.data
+        error_msg = data[0] if isinstance(data, list) else data.get("non_field_errors", [""])[0]
+        self.assertIn("менша за мінімально допустиму", error_msg)
+
+        # 3. Valid weight (72.0)
+        reg.recorded_weight = 72.0
+        reg.save(update_fields=["recorded_weight"])
+        response = self.client.patch(
+            f"/api/registrations/{reg.pk}/",
+            {"status": Registration.Status.CONFIRMED},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -1121,3 +1255,415 @@ class TestTournamentExtraActions(TournamentAPITestCase):
 
         response = self.client.get("/api/registrations/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class CoachDashboardAndBillingIntegrationTest(TestCase):
+    """Інтеграційні тести підсистеми білінгу, кастомного персоналу та командних реєстрацій."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+        # Clubs
+        self.club = Club.objects.create(name="Козаки", region="kyiv_city")
+
+        # Users
+        self.organizer = User.objects.create_user(
+            email="org_billing@test.local",
+            password="testpassword",
+            first_name="Олег",
+            last_name="Органайзер",
+            role=User.Role.ORGANIZER,
+            club=self.club,
+        )
+        self.coach = User.objects.create_user(
+            email="coach_billing@test.local",
+            password="testpassword",
+            first_name="Тарас",
+            last_name="Шевченко",
+            role=User.Role.COACH,
+            club=self.club,
+        )
+        self.staff = User.objects.create_user(
+            email="staff_billing@test.local",
+            password="testpassword",
+            first_name="Іван",
+            last_name="Персонал",
+            role=User.Role.STAFF,
+            club=self.club,
+        )
+
+        # Athlete
+        self.athlete1 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club,
+            first_name="Олексій",
+            last_name="Атлет",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2005, 1, 1),
+            base_weight=74,
+            skill_level="КМС",
+        )
+        self.athlete2 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club,
+            first_name="Богдан",
+            last_name="Атлет",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2005, 1, 1),
+            base_weight=73,
+            skill_level="КМС",
+        )
+
+        # Tournaments
+        self.tournament = Tournament.objects.create(
+            organizer=self.organizer,
+            title="Billing Tournament",
+            sport_type="Карате WKF",
+            location="Київ",
+            start_date=timezone.now() + timedelta(days=5),
+            end_date=timezone.now() + timedelta(days=6),
+            status=Tournament.Status.REGISTRATION,
+            weigh_in_required=True,
+            base_registration_fee=1000,
+        )
+        self.tournament.staff_members.add(self.staff)
+
+        # Categories
+        self.ind_category = Category.objects.create(
+            tournament=self.tournament,
+            name="Male Ind 18-20 -75kg",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=18,
+            max_age=21,
+            min_weight=70,
+            max_weight=75,
+            allowed_skill_level="КМС",
+            is_team=False,
+        )
+        self.team_category = Category.objects.create(
+            tournament=self.tournament,
+            name="Male Team 18-20",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=18,
+            max_age=21,
+            is_team=True,
+            allowed_skill_level="КМС",
+            registration_fee=800,
+        )
+
+    def _login(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_team_crud_and_registration(self):
+        # 1. Coach creates a team
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/teams/",
+            {
+                "name": "Team Golden Lion",
+                "club_id": self.club.id,
+                "athlete_ids": [self.athlete1.id, self.athlete2.id],
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        team_id = response.data["id"]
+
+        # 2. Coach registers the team to team category
+        response = self.client.post(
+            "/api/registrations/", {"team_id": team_id, "category": self.team_category.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Verify team fee is multiplied by team size and respects
+        # custom registration_fee (800 * 3 = 2400)
+        self.assertEqual(response.data["fee"], 2400)
+
+        # Verify it is pending by default since weigh-in is required
+        self.assertEqual(response.data["status"], "pending")
+
+        # 3. Check coach cannot register other coaches' teams/athletes (not in setup)
+        other_coach = User.objects.create_user(
+            email="other_coach@test.local",
+            password="testpassword",
+            first_name="Other",
+            last_name="Coach",
+            role=User.Role.COACH,
+        )
+        self._login(other_coach)
+        response = self.client.post(
+            "/api/registrations/", {"team_id": team_id, "category": self.team_category.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_smart_category_audit_violations(self):
+        # Create ineligible athlete (wrong gender)
+        female_athlete = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club,
+            first_name="Марія",
+            last_name="Атлет",
+            gender=Athlete.Gender.FEMALE,
+            birth_date=date(2005, 1, 1),
+            base_weight=72,
+            skill_level="КМС",
+        )
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/",
+            {"athlete_id": female_athlete.id, "category": self.ind_category.id},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Стать не відповідає категорії", response.data["non_field_errors"][0])
+
+    def test_auto_confirm_and_toggle(self):
+        # 1. Register athlete (weigh_in_required=True) -> status should be pending
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/",
+            {"athlete_id": self.athlete1.id, "category": self.ind_category.id},
+        )
+        if response.status_code != status.HTTP_201_CREATED:
+            print("AUTO CONFIRM REGISTER ERROR:", response.data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        reg_id = response.data["id"]
+        self.assertEqual(response.data["status"], "pending")
+
+        # 2. Toggle weigh-in required to False on tournament
+        self._login(self.organizer)
+        response = self.client.patch(
+            f"/api/tournaments/{self.tournament.id}/", {"weigh_in_required": False}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # 3. Check registration became confirmed
+        reg = Registration.objects.get(id=reg_id)
+        self.assertEqual(reg.status, Registration.Status.CONFIRMED)
+
+    def test_bracket_locks(self):
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/",
+            {"athlete_id": self.athlete1.id, "category": self.ind_category.id},
+        )
+        reg_id = response.data["id"]
+
+        # Fake a match to simulate generated bracket
+        from apps.matches.models import Match
+
+        Match.objects.create(category=self.ind_category, round_index=1, match_order=1)
+
+        # Try to delete registration -> should fail due to bracket lock
+        response = self.client.delete(f"/api/registrations/{reg_id}/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("сітка змагань уже сформована", response.data["detail"])
+
+    def test_tournament_staff_permissions(self):
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/",
+            {"athlete_id": self.athlete1.id, "category": self.ind_category.id},
+        )
+        reg_id = response.data["id"]
+
+        # Staff logs in and confirms weigh-in
+        self._login(self.staff)
+        response = self.client.post(
+            f"/api/registrations/{reg_id}/confirm_weigh_in/", {"weight": 73.5}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "confirmed")
+
+    def test_bulk_pay_and_offline_fees(self):
+        # 1. Register and pay offline
+        self._login(self.coach)
+        response1 = self.client.post(
+            "/api/registrations/",
+            {
+                "athlete_id": self.athlete1.id,
+                "category": self.ind_category.id,
+                "payment_method": "offline",
+            },
+        )
+        reg1_id = response1.data["id"]
+
+        # Confirm weigh in so registration is confirmed
+        self._login(self.staff)
+        self.client.post(f"/api/registrations/{reg1_id}/confirm_weigh_in/", {"weight": 73.5})
+
+        # Bulk pay
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/bulk_pay/",
+            {"registration_ids": [reg1_id], "payment_method": "offline"},
+            format="json",
+        )
+        if response.status_code != 200:
+            print("BULK PAY ERROR:", response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Start and Complete tournament
+        self.tournament.status = Tournament.Status.ACTIVE
+        self.tournament.save()
+
+        response = self.client.post(f"/api/tournaments/{self.tournament.id}/complete/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Verify platform fee is 5% of 1000 = 50, status unpaid
+        self.tournament.refresh_from_db()
+        self.assertEqual(self.tournament.platform_fee_amount, 50)
+        self.assertEqual(self.tournament.platform_fee_status, "unpaid")
+        # Staff is cleared
+        self.assertEqual(self.tournament.staff_members.count(), 0)
+
+        # Try to create new tournament with active debt -> should fail
+        response = self.client.post(
+            "/api/tournaments/",
+            {
+                "title": "Debt Tournament",
+                "sport_type": "Карате WKF",
+                "location": "Київ",
+                "start_date": timezone.now() + timedelta(days=10),
+                "end_date": timezone.now() + timedelta(days=11),
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("у вас є неоплачена комісія", response.data["non_field_errors"][0])
+
+        # Pay platform fee
+        response = self.client.post(f"/api/tournaments/{self.tournament.id}/pay_platform_fee/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["platform_fee_status"], "paid")
+
+        # Now creating a tournament should succeed
+        response = self.client.post(
+            "/api/tournaments/",
+            {
+                "title": "New Tournament",
+                "sport_type": "Карате WKF",
+                "location": "Київ",
+                "start_date": timezone.now() + timedelta(days=10),
+                "end_date": timezone.now() + timedelta(days=11),
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_organizer_included_in_staff_member_me(self):
+        # Organizer user
+        self._login(self.organizer)
+        # Verify staff_members doesn't contain organizer
+        self.assertNotIn(self.organizer, self.tournament.staff_members.all())
+        # Query tournaments/?staff_member=me
+        response = self.client.get("/api/tournaments/?staff_member=me")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Should include self.tournament since user is the organizer
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], self.tournament.id)
+
+    def test_base_team_registration_fee_and_ruleset_team_prices(self):
+        # 1. Test base team registration fee fallback
+        self.tournament.base_team_registration_fee = 700
+        self.tournament.save()
+
+        # Create a team category without custom registration_fee
+        team_cat_no_override = Category.objects.create(
+            tournament=self.tournament,
+            name="Male Team No Override",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=18,
+            max_age=21,
+            is_team=True,
+            ruleset_key="karate_wkf",
+        )
+        self.assertEqual(team_cat_no_override.get_athlete_fee(), 700)
+
+        # 2. Test ruleset team prices fallback
+        self.tournament.ruleset_team_prices = {"karate_wkf": 650}
+        self.tournament.save()
+        self.assertEqual(team_cat_no_override.get_athlete_fee(), 650)
+
+        # 3. Test custom registration_fee override
+        team_cat_no_override.registration_fee = 600
+        team_cat_no_override.save()
+        self.assertEqual(team_cat_no_override.get_athlete_fee(), 600)
+
+    def test_category_creation_completed_tournament_error(self):
+        # Set tournament status to completed
+        self.tournament.status = Tournament.Status.COMPLETED
+        self.tournament.save()
+        self._login(self.organizer)
+
+        payload = {
+            "tournament": self.tournament.id,
+            "name": "Нова категорія 123",
+            "allowed_gender": Category.AllowedGender.MALE,
+            "min_age": 18,
+            "max_age": 35,
+        }
+        response = self.client.post("/api/categories/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauthorized_user_cannot_create_category(self):
+        other_coach = User.objects.create_user(
+            email="other_cat_coach@test.local",
+            password="testpassword123",  # NOSONAR
+            role=User.Role.COACH,
+        )
+        self._login(other_coach)
+        payload = {
+            "tournament": self.tournament.id,
+            "name": "Нова категорія 123",
+            "allowed_gender": Category.AllowedGender.MALE,
+            "min_age": 18,
+            "max_age": 35,
+        }
+        response = self.client.post("/api/categories/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_bulk_pay_cross_coach_error(self):
+        coach_a = User.objects.create_user(
+            email="coach_a@test.local",
+            password="testpassword123",  # NOSONAR
+            role=User.Role.COACH,
+        )
+        coach_b = User.objects.create_user(
+            email="coach_b@test.local",
+            password="testpassword123",  # NOSONAR
+            role=User.Role.COACH,
+        )
+        ath_a = Athlete.objects.create(
+            coach=coach_a,
+            club=self.club,
+            first_name="A",
+            last_name="A",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=70,
+        )
+        ath_b = Athlete.objects.create(
+            coach=coach_b,
+            club=self.club,
+            first_name="B",
+            last_name="B",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=70,
+        )
+        reg_a = Registration.objects.create(
+            athlete=ath_a,
+            category=self.ind_category,
+            status=Registration.Status.PENDING,
+        )
+        reg_b = Registration.objects.create(
+            athlete=ath_b,
+            category=self.ind_category,
+            status=Registration.Status.PENDING,
+        )
+
+        # Coach A tries to pay for both -> 403 Forbidden
+        self._login(coach_a)
+        payload = {
+            "registration_ids": [reg_a.id, reg_b.id],
+            "payment_method": "cash",
+        }
+        response = self.client.post("/api/registrations/bulk_pay/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
