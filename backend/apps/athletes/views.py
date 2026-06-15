@@ -212,8 +212,7 @@ class AthleteViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     "detail": (
-                        "Непідтримуваний формат файлу. "
-                        "Дозволено тільки CSV та Excel (.xlsx/.xls)."
+                        "Непідтримуваний формат файлу. Дозволено тільки CSV та Excel (.xlsx/.xls)."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,

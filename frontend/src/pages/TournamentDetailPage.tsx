@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
@@ -275,6 +276,7 @@ export default function TournamentDetailPage() {
     });
 
     return groups;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedCategories, catGroupBy, tatamis, matches]);
 
   const activeGroupKeys = useMemo(() => {

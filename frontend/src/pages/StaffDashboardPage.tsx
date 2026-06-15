@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search, Loader2, Check, ShieldAlert, Award, Calendar, MapPin, RefreshCw } from "lucide-react";

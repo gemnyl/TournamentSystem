@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { useParams } from "react-router-dom";

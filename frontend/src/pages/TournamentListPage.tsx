@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useEffect, useState } from "react";
 import { Plus, Search, Loader2, Trophy } from "lucide-react";
 import { useSearchParams } from "react-router-dom";

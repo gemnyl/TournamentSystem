@@ -423,7 +423,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             return Response(
                 {
                     "detail": (
-                        "Додатковий бій можна створити лише для " "батьківського командного матчу."
+                        "Додатковий бій можна створити лише для батьківського командного матчу."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
