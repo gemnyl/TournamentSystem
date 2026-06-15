@@ -16,6 +16,7 @@ export function useAuth() {
     isOrganizer: user?.role === "organizer",
     isCoach: user?.role === "coach",
     isJudge: user?.role === "judge",
+    isStaff: user?.role === "staff",
     login,
     logout,
     register,

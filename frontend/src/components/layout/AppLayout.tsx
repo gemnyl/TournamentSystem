@@ -17,6 +17,7 @@ const ROLE_LABELS: Record<string, string> = {
   coach:     "Тренер",
   judge:     "Суддя",
   spectator: "Глядач",
+  staff:     "Персонал",
 };
 
 function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
@@ -56,7 +57,7 @@ export default function AppLayout() {
       api.get<Tatami[]>("/tatamis/")
         .then((res) => {
           const list = Array.isArray(res.data) ? res.data : (res.data as { results: Tatami[] }).results || [];
-          const assigned = list.filter((t: Tatami) => t.assigned_judge === user.id);
+          const assigned = list.filter((t: Tatami) => t.assigned_judge === user.id && t.tournament_status !== "completed");
           // Сортуємо активні турніри спочатку
           const sorted = [...assigned].sort((a, b) => {
             if (a.tournament_status === "active" && b.tournament_status !== "active") return -1;
@@ -116,6 +117,12 @@ export default function AppLayout() {
           <nav className="hidden md:flex items-center gap-6">
             <NavItem to="/tournaments">Турніри</NavItem>
             {isAuthenticated && <NavItem to="/athletes">Атлети</NavItem>}
+            {isAuthenticated && user?.role === "coach" && (
+              <NavItem to="/coach/dashboard">Панель тренера</NavItem>
+            )}
+            {isAuthenticated && (user?.role === "staff" || user?.role === "organizer") && (
+              <NavItem to="/staff">Панель секретаря</NavItem>
+            )}
             {judgeTatamis.length === 1 && (
               <NavItem to={`/operator/tournament/${judgeTatamis[0].tournament}/tatami/${judgeTatamis[0].number}`}>
                 Мій татамі ({judgeTatamis[0].number})
@@ -175,7 +182,17 @@ export default function AppLayout() {
                   <DropdownMenuSeparator />
                   {isOrganizer && (
                     <DropdownMenuItem asChild>
-                      <Link to="/tournaments"><Trophy className="w-4 h-4" />Мої турніри</Link>
+                      <Link to="/tournaments?my=true"><Trophy className="w-4 h-4" />Мої турніри</Link>
+                    </DropdownMenuItem>
+                  )}
+                  {user?.role === "coach" && (
+                    <DropdownMenuItem asChild>
+                      <Link to="/coach/dashboard"><Users className="w-4 h-4" />Панель тренера</Link>
+                    </DropdownMenuItem>
+                  )}
+                  {(user?.role === "staff" || user?.role === "organizer") && (
+                    <DropdownMenuItem asChild>
+                      <Link to="/staff"><Users className="w-4 h-4" />Панель секретаря</Link>
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem asChild>
@@ -218,6 +235,16 @@ export default function AppLayout() {
             {isAuthenticated && (
               <NavLink to="/athletes" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
                 Атлети
+              </NavLink>
+            )}
+            {isAuthenticated && user?.role === "coach" && (
+              <NavLink to="/coach/dashboard" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
+                Панель тренера
+              </NavLink>
+            )}
+            {isAuthenticated && (user?.role === "staff" || user?.role === "organizer") && (
+              <NavLink to="/staff" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
+                Панель секретаря
               </NavLink>
             )}
             {judgeTatamis.length === 1 && (

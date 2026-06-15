@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "./StatusBadge";
 import type { Category } from "@/types/api";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 interface CategoryCardProps {
   category: Category;
@@ -16,6 +17,9 @@ interface CategoryCardProps {
 }
 
 export function CategoryCard({ category, estimate }: Readonly<CategoryCardProps>) {
+  const { user } = useAuth();
+  const showFee = !!user && ["coach", "organizer", "staff", "judge", "admin"].includes(user.role);
+
   // Форматуємо час початку
   const timeStr = estimate
     ? new Date(estimate.startTime).toLocaleTimeString("uk-UA", {
@@ -72,6 +76,11 @@ export function CategoryCard({ category, estimate }: Readonly<CategoryCardProps>
             </CardTitle>
             <div className="flex items-center gap-2 shrink-0">
               {estimateBadge}
+              {category.is_team && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                  Команда
+                </span>
+              )}
               {!category.has_bracket && (
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
                   Сітка не згенерована
@@ -102,6 +111,11 @@ export function CategoryCard({ category, estimate }: Readonly<CategoryCardProps>
               <Users className="w-3 h-3" />
               {category.confirmed_registrations_count} учасників
             </span>
+            {showFee && (
+              <span className="flex items-center gap-1 font-semibold text-amber-500/90">
+                💵 {category.athlete_fee} UAH{category.is_team ? " / учасник" : ""}
+              </span>
+            )}
           </div>
         </CardContent>
       </Card>

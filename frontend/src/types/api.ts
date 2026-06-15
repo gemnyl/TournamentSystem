@@ -1,14 +1,16 @@
 // ─── Користувач та аутентифікація ───────────────────────────────────────────
 
-export type UserRole = "organizer" | "coach" | "judge" | "spectator" | "admin";
+export type UserRole = "organizer" | "coach" | "judge" | "spectator" | "admin" | "staff";
 
 export interface User {
   id: number;
   email: string;
   first_name: string;
   last_name: string;
+  patronymic?: string;
   role: UserRole;
   club?: { id: number; name: string; region: string } | null;
+  photo?: string | null;
 }
 
 // ─── Клуб ───────────────────────────────────────────────────────────────────
@@ -19,12 +21,24 @@ export interface Club {
   region: string;
 }
 
+// ─── Команда ─────────────────────────────────────────────────────────────────
+
+export interface Team {
+  id: number;
+  name: string;
+  club?: Club | null;
+  coach?: User | null;
+  athletes: Athlete[];
+  created_at: string;
+}
+
 // ─── Атлет ──────────────────────────────────────────────────────────────────
 
 export interface Athlete {
   id: number;
   first_name: string;
   last_name: string;
+  patronymic?: string;
   /** Повне ім'я: зручне поле для відображення */
   full_name?: string;
   birth_date: string; // ISO date
@@ -33,6 +47,9 @@ export interface Athlete {
   club?: { id: number; name: string; region: string } | null;
   club_id?: number;
   skill_level: string;
+  photo?: string | null;
+  coach?: User | null;
+  qr_token?: string;
 }
 
 // ─── Турнір ─────────────────────────────────────────────────────────────────
@@ -55,6 +72,19 @@ export interface Tournament {
   registration_end: string | null;
   completed_at: string | null;
   created_at: string;
+  online_payment_enabled?: boolean;
+  payment_details?: string;
+  base_registration_fee?: number;
+  base_team_registration_fee?: number | null;
+  ruleset_prices?: Record<string, number>;
+  ruleset_team_prices?: Record<string, number>;
+  commission_payer?: "buyer" | "organizer";
+
+  platform_fee_status?: "paid" | "unpaid";
+  platform_fee_amount?: number;
+  staff_members?: number[];
+  use_check_in?: boolean;
+  categories?: Category[];
 }
 
 // ─── Категорія ──────────────────────────────────────────────────────────────
@@ -84,6 +114,10 @@ export interface Category {
   two_third_places?: boolean;
   results_finalized?: boolean;
   judges_count?: number | null;
+  is_team: boolean;
+  team_size: number;
+  registration_fee: number | null;
+  athlete_fee: number;
 }
 
 // ─── Реєстрація ─────────────────────────────────────────────────────────────
@@ -94,13 +128,26 @@ export interface Registration {
   id: number;
   category: number;
   category_name: string;
-  athlete: Athlete;
+  tournament_id?: number;
+  tournament_title?: string;
+  fee?: number;
+  commission_payer?: "buyer" | "organizer";
+  athlete: Athlete | null;
   recorded_weight: number | null;
   status: RegistrationStatus;
   status_display: string;
   seed_number: number | null;
   place?: number | null;
   created_at: string;
+  team: Team | null;
+  payment_status: "unpaid" | "paid";
+  payment_method?: "online" | "offline";
+  checked_in: boolean;
+  coach_name_short?: string;
+  online_payment_enabled?: boolean;
+  payment_details?: string;
+  qr_token?: string;
+  tournament_status?: string;
 }
 
 // ─── Матч ───────────────────────────────────────────────────────────────────
@@ -125,6 +172,7 @@ export interface Match {
   status: MatchStatus;
   winner: number | null;            // Registration id
   win_method: WinMethod | null;
+  win_method_display?: string | null;
   next_match: number | null;        // Match id куди йде переможець
   started_at: string | null;
   completed_at: string | null;
@@ -140,6 +188,15 @@ export interface Match {
   flags_aka?: number | null;
   flags_ao?: number | null;
   show_timer: boolean;
+  parent_team_match?: number | null;
+  athlete_first?: Athlete | null;
+  athlete_second?: Athlete | null;
+  bout_index?: number | null;
+  category_is_team?: boolean;
+  team_bouts?: Match[];
+  is_team_bouts_supported?: boolean;
+  tournament_id?: number;
+  tournament_title?: string;
 }
 
 // ─── Рулсет ─────────────────────────────────────────────────────────────────
@@ -216,7 +273,9 @@ export interface RegisterData {
   password_confirm: string;
   first_name: string;
   last_name: string;
+  patronymic?: string;
   role: UserRole;
+  club_id?: number | null;
 }
 
 export interface CreateTournamentData {

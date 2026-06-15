@@ -114,6 +114,7 @@ class MatchAPITestCase(TestCase):
                     seed_number=idx,
                     recorded_weight=73.0,
                     status=Registration.Status.CONFIRMED,
+                    payment_status="paid",
                 )
             )
 
@@ -1046,4 +1047,226 @@ class TestMatchesExtraActions(MatchAPITestCase):
         response = self.client.post(
             f"/api/matches/{self.first_round_match.pk}/set_judges_count/", {}, format="json"
         )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_team_match_reset_and_score_recalculation(self):
+        # Create a team category
+        team_cat = Category.objects.create(
+            tournament=self.tournament,
+            name="Командне куміте",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=18,
+            max_age=35,
+            bracket_format=Category.BracketFormat.SINGLE_ELIMINATION,
+            is_team=True,
+            team_size=3,
+        )
+
+        from apps.athletes.models import Team
+
+        team1 = Team.objects.create(name="Команда 1", club=self.club_a, coach=self.coach)
+        team2 = Team.objects.create(name="Команда 2", club=self.club_b, coach=self.coach)
+
+        reg_team1 = Registration.objects.create(
+            category=team_cat, team=team1, status=Registration.Status.CONFIRMED
+        )
+        reg_team2 = Registration.objects.create(
+            category=team_cat, team=team2, status=Registration.Status.CONFIRMED
+        )
+
+        # Create athletes for teams
+        ath1 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_a,
+            first_name="A1",
+            last_name="L1",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=73.0,
+        )
+        ath2 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_b,
+            first_name="A2",
+            last_name="L2",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=73.0,
+        )
+        team1.athletes.add(ath1)
+        team2.athletes.add(ath2)
+
+        # Parent team match
+        parent_match = Match.objects.create(
+            category=team_cat,
+            round_index=1,
+            match_order=1,
+            reg_first=reg_team1,
+            reg_second=reg_team2,
+            status=Match.Status.SCHEDULED,
+        )
+
+        # Generating sub-bouts triggers on save in models.py because
+        # parent_team_match is None and reg_first/second exist
+        bouts = list(parent_match.team_bouts.all())
+        self.assertEqual(len(bouts), 3)
+
+        # Simulate finishing first 2 bouts in favor of AKA (team1)
+        bout1 = bouts[0]
+        bout2 = bouts[1]
+
+        # Complete bout1
+        bout1_svc = MatchService(bout1)
+        bout1_svc.set_winner("aka", Match.WinMethod.POINTS)
+        bout1.refresh_from_db()
+        self.assertEqual(bout1.status, Match.Status.COMPLETED)
+        self.assertEqual(bout1.winner, reg_team1)
+
+        parent_match.refresh_from_db()
+        # Parent match should have score 1 : 0 and status ongoing
+        self.assertEqual(parent_match.score_first, 1)
+        self.assertEqual(parent_match.score_second, 0)
+        self.assertEqual(parent_match.status, Match.Status.ONGOING)
+
+        # Complete bout2
+        bout2_svc = MatchService(bout2)
+        bout2_svc.set_winner("aka", Match.WinMethod.POINTS)
+        bout2.refresh_from_db()
+        self.assertEqual(bout2.status, Match.Status.COMPLETED)
+        self.assertEqual(bout2.winner, reg_team1)
+
+        # Since AKA has 2 wins out of 3, the parent match should be automatically completed
+        parent_match.refresh_from_db()
+        self.assertEqual(parent_match.score_first, 2)
+        self.assertEqual(parent_match.score_second, 0)
+        self.assertEqual(parent_match.status, Match.Status.COMPLETED)
+        self.assertEqual(parent_match.winner, reg_team1)
+
+        # Reset bout1
+        bout1_svc.reset_match()
+        bout1.refresh_from_db()
+        self.assertEqual(bout1.status, Match.Status.SCHEDULED)
+        self.assertIsNone(bout1.winner)
+
+        # Now, parent match should have score 1 : 0, winner None, status ongoing
+        parent_match.refresh_from_db()
+        self.assertEqual(parent_match.score_first, 1)
+        self.assertEqual(parent_match.score_second, 0)
+        self.assertIsNone(parent_match.winner)
+        self.assertEqual(parent_match.status, Match.Status.ONGOING)
+
+        # Resetting the parent match directly
+        parent_svc = MatchService(parent_match)
+        parent_svc.reset_match()
+
+        parent_match.refresh_from_db()
+        self.assertEqual(parent_match.status, Match.Status.SCHEDULED)
+        self.assertEqual(parent_match.score_first, 0)
+        self.assertEqual(parent_match.score_second, 0)
+        self.assertIsNone(parent_match.winner)
+
+        # All child bouts must also be reset to scheduled
+        for b in parent_match.team_bouts.all():
+            self.assertEqual(b.status, Match.Status.SCHEDULED)
+            self.assertEqual(b.score_first, 0)
+            self.assertEqual(b.score_second, 0)
+            self.assertIsNone(b.winner)
+
+    def test_matches_viewset_extra_endpoints(self):
+        """Тест додаткових ендпоінтів MatchViewSet.
+
+        (events, assign_bout_athletes, spawn_extra_bout)
+        """
+        self._login(self.judge)
+
+        # 1. GET events
+        # Створюємо подію для матчу
+        from apps.matches.models import MatchEvent
+
+        MatchEvent.objects.create(
+            match=self.first_round_match,
+            event_type="score",
+            sequence=1,
+            payload={"competitor": "aka", "point_type": "ippon", "match_time_ms": 5000},
+        )
+        response = self.client.get(f"/api/matches/{self.first_round_match.pk}/events/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["event_type"], "score")
+
+        # 2. POST spawn_extra_bout
+        # Створимо спочатку командний матч
+        team_cat = Category.objects.create(
+            tournament=self.tournament,
+            name="Командне куміте Тест",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=18,
+            max_age=35,
+            bracket_format=Category.BracketFormat.SINGLE_ELIMINATION,
+            is_team=True,
+            team_size=3,
+        )
+        parent_match = Match.objects.create(
+            category=team_cat,
+            round_index=1,
+            match_order=1,
+            status=Match.Status.SCHEDULED,
+        )
+        response = self.client.post(f"/api/matches/{parent_match.pk}/spawn_extra_bout/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Очікуємо 1 бій (оскільки дефолтні бої не створюються без реєстрацій)
+        parent_match.refresh_from_db()
+        self.assertEqual(parent_match.team_bouts.count(), 1)
+
+        # Спроба викликати spawn_extra_bout для не-командного матчу -> 400
+        response = self.client.post(f"/api/matches/{self.first_round_match.pk}/spawn_extra_bout/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 3. POST assign_bout_athletes
+        # Візьмемо один з боїв командного матчу
+        bout = parent_match.team_bouts.first()
+        from apps.athletes.models import Athlete
+
+        ath1 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_a,
+            first_name="Aka_Athlete",
+            last_name="Aka_L",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=70.0,
+        )
+        ath2 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_b,
+            first_name="Ao_Athlete",
+            last_name="Ao_L",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=70.0,
+        )
+        payload = {"athlete_first_id": ath1.id, "athlete_second_id": ath2.id}
+        url = f"/api/matches/{bout.pk}/assign_bout_athletes/"
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        bout.refresh_from_db()
+        self.assertEqual(bout.athlete_first, ath1)
+        self.assertEqual(bout.athlete_second, ath2)
+
+        # Скидання призначень спортсменів (None values)
+        payload_none = {"athlete_first_id": None, "athlete_second_id": None}
+        response = self.client.post(url, payload_none, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        bout.refresh_from_db()
+        self.assertIsNone(bout.athlete_first)
+        self.assertIsNone(bout.athlete_second)
+
+        # Спроба викликати для індивідуального бою не-командного матчу -> 400
+        url_non_team = f"/api/matches/{self.first_round_match.pk}/assign_bout_athletes/"
+        response = self.client.post(url_non_team, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Неіснуючі атлети -> 400
+        payload_invalid = {"athlete_first_id": 999999, "athlete_second_id": 888888}
+        response = self.client.post(url, payload_invalid, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

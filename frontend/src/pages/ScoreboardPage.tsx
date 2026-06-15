@@ -39,6 +39,7 @@ export default function ScoreboardPage() {
   );
 
   const tatamiRef = useRef<Tatami | null>(null);
+  const lastFetchedCatIdRef = useRef<number | null>(null);
   useEffect(() => {
     tatamiRef.current = tatami;
   }, [tatami]);
@@ -49,6 +50,10 @@ export default function ScoreboardPage() {
     const activeResultsCatName = targetTatami?.active_results_category_name;
 
     if (activeResultsCatId) {
+      if (lastFetchedCatIdRef.current === activeResultsCatId) {
+        return;
+      }
+      lastFetchedCatIdRef.current = activeResultsCatId;
       try {
         const res = await api.get<Record<string, unknown>[]>(`/categories/${activeResultsCatId}/results/`);
         setCategoryResults(res.data);
@@ -56,10 +61,12 @@ export default function ScoreboardPage() {
         setResultsCategoryName(nameVal ?? "");
       } catch {
         setCategoryResults([]);
+        lastFetchedCatIdRef.current = null;
       }
       return;
     }
 
+    lastFetchedCatIdRef.current = null;
     setCategoryResults([]);
     setResultsCategoryName("");
   // eslint-disable-next-line react-hooks/exhaustive-deps

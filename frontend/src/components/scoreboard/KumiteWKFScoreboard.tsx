@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn, formatRegistrationName, formatAthleteName } from "@/lib/utils";
 import { formatTimer } from "@/hooks/useTimer";
 import type { Match } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
@@ -71,7 +71,7 @@ interface KumiteWKFScoreboardProps {
   timerState: TimerState;
   remainingMs: number;
   tatamiNumber: string;
-  categoryResults?: { place?: number | null; id?: number; name?: string; club?: string; registration?: { id?: number; athlete?: { full_name?: string; club?: { name?: string; region?: string } } } }[];
+  categoryResults?: { place?: number | null; id?: number; name?: string; club?: string; registration?: { id?: number; athlete?: { full_name?: string; club?: { name?: string; region?: string } } | null; team?: { name?: string; club?: { name?: string; region?: string } } | null } }[];
   resultsCategoryName?: string;
 }
 
@@ -352,8 +352,12 @@ export default function KumiteWKFScoreboard({
             {/* RED / AKA (LEFT) */}
             <AthleteColumn
               side="aka"
-              name={aka?.athlete?.full_name ?? ""}
-              club={aka?.athlete?.club?.name ?? ""}
+              name={match.athlete_first
+                ? formatAthleteName(match.athlete_first)
+                : (formatRegistrationName(aka) || "")}
+              club={match.athlete_first
+                ? (aka?.team?.name ?? "")
+                : (aka?.athlete?.club?.name ?? aka?.team?.club?.name ?? "")}
               score={match.judging_mode === "flags" ? (match.flags_aka ?? 0) : match.score_first}
               warnings={match.warnings_first}
               hasSenshu={match.senshu === "aka"}
@@ -373,8 +377,12 @@ export default function KumiteWKFScoreboard({
             {/* BLUE / AO (RIGHT) */}
             <AthleteColumn
               side="ao"
-              name={ao?.athlete?.full_name ?? ""}
-              club={ao?.athlete?.club?.name ?? ""}
+              name={match.athlete_second
+                ? formatAthleteName(match.athlete_second)
+                : (formatRegistrationName(ao) || "")}
+              club={match.athlete_second
+                ? (ao?.team?.name ?? "")
+                : (ao?.athlete?.club?.name ?? ao?.team?.club?.name ?? "")}
               score={match.judging_mode === "flags" ? (match.flags_ao ?? 0) : match.score_second}
               warnings={match.warnings_second}
               hasSenshu={match.senshu === "ao"}
@@ -398,9 +406,9 @@ export default function KumiteWKFScoreboard({
             <div className="w-full max-w-3xl bg-zinc-950/60 border border-zinc-800/60 rounded-2xl p-6 shadow-2xl backdrop-blur-md space-y-3">
               {finalStandings.map((res) => {
                 const place = res.place;
-                const name = res.registration?.athlete?.full_name ?? res.name ?? "—";
-                const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
-                const region = res.registration?.athlete?.club?.region;
+                const name = formatRegistrationName(res.registration) || res.name || "—";
+                const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
+                const region = res.registration?.athlete?.club?.region ?? res.registration?.team?.club?.region;
 
                 const badgeClass = getStandingBadgeClass(place);
                 const rowClass = getStandingRowClass(place);

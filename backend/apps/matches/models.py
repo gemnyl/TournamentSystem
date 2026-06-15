@@ -51,6 +51,35 @@ class Match(models.Model):
         related_name="matches",
         verbose_name="Категорія",
     )
+    parent_team_match = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="team_bouts",
+        verbose_name="Командна зустріч",
+    )
+    athlete_first = models.ForeignKey(
+        "athletes.Athlete",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="matches_as_first_athlete",
+        verbose_name="Атлет Aka",
+    )
+    athlete_second = models.ForeignKey(
+        "athletes.Athlete",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="matches_as_second_athlete",
+        verbose_name="Атлет Ao",
+    )
+    bout_index = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Номер бою у зустрічі",
+    )
     reg_first = models.ForeignKey(
         REG_MODEL,
         on_delete=models.SET_NULL,
@@ -159,9 +188,82 @@ class Match(models.Model):
         ]
 
     def __str__(self):
-        f = self.reg_first.athlete.get_full_name() if self.reg_first else "TBD"
-        s = self.reg_second.athlete.get_full_name() if self.reg_second else "TBD"
-        return f"R{self.round_index}.{self.match_order}: {f} vs {s}"
+        f = (
+            self.athlete_first.get_full_name()
+            if self.athlete_first
+            else (
+                self.reg_first.athlete.get_full_name()
+                if (self.reg_first and self.reg_first.athlete)
+                else (
+                    self.reg_first.team.name if (self.reg_first and self.reg_first.team) else "TBD"
+                )
+            )
+        )
+        s = (
+            self.athlete_second.get_full_name()
+            if self.athlete_second
+            else (
+                self.reg_second.athlete.get_full_name()
+                if (self.reg_second and self.reg_second.athlete)
+                else (
+                    self.reg_second.team.name
+                    if (self.reg_second and self.reg_second.team)
+                    else "TBD"
+                )
+            )
+        )
+        suffix = f" (Бій {self.bout_index})" if self.parent_team_match else ""
+        return f"R{self.round_index}.{self.match_order}{suffix}: {f} vs {s}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+
+        # Автоматичне створення суб-боїв для командної категорії
+        if (
+            self.category.is_team
+            and not self.parent_team_match
+            and self.reg_first
+            and self.reg_second
+        ):
+            from apps.rulesets.registry import get_ruleset
+
+            try:
+                ruleset = get_ruleset(self.category.ruleset_key)
+                supports_bouts = ruleset.is_team_bouts_supported()
+            except KeyError:
+                supports_bouts = False
+
+            if supports_bouts and not self.team_bouts.exists():
+                team_size = getattr(self.category, "team_size", 3)
+                athletes_first = (
+                    list(self.reg_first.team.athletes.all().order_by("id"))
+                    if (self.reg_first and self.reg_first.team)
+                    else []
+                )
+                athletes_second = (
+                    list(self.reg_second.team.athletes.all().order_by("id"))
+                    if (self.reg_second and self.reg_second.team)
+                    else []
+                )
+
+                for idx in range(1, team_size + 1):
+                    ath_first = athletes_first[idx - 1] if idx - 1 < len(athletes_first) else None
+                    ath_second = (
+                        athletes_second[idx - 1] if idx - 1 < len(athletes_second) else None
+                    )
+                    Match.objects.create(
+                        category=self.category,
+                        parent_team_match=self,
+                        round_index=self.round_index,
+                        match_order=self.match_order,
+                        bout_index=idx,
+                        reg_first=self.reg_first,
+                        reg_second=self.reg_second,
+                        athlete_first=ath_first,
+                        athlete_second=ath_second,
+                        timer_duration_ms=self.timer_duration_ms,
+                        status=self.Status.SCHEDULED,
+                    )
 
     @transaction.atomic
     def set_winner(self, winner_registration, method=WinMethod.DECISION):
@@ -175,9 +277,53 @@ class Match(models.Model):
         from django.utils import timezone
 
         self.completed_at = timezone.now()
-        self.save(update_fields=["winner", "win_method", "status", "completed_at"])
 
-        self.advance_participant()
+        update_fields = ["winner", "win_method", "status", "completed_at"]
+        if self.category.is_team and not self.parent_team_match:
+            update_fields.extend(["score_first", "score_second"])
+        self.save(update_fields=update_fields)
+
+        # Якщо це суб-бой командного матчу:
+        if self.parent_team_match:
+            parent = self.parent_team_match
+            parent.refresh_from_db()
+            from apps.rulesets.registry import get_ruleset
+
+            try:
+                # Оновлюємо рахунок батьківського матчу (кількість виграних боїв)
+                completed_bouts = parent.team_bouts.filter(status=self.Status.COMPLETED)
+                parent.score_first = completed_bouts.filter(winner_id=parent.reg_first_id).count()
+                parent.score_second = completed_bouts.filter(winner_id=parent.reg_second_id).count()
+
+                ruleset = get_ruleset(parent.category.ruleset_key)
+                is_finished, parent_winner_id, parent_win_method = ruleset.determine_team_winner(
+                    parent
+                )
+                if is_finished and parent_winner_id:
+                    parent_winner_reg = (
+                        parent.reg_first
+                        if parent.reg_first_id == parent_winner_id
+                        else parent.reg_second
+                    )
+                    parent.set_winner(parent_winner_reg, parent_win_method)
+                else:
+                    has_active = parent.team_bouts.filter(
+                        status__in=[self.Status.ONGOING, self.Status.COMPLETED]
+                    ).exists()
+                    parent.status = self.Status.ONGOING if has_active else self.Status.SCHEDULED
+                    parent.save(update_fields=["score_first", "score_second", "status"])
+            except Exception as e:
+                print(f"Error determining team winner: {e}")
+
+            # Повертаємо поточний матч татамі назад на командну зустріч
+            if self.tatami and self.tatami.current_match_id == self.id:
+                self.tatami.current_match = parent
+                self.tatami.save(update_fields=["current_match"])
+                from apps.common.broadcast import broadcast_tatami_state
+
+                broadcast_tatami_state(self.tatami)
+        else:
+            self.advance_participant()
 
         from apps.common.broadcast import broadcast_match_update
 

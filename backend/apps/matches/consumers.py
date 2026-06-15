@@ -54,3 +54,37 @@ class MatchConsumer(AsyncWebsocketConsumer):
                 }
             )
         )
+
+
+class TournamentConsumer(AsyncWebsocketConsumer):
+    """Асинхронний WebSocket consumer для трансляції подій турніру (реєстрації тощо)."""
+
+    async def connect(self):
+        self.tournament_id = self.scope["url_route"]["kwargs"]["tournament_id"]
+        self.group_name = f"tournament_{self.tournament_id}"
+
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive(self, text_data=None, bytes_data=None):
+        if text_data:
+            try:
+                message = json.loads(text_data)
+                if message.get("type") == "ping":
+                    await self.send(json.dumps({"type": "pong"}))
+            except json.JSONDecodeError:
+                pass
+
+    async def registration_update(self, event):
+        """Отримує {type: 'registration.update', registration} і пересилає клієнту."""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "registration.update",
+                    "registration": event["registration"],
+                }
+            )
+        )

@@ -22,6 +22,12 @@ export function TournamentCard({ tournament }: TournamentCardProps) {
     }
   };
 
+  const isRegClosed = tournament.status === "registration" &&
+    tournament.registration_end &&
+    new Date() > new Date(tournament.registration_end);
+
+  const displayStatus = isRegClosed ? "registration_closed" : tournament.status;
+
   return (
     <Link to={`/tournaments/${tournament.id}`} className="block group">
       <Card className="transition-all duration-200 hover:border-amber-500/40 hover:shadow-lg hover:shadow-amber-500/5 group-hover:bg-card/80">
@@ -31,7 +37,7 @@ export function TournamentCard({ tournament }: TournamentCardProps) {
               {tournament.title}
             </CardTitle>
             <div className="flex items-center gap-2 shrink-0">
-              <StatusBadge status={tournament.status} type="tournament" />
+              <StatusBadge status={displayStatus} type="tournament" />
               <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-amber-500 transition-colors" />
             </div>
           </div>
