@@ -244,6 +244,34 @@ export default function AthletesPage() {
 
   const canManageAthletes = isCoach || user?.role === "admin";
 
+  const openCreateDialog = () => {
+    setEditingAthlete(null);
+    setSelectedFile(null);
+    reset({
+      first_name: "",
+      last_name: "",
+      patronymic: "",
+      date_of_birth: "",
+      gender: "M",
+      weight: 0,
+      skill_level: "",
+      club: 0,
+    });
+    setSelectedGender("M");
+    setSelectedClub("");
+    setDialogOpen(true);
+  };
+
+  const openDeleteConfirm = (athlete: Athlete) => {
+    setAthleteToDelete(athlete);
+    setDeleteConfirmOpen(true);
+  };
+
+  const getSubmitLabel = () => {
+    if (isCreating) return <Loader2 className="w-4 h-4 animate-spin" />;
+    return editingAthlete ? "Зберегти" : "Додати";
+  };
+
   return (
     <div className="container py-8 space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -252,26 +280,7 @@ export default function AthletesPage() {
           <p className="text-muted-foreground mt-1 text-sm">{athletes.length} атлетів у клубі</p>
         </div>
         {canManageAthletes && (
-          <Button
-            variant="sport"
-            onClick={() => {
-              setEditingAthlete(null);
-              setSelectedFile(null);
-              reset({
-                first_name: "",
-                last_name: "",
-                patronymic: "",
-                date_of_birth: "",
-                gender: "M",
-                weight: 0,
-                skill_level: "",
-                club: 0,
-              });
-              setSelectedGender("M");
-              setSelectedClub("");
-              setDialogOpen(true);
-            }}
-          >
+          <Button variant="sport" onClick={openCreateDialog}>
             <Plus className="w-4 h-4" /> Додати атлета
           </Button>
         )}
@@ -395,10 +404,7 @@ export default function AthletesPage() {
                           variant="ghost"
                           size="icon"
                           className="w-7 h-7 text-muted-foreground hover:text-destructive hover:bg-zinc-800"
-                          onClick={() => {
-                            setAthleteToDelete(a);
-                            setDeleteConfirmOpen(true);
-                          }}
+                          onClick={() => openDeleteConfirm(a)}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </Button>
@@ -468,10 +474,7 @@ export default function AthletesPage() {
                               variant="ghost"
                               size="icon"
                               className="w-8 h-8 text-muted-foreground hover:text-destructive hover:bg-zinc-800"
-                              onClick={() => {
-                                setAthleteToDelete(a);
-                                setDeleteConfirmOpen(true);
-                              }}
+                              onClick={() => openDeleteConfirm(a)}
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -636,7 +639,7 @@ export default function AthletesPage() {
                 Скасувати
               </Button>
               <Button type="submit" variant="sport" disabled={isCreating}>
-                {isCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingAthlete ? "Зберегти" : "Додати")}
+                {getSubmitLabel()}
               </Button>
             </DialogFooter>
           </form>

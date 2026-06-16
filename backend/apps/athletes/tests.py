@@ -479,3 +479,111 @@ class AthleteCreationTestCase(TestCase):
         response = self.client.delete(f"/api/teams/{team_id}/")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Team.objects.filter(id=team_id).exists())
+
+    def test_import_csv_decode_error(self):
+        """Тест помилки розкодування CSV (UnicodeDecodeError)."""
+        self.client.force_authenticate(user=self.coach_with_club)
+        from unittest.mock import patch
+
+        from django.core.files.uploadedfile import InMemoryUploadedFile
+
+        class DecodeErrorBytes:
+            def decode(self, encoding="utf-8", errors="strict"):
+                raise UnicodeDecodeError(encoding, b"", 0, 1, "mock error")
+
+        uploaded_file = SimpleUploadedFile(
+            "athletes.csv", b"dummy content", content_type="text/csv"
+        )
+
+        with patch.object(InMemoryUploadedFile, "read", return_value=DecodeErrorBytes()):
+            response = self.client.post(
+                "/api/athletes/import_athletes/", {"file": uploaded_file}, format="multipart"
+            )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Не вдалося розкодувати CSV файл", response.data["detail"])
+
+    def test_import_csv_parser_error(self):
+        """Тест помилки парсингу CSV (csv.Error)."""
+        self.client.force_authenticate(user=self.coach_with_club)
+        import csv
+
+        def mock_reader(*args, **kwargs):
+            class MockCsvReader:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    raise csv.Error("mock csv error")
+
+            return MockCsvReader()
+
+        orig_reader = csv.reader
+        csv.reader = mock_reader
+        try:
+            csv_content = (
+                "Прізвище,Ім'я,По батькові,Стать,Дата народження,Вага,Розряд\n"
+                "Іванов,Іван,Васильович,Ч,2010-05-15,55.0,1 кю\n"
+            )
+            uploaded_file = SimpleUploadedFile(
+                "athletes.csv", csv_content.encode("utf-8"), content_type="text/csv"
+            )
+            response = self.client.post(
+                "/api/athletes/import_athletes/", {"file": uploaded_file}, format="multipart"
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn("Помилка зчитування CSV", response.data["detail"])
+        finally:
+            csv.reader = orig_reader
+
+    def test_import_excel_parser_error(self):
+        """Тест помилки зчитування пошкодженого файлу Excel."""
+        self.client.force_authenticate(user=self.coach_with_club)
+        invalid_xlsx = b"corrupted xlsx file contents"
+        uploaded_file = SimpleUploadedFile(
+            "athletes.xlsx", invalid_xlsx, content_type="application/vnd.ms-excel"
+        )
+        response = self.client.post(
+            "/api/athletes/import_athletes/", {"file": uploaded_file}, format="multipart"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Помилка зчитування Excel", response.data["detail"])
+
+    def test_import_csv_empty_rows(self):
+        """Тест пропуску пустих рядків при імпорті CSV."""
+        self.client.force_authenticate(user=self.coach_with_club)
+        csv_content = (
+            "Прізвище,Ім'я,По батькові,Стать,Дата народження,Вага,Розряд\n"
+            "\n"
+            "   ,   ,  ,  ,  ,  ,  \n"
+            "Іванов,Іван,Васильович,Ч,2010-05-15,55.0,1 кю\n"
+        )
+        uploaded_file = SimpleUploadedFile(
+            "athletes.csv", csv_content.encode("utf-8"), content_type="text/csv"
+        )
+        response = self.client.post(
+            "/api/athletes/import_athletes/", {"file": uploaded_file}, format="multipart"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["imported_count"], 1)
+
+    def test_athlete_list_ordering_no_ordering_param(self):
+        """Тест отримання списку спортсменів без параметра ordering."""
+        self.client.force_authenticate(user=self.coach_with_club)
+        response = self.client.get("/api/athletes/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_import_csv_missing_all_required_columns(self):
+        """Тест відсутності всіх обов'язкових колонок."""
+        self.client.force_authenticate(user=self.coach_with_club)
+        csv_content = "НевідомаКолонка1,НевідомаКолонка2\nзначення1,значення2\n"
+        uploaded_file = SimpleUploadedFile(
+            "athletes.csv", csv_content.encode("utf-8"), content_type="text/csv"
+        )
+        response = self.client.post(
+            "/api/athletes/import_athletes/", {"file": uploaded_file}, format="multipart"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        detail = response.data["detail"]
+        self.assertIn("Ім'я", detail)
+        self.assertIn("Прізвище", detail)
+        self.assertIn("Стать", detail)

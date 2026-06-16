@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { useParams } from "react-router-dom";
@@ -69,6 +69,31 @@ function updateBracketRounds(rounds: Match[][], updatedMatch: Match): Match[][] 
   );
 }
 
+function getMedalLabel(placeVal: number | null | undefined): string {
+  if (placeVal === 1) return "🥇";
+  if (placeVal === 2) return "🥈";
+  if (placeVal === 3) return "🥉";
+  if (placeVal != null) return `${placeVal}`;
+  return "—";
+}
+
+function formatParticipant(reg: { team?: { name?: string } | null; athlete?: { first_name?: string; last_name?: string } | null } | null | undefined, ath: { first_name?: string; last_name?: string } | null | undefined): string {
+  if (!reg) return "TBD";
+  const teamName = (reg as { team?: { name?: string } | null }).team?.name;
+  const athleteName = formatAthleteName(ath as Parameters<typeof formatAthleteName>[0]) || formatAthleteName((reg as { athlete?: Parameters<typeof formatAthleteName>[0] | null }).athlete ?? null);
+  if (teamName && athleteName) return `${teamName} (${athleteName})`;
+  return formatRegistrationName(reg as Parameters<typeof formatRegistrationName>[0]) || "TBD";
+}
+
+function resolveRoundLabel(roundIdx: number, bracketFormat: string | undefined, totalRounds: number): string {
+  if (!bracketFormat || bracketFormat === "round_robin") return `Раунд ${roundIdx}`;
+  const fromEnd = totalRounds - roundIdx;
+  if (fromEnd === 0) return "Фінал";
+  if (fromEnd === 1) return "Півфінал";
+  if (fromEnd === 2) return "Чвертьфінал";
+  return `Раунд ${roundIdx}`;
+}
+
 interface OperatorResultRowProps {
   readonly res: CategoryResult;
   readonly resultsPersisted: boolean;
@@ -83,17 +108,7 @@ function OperatorResultRow({
   onOverrideChange,
 }: OperatorResultRowProps) {
   const placeVal = resultsPersisted ? res.registration?.place : placeOverride;
-
-  const medal =
-    placeVal === 1
-      ? "🥇"
-      : placeVal === 2
-      ? "🥈"
-      : placeVal === 3
-      ? "🥉"
-      : placeVal != null
-      ? `${placeVal}`
-      : "—";
+  const medal = getMedalLabel(placeVal);
 
   return (
     <div className="flex items-center justify-between p-3 text-xs hover:bg-muted/10 transition-colors">
@@ -647,13 +662,6 @@ export default function OperatorPanelPage() {
 
     const nextInQueue = nextUpcomingMatches[0];
     if (nextInQueue) {
-      const formatParticipant = (reg: any, ath: any) => {
-        if (!reg) return "TBD";
-        const teamName = reg.team?.name;
-        const athleteName = formatAthleteName(ath) || formatAthleteName(reg?.athlete);
-        if (teamName && athleteName) return `${teamName} (${athleteName})`;
-        return formatRegistrationName(reg) || "TBD";
-      };
       const nameFirst = formatParticipant(nextInQueue.reg_first, nextInQueue.athlete_first);
       const nameSecond = formatParticipant(nextInQueue.reg_second, nextInQueue.athlete_second);
       toast({ title: `Перехід до наступного бою: ${nameFirst} vs ${nameSecond}` });
@@ -888,19 +896,11 @@ export default function OperatorPanelPage() {
     const isCompleted = m.status === "completed";
     const isNext = m.id === nextMatchId;
 
-    const formatMatchParticipant = (reg: any, ath: any) => {
-      if (!reg) return "TBD";
-      const teamName = reg.team?.name;
-      const athleteName = formatAthleteName(ath) || formatAthleteName(reg?.athlete);
-      if (teamName && athleteName) return `${teamName} (${athleteName})`;
-      return formatRegistrationName(reg) || "TBD";
-    };
-
-    const aoName = formatMatchParticipant(m.reg_second, m.athlete_second);
-    const akaName = formatMatchParticipant(m.reg_first, m.athlete_first);
+    const aoName = formatParticipant(m.reg_second, m.athlete_second);
+    const akaName = formatParticipant(m.reg_first, m.athlete_first);
     const winnerReg = m.winner === m.reg_first?.id ? m.reg_first : m.reg_second;
     const winnerAthlete = m.winner === m.reg_first?.id ? m.athlete_first : m.athlete_second;
-    const winnerName = winnerReg ? formatMatchParticipant(winnerReg, winnerAthlete) : "";
+    const winnerName = winnerReg ? formatParticipant(winnerReg, winnerAthlete) : "";
 
     let matchItemClass: string;
     if (isCurrent) {
@@ -1486,13 +1486,6 @@ export default function OperatorPanelPage() {
               <div className="space-y-1.5">
                 {nextUpcomingMatches.map((nm, idx) => {
                   const isFirst = idx === 0;
-                  const formatParticipant = (reg: any, ath: any) => {
-                    if (!reg) return "TBD";
-                    const teamName = reg.team?.name;
-                    const athleteName = formatAthleteName(ath) || formatAthleteName(reg?.athlete);
-                    if (teamName && athleteName) return `${teamName} (${athleteName})`;
-                    return formatRegistrationName(reg) || "TBD";
-                  };
                   const ao = formatParticipant(nm.reg_second, nm.athlete_second);
                   const aka = formatParticipant(nm.reg_first, nm.athlete_first);
 
@@ -1661,20 +1654,10 @@ export default function OperatorPanelPage() {
                       roundsKeys.map((roundIdx) => {
                         const roundMatches = matchesByRound[roundIdx];
 
-                        // Format round labels
-                        let roundLabel = `Раунд ${roundIdx}`;
-                        if (selectedCategoryBracket && selectedCategoryBracket.format !== "round_robin") {
-                          const total = selectedCategoryBracket.rounds.length;
-                          const fromEnd = total - roundIdx;
-                          if (fromEnd === 0) roundLabel = "Фінал";
-                          else if (fromEnd === 1) roundLabel = "Півфінал";
-                          else if (fromEnd === 2) roundLabel = "Чвертьфінал";
-                        }
-
                         return (
                           <div key={roundIdx} className="space-y-1.5">
                             <p className="text-[9px] font-bold text-muted-foreground/80 uppercase tracking-widest px-1">
-                              {roundLabel}
+                              {resolveRoundLabel(roundIdx, selectedCategoryBracket?.format, selectedCategoryBracket?.rounds.length ?? 0)}
                             </p>
                             <div className="space-y-1.5">
                               {roundMatches.map((m) => renderMatchCard(m, currentMatch?.id === m.id))}
@@ -1949,10 +1932,10 @@ export default function OperatorPanelPage() {
                           const place = res.place;
                           const name = formatRegistrationName(res.registration) || res.name;
                           const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
-                          let badge = "🥇";
-                          if (place === 2) badge = "🥈";
+                        let badge = "🥇";
+                          if ((place ?? 0) > 3) badge = "🎖️";
                           else if (place === 3) badge = "🥉";
-                          else if ((place ?? 0) > 3) badge = "🎖️";
+                          else if (place === 2) badge = "🥈";
 
                           return (
                             <div key={res.registration?.id} className="flex items-center gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">

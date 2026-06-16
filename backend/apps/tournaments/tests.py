@@ -1667,3 +1667,72 @@ class CoachDashboardAndBillingIntegrationTest(TestCase):
         }
         response = self.client.post("/api/registrations/bulk_pay/", payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_registration_extra_scenarios(self):
+        # Setup another coach and team for deleting team registration
+        other_coach = User.objects.create_user(
+            email="other_del_coach@test.local",
+            password="testpassword123",  # NOSONAR
+            role=User.Role.COACH,
+            club=self.club,
+        )
+        from apps.athletes.models import Team
+
+        other_team = Team.objects.create(
+            name="Other Team",
+            coach=other_coach,
+            club=self.club,
+        )
+        team_reg = Registration.objects.create(
+            team=other_team,
+            category=self.ind_category,
+            status=Registration.Status.PENDING,
+        )
+
+        # 1. Coach list view: query registrations
+        # (hits filter Q(athlete__coach=user) | Q(team__coach=user))
+        self._login(self.coach)
+        response = self.client.get("/api/registrations/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # 2. Try to delete other coach's team registration
+        # -> should fail (403 Forbidden via permission class)
+        response = self.client.delete(f"/api/registrations/{team_reg.id}/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Create a registration for a completed tournament and try to edit/delete
+        completed_tournament = Tournament.objects.create(
+            organizer=self.organizer,
+            title="Completed Tournament Info",
+            sport_type="Карате WKF",
+            location="Київ",
+            start_date=timezone.now() - timedelta(days=10),
+            end_date=timezone.now() - timedelta(days=9),
+            status=Tournament.Status.COMPLETED,
+        )
+        completed_category = Category.objects.create(
+            tournament=completed_tournament,
+            name="Completed Category",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=18,
+            max_age=21,
+            ruleset_key="karate_wkf",
+        )
+        completed_reg = Registration.objects.create(
+            athlete=self.athlete1,
+            category=completed_category,
+            status=Registration.Status.CONFIRMED,
+        )
+
+        # Organizer logs in
+        self._login(self.organizer)
+
+        # Try to edit registration on completed tournament -> should fail
+        response = self.client.patch(
+            f"/api/registrations/{completed_reg.id}/", {"payment_status": "paid"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Try to delete registration on completed tournament -> should fail
+        response = self.client.delete(f"/api/registrations/{completed_reg.id}/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

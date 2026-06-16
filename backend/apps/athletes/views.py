@@ -9,30 +9,28 @@ from apps.athletes.serializers import AthleteSerializer, TeamSerializer
 
 
 class CaseInsensitiveOrderingFilter(filters.OrderingFilter):
+    def _get_field_ordering(self, field):
+        descending = field.startswith("-")
+        clean_field = field[1:] if descending else field
+
+        if clean_field not in ["last_name", "first_name"]:
+            return [field]
+
+        primary = clean_field
+        secondary = "first_name" if clean_field == "last_name" else "last_name"
+        if descending:
+            return [Lower(primary).desc(), Lower(secondary).desc()]
+        return [Lower(primary).asc(), Lower(secondary).asc()]
+
     def filter_queryset(self, request, queryset, view):
         ordering = self.get_ordering(request, queryset, view)
-        if ordering:
-            new_ordering = []
-            for field in ordering:
-                descending = field.startswith("-")
-                clean_field = field[1:] if descending else field
+        if not ordering:
+            return queryset
 
-                if clean_field == "last_name":
-                    if descending:
-                        new_ordering.extend([Lower("last_name").desc(), Lower("first_name").desc()])
-                    else:
-                        new_ordering.extend([Lower("last_name").asc(), Lower("first_name").asc()])
-                elif clean_field == "first_name":
-                    if descending:
-                        new_ordering.extend([Lower("first_name").desc(), Lower("last_name").desc()])
-                    else:
-                        new_ordering.extend([Lower("first_name").asc(), Lower("last_name").asc()])
-                elif clean_field in ["birth_date", "base_weight"]:
-                    new_ordering.append(field)
-                else:
-                    new_ordering.append(field)
-            return queryset.order_by(*new_ordering)
-        return queryset
+        new_ordering = []
+        for field in ordering:
+            new_ordering.extend(self._get_field_ordering(field))
+        return queryset.order_by(*new_ordering)
 
 
 class AthleteViewSet(viewsets.ModelViewSet):
@@ -356,8 +354,8 @@ class AthleteViewSet(viewsets.ModelViewSet):
                         errors.append(f"Рядок {row_num}: {str(e)}")
 
                 if errors:
-                    raise Exception("Validation failed")
-        except Exception:
+                    raise ValueError("Validation failed")
+        except ValueError:
             pass
 
         if errors:

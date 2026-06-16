@@ -30,6 +30,12 @@ interface CategoryStanding {
   };
 }
 
+function getMatchStatusLabel(isDone: boolean, isLive: boolean): string {
+  if (isDone) return "Завершено";
+  if (isLive) return "У процесі";
+  return "Очікує";
+}
+
 export default function BracketPage() {
   const { id } = useParams<{ id: string }>();
   const [bracket, setBracket]   = useState<BracketResponse | null>(null);
@@ -129,6 +135,87 @@ export default function BracketPage() {
       }
     }
   }, [category]);
+
+  const renderBoutsSection = () => {
+    if (loadingBouts) {
+      return (
+        <div className="flex justify-center py-6">
+          <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+        </div>
+      );
+    }
+
+    if (matchBouts.length === 0) {
+      return (
+        <div className="text-center py-6 text-zinc-500 text-xs border border-dashed border-zinc-800 rounded-xl">
+          Немає призначених поєдинків
+        </div>
+      );
+    }
+
+    const getBoutScore = (mode: string, flags: number | null | undefined, score: number | null | undefined) =>
+      mode === "flags" ? (flags ?? 0) : (score ?? 0);
+
+    return (
+      <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+        {matchBouts.map((bout) => {
+          const boutAka = bout.athlete_first ? formatAthleteName(bout.athlete_first) : "TBD";
+          const boutAo = bout.athlete_second ? formatAthleteName(bout.athlete_second) : "TBD";
+          const boutAkaClub = bout.athlete_first?.club?.name ?? "";
+          const boutAoClub = bout.athlete_second?.club?.name ?? "";
+
+          const boutIsDone = bout.status === "completed";
+          const boutIsLive = bout.status === "ongoing";
+
+          const boutScoreAka = getBoutScore(bout.judging_mode, bout.flags_aka, bout.score_first);
+          const boutScoreAo = getBoutScore(bout.judging_mode, bout.flags_ao, bout.score_second);
+
+          const boutAkaWon = boutIsDone && bout.winner === selectedMatch?.reg_first?.id;
+          const boutAoWon = boutIsDone && bout.winner === selectedMatch?.reg_second?.id;
+
+          return (
+            <div
+              key={bout.id}
+              className={cn(
+                "grid grid-cols-7 items-center gap-2 p-3 bg-zinc-950/30 border rounded-xl transition-all",
+                boutIsLive ? "border-amber-500 bg-amber-500/5 shadow-md shadow-amber-500/10" : "border-zinc-800/80 hover:border-zinc-800"
+              )}
+            >
+              {/* Bout Number */}
+              <div className="col-span-7 flex items-center justify-between text-[10px] text-zinc-400 font-bold uppercase tracking-wider pb-1 border-b border-zinc-800/40">
+                <span>Бій #{bout.bout_index}</span>
+                {boutIsLive && <span className="text-red-400 animate-pulse">LIVE</span>}
+                {boutIsDone && bout.win_method && <span className="text-zinc-500">{bout.win_method}</span>}
+              </div>
+
+              {/* Aka Athlete */}
+              <div className="col-span-3 text-left">
+                <div className="font-semibold text-xs whitespace-normal break-words text-red-300 flex items-center gap-1">
+                  {boutAkaWon && <span className="text-emerald-400 font-bold">✓</span>}
+                  {boutAka}
+                </div>
+                {boutAkaClub && <div className="text-[9px] text-zinc-500 whitespace-normal break-words">{boutAkaClub}</div>}
+              </div>
+
+              {/* Bout Score */}
+              <div className="col-span-1 text-center font-mono font-bold text-xs text-white">
+                {boutScoreAka} : {boutScoreAo}
+              </div>
+
+              {/* Ao Athlete */}
+              <div className="col-span-3 text-right">
+                <div className="font-semibold text-xs whitespace-normal break-words text-blue-300 flex items-center gap-1 justify-end">
+                  {boutAo}
+                  {boutAoWon && <span className="text-emerald-400 font-bold">✓</span>}
+                </div>
+                {boutAoClub && <div className="text-[9px] text-zinc-500 whitespace-normal break-words">{boutAoClub}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -295,7 +382,7 @@ export default function BracketPage() {
                       {selectedMatch.reg_first && selectedMatch.reg_second ? `${scoreFirst} : ${scoreSecond}` : "—"}
                     </div>
                     <div className="text-[9px] font-bold text-zinc-500 uppercase mt-1">
-                      {isDone ? "Завершено" : isLive ? "У процесі" : "Очікує"}
+                      {getMatchStatusLabel(isDone, isLive)}
                     </div>
                   </div>
 
@@ -324,73 +411,7 @@ export default function BracketPage() {
                       Склад індивідуальних боїв
                     </h4>
 
-                    {loadingBouts ? (
-                      <div className="flex justify-center py-6">
-                        <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
-                      </div>
-                    ) : matchBouts.length === 0 ? (
-                      <div className="text-center py-6 text-zinc-500 text-xs border border-dashed border-zinc-800 rounded-xl">
-                        Немає призначених поєдинків
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                        {matchBouts.map((bout) => {
-                          const boutAka = bout.athlete_first ? formatAthleteName(bout.athlete_first) : "TBD";
-                          const boutAo = bout.athlete_second ? formatAthleteName(bout.athlete_second) : "TBD";
-                          const boutAkaClub = bout.athlete_first?.club?.name ?? "";
-                          const boutAoClub = bout.athlete_second?.club?.name ?? "";
-
-                          const boutIsDone = bout.status === "completed";
-                          const boutIsLive = bout.status === "ongoing";
-
-                          const boutScoreAka = bout.judging_mode === "flags" ? (bout.flags_aka ?? 0) : (bout.score_first ?? 0);
-                          const boutScoreAo = bout.judging_mode === "flags" ? (bout.flags_ao ?? 0) : (bout.score_second ?? 0);
-
-                          const boutAkaWon = boutIsDone && bout.winner === selectedMatch.reg_first?.id;
-                          const boutAoWon = boutIsDone && bout.winner === selectedMatch.reg_second?.id;
-
-                          return (
-                            <div
-                              key={bout.id}
-                              className={cn(
-                                "grid grid-cols-7 items-center gap-2 p-3 bg-zinc-950/30 border rounded-xl transition-all",
-                                boutIsLive ? "border-amber-500 bg-amber-500/5 shadow-md shadow-amber-500/10" : "border-zinc-800/80 hover:border-zinc-800"
-                              )}
-                            >
-                              {/* Bout Number */}
-                              <div className="col-span-7 flex items-center justify-between text-[10px] text-zinc-400 font-bold uppercase tracking-wider pb-1 border-b border-zinc-800/40">
-                                <span>Бій #{bout.bout_index}</span>
-                                {boutIsLive && <span className="text-red-400 animate-pulse">LIVE</span>}
-                                {boutIsDone && bout.win_method && <span className="text-zinc-500">{bout.win_method}</span>}
-                              </div>
-
-                              {/* Aka Athlete */}
-                              <div className="col-span-3 text-left">
-                                <div className="font-semibold text-xs whitespace-normal break-words text-red-300 flex items-center gap-1">
-                                  {boutAkaWon && <span className="text-emerald-400 font-bold">✓</span>}
-                                  {boutAka}
-                                </div>
-                                {boutAkaClub && <div className="text-[9px] text-zinc-500 whitespace-normal break-words">{boutAkaClub}</div>}
-                              </div>
-
-                              {/* Bout Score */}
-                              <div className="col-span-1 text-center font-mono font-bold text-xs text-white">
-                                {boutScoreAka} : {boutScoreAo}
-                              </div>
-
-                              {/* Ao Athlete */}
-                              <div className="col-span-3 text-right">
-                                <div className="font-semibold text-xs whitespace-normal break-words text-blue-300 flex items-center gap-1 justify-end">
-                                  {boutAo}
-                                  {boutAoWon && <span className="text-emerald-400 font-bold">✓</span>}
-                                </div>
-                                {boutAoClub && <div className="text-[9px] text-zinc-500 whitespace-normal break-words">{boutAoClub}</div>}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                    {renderBoutsSection()}
                   </div>
                 )}
               </div>

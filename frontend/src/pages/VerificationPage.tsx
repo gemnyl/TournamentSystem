@@ -53,6 +53,158 @@ const REGIONS_MAP: Record<string, string> = {
   sevastopol: "м. Севастополь",
 };
 
+
+interface RegistrationCardProps {
+  reg: any;
+  isCurrentScanned: boolean;
+  isStaffOrOrganizer: boolean;
+  onWeighIn: (regId: number, currentWeight: string) => void;
+  onTogglePayment: (regId: number, currentStatus: string) => void;
+  onChangeStatus: (regId: number, newStatus: string) => void;
+}
+
+function RegistrationCard({
+  reg,
+  isCurrentScanned,
+  isStaffOrOrganizer,
+  onWeighIn,
+  onTogglePayment,
+  onChangeStatus,
+}: RegistrationCardProps) {
+  const isTeamRegCard = !!reg.team;
+  return (
+    <Card
+      className={`w-full bg-slate-900/60 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 ${
+        isCurrentScanned
+          ? "border-amber-500 shadow-amber-500/5 ring-1 ring-amber-500/30"
+          : "border-slate-800/80"
+      }`}
+    >
+      {isCurrentScanned && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 flex items-center justify-between">
+          <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">
+            Зчитаний бейдж / Scanned Pass
+          </span>
+          <span className="text-[10px] font-mono text-amber-500 font-bold">ID: {reg.id}</span>
+        </div>
+      )}
+      {!isCurrentScanned && (
+        <div className="bg-slate-950/40 border-b border-slate-900 px-4 py-1.5 flex items-center justify-between">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Категорія</span>
+          <span className="text-[10px] font-mono text-slate-400 font-bold">ID: {reg.id}</span>
+        </div>
+      )}
+      <CardContent className="p-5 space-y-4">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-black uppercase tracking-wide text-slate-400">{reg.tournament_title}</span>
+            {reg.tournament_status === "completed" && (
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                Завершено / Ended
+              </span>
+            )}
+          </div>
+          <div className="text-sm font-extrabold text-slate-100 leading-tight">{reg.category_name}</div>
+          {isTeamRegCard && (
+            <div className="mt-2 p-2.5 bg-blue-950/20 border border-blue-900/30 rounded-xl space-y-1">
+              <div className="text-[10px] font-black uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5" />
+                Групова категорія: {reg.team?.name}
+              </div>
+              {reg.team?.athletes && reg.team.athletes.length > 0 && (
+                <div className="text-[10px] text-slate-400 leading-normal">
+                  Склад: {reg.team.athletes.map((a: any) => `${a.last_name} ${a.first_name}`).join(", ")}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-3 gap-2 bg-slate-950/30 border border-slate-900/60 rounded-xl p-3 text-center">
+          <div>
+            <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">Зважування</div>
+            <span className="text-[10px] font-bold text-slate-200">
+              {isTeamRegCard ? "—" : reg.recorded_weight !== null ? `${reg.recorded_weight} кг` : "Не пройдено"}
+            </span>
+          </div>
+          <div>
+            <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">Оплата</div>
+            <span className={`font-bold uppercase text-[9px] px-1.5 py-0.5 rounded ${
+              reg.payment_status === "paid"
+                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                : "bg-red-500/10 text-red-400 border border-red-500/20"
+            }`}>
+              {reg.payment_status === "paid" ? "Сплачено" : "Борг"}
+            </span>
+          </div>
+          <div>
+            <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">Допуск</div>
+            <span className={`font-bold uppercase text-[9px] px-1.5 py-0.5 rounded ${
+              reg.status === "confirmed"
+                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                : reg.status === "withdrawn"
+                ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+            }`}>
+              {reg.status_display}
+            </span>
+          </div>
+        </div>
+        {isStaffOrOrganizer && (
+          <div className="border-t border-slate-900 pt-4 mt-1 space-y-3">
+            <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-blue-500" />
+              Адміністрування категорії
+            </div>
+            {reg.tournament_status === "completed" ? (
+              <div className="p-3 bg-slate-950/40 border border-slate-900 rounded-xl text-center text-xs text-slate-500 font-semibold">
+                🔒 Турнір завершено. Редагування даних заблоковано.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  {!isTeamRegCard && (
+                    <Button
+                      size="sm"
+                      onClick={() => onWeighIn(reg.id, reg.recorded_weight ? reg.recorded_weight.toString() : "")}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
+                    >
+                      <Scale className="w-3.5 h-3.5" /> Зважити
+                    </Button>
+                  )}
+                  {isTeamRegCard && (
+                    <Button
+                      size="sm"
+                      onClick={() => onChangeStatus(reg.id, reg.status === "confirmed" ? "pending" : "confirmed")}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      {reg.status === "confirmed" ? "Зняти допуск" : "Дати допуск"}
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onTogglePayment(reg.id, reg.payment_status)}
+                    className="border-slate-800 text-slate-300 hover:bg-slate-950 font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
+                  >
+                    <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
+                    {reg.payment_status === "paid" ? "Борг" : "Оплачено"}
+                  </Button>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" variant={reg.status === "pending" ? "default" : "outline"} onClick={() => onChangeStatus(reg.id, "pending")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Очікує</Button>
+                  <Button size="sm" variant={reg.status === "confirmed" ? "sport" : "outline"} onClick={() => onChangeStatus(reg.id, "confirmed")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Допущено</Button>
+                  <Button size="sm" variant={reg.status === "withdrawn" ? "destructive" : "outline"} onClick={() => onChangeStatus(reg.id, "withdrawn")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Знято</Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function VerificationPage() {
   const { type, token } = useParams<{ type: string; token: string }>();
   const navigate = useNavigate();
@@ -126,7 +278,7 @@ export default function VerificationPage() {
   const handleWeighInSubmit = async () => {
     if (!passData || !targetRegId) return;
     const weightVal = parseFloat(weighInValue);
-    if (isNaN(weightVal) || weightVal <= 0) {
+    if (Number.isNaN(weightVal) || weightVal <= 0) {
       toast({
         title: "Некоректна вага",
         description: "Будь ласка, введіть дійсне число більше нуля.",
@@ -365,196 +517,20 @@ export default function VerificationPage() {
               ) : (
                 displayedRegistrations.map((reg: any) => {
                   const isCurrentScanned = mainReg && mainReg.id === reg.id;
-                  const isTeamRegCard = !!reg.team;
                   return (
-                    <Card
+                    <RegistrationCard
                       key={reg.id}
-                      className={`w-full bg-slate-900/60 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 ${
-                        isCurrentScanned
-                          ? "border-amber-500 shadow-amber-500/5 ring-1 ring-amber-500/30"
-                          : "border-slate-800/80"
-                      }`}
-                    >
-                      {isCurrentScanned && (
-                        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 flex items-center justify-between">
-                          <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">
-                            Зчитаний бейдж / Scanned Pass
-                          </span>
-                          <span className="text-[10px] font-mono text-amber-500 font-bold">
-                            ID: {reg.id}
-                          </span>
-                        </div>
-                      )}
-                      {!isCurrentScanned && (
-                        <div className="bg-slate-950/40 border-b border-slate-900 px-4 py-1.5 flex items-center justify-between">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                            Категорія
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-400 font-bold">
-                            ID: {reg.id}
-                          </span>
-                        </div>
-                      )}
-
-                      <CardContent className="p-5 space-y-4">
-                        {/* Tournament & Category Info */}
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-black uppercase tracking-wide text-slate-400">
-                              {reg.tournament_title}
-                            </span>
-                            {reg.tournament_status === "completed" && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                                Завершено / Ended
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm font-extrabold text-slate-100 leading-tight">
-                            {reg.category_name}
-                          </div>
-                          {isTeamRegCard && (
-                            <div className="mt-2 p-2.5 bg-blue-950/20 border border-blue-900/30 rounded-xl space-y-1">
-                              <div className="text-[10px] font-black uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
-                                <Users className="w-3.5 h-3.5" />
-                                Групова категорія: {reg.team?.name}
-                              </div>
-                              {reg.team?.athletes && reg.team.athletes.length > 0 && (
-                                <div className="text-[10px] text-slate-400 leading-normal">
-                                  Склад: {reg.team.athletes.map((a: any) => `${a.last_name} ${a.first_name}`).join(", ")}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Status Badges Row */}
-                        <div className="grid grid-cols-3 gap-2 bg-slate-950/30 border border-slate-900/60 rounded-xl p-3 text-center">
-                          <div>
-                            <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">
-                              Зважування
-                            </div>
-                            <span className="text-[10px] font-bold text-slate-200">
-                              {isTeamRegCard
-                                ? "—"
-                                : reg.recorded_weight !== null
-                                ? `${reg.recorded_weight} кг`
-                                : "Не пройдено"}
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">
-                              Оплата
-                            </div>
-                            <span
-                              className={`font-bold uppercase text-[9px] px-1.5 py-0.5 rounded ${
-                                reg.payment_status === "paid"
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                  : "bg-red-500/10 text-red-400 border border-red-500/20"
-                              }`}
-                            >
-                              {reg.payment_status === "paid" ? "Сплачено" : "Борг"}
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">
-                              Допуск
-                            </div>
-                            <span
-                              className={`font-bold uppercase text-[9px] px-1.5 py-0.5 rounded ${
-                                reg.status === "confirmed"
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                  : reg.status === "withdrawn"
-                                  ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                                  : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                              }`}
-                            >
-                              {reg.status_display}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Actions Panel */}
-                        {isStaffOrOrganizer && (
-                          <div className="border-t border-slate-900 pt-4 mt-1 space-y-3">
-                            <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
-                              <ShieldAlert className="w-3.5 h-3.5 text-blue-500" />
-                              Адміністрування категорії
-                            </div>
-                            {reg.tournament_status === "completed" ? (
-                              <div className="p-3 bg-slate-950/40 border border-slate-900 rounded-xl text-center text-xs text-slate-500 font-semibold">
-                                🔒 Турнір завершено. Редагування даних заблоковано.
-                              </div>
-                            ) : (
-                              <>
-                                <div className="grid grid-cols-2 gap-2">
-                                  {!isTeamRegCard && (
-                                    <Button
-                                      size="sm"
-                                      onClick={() => {
-                                        setWeighInValue(reg.recorded_weight ? reg.recorded_weight.toString() : "");
-                                        setTargetRegId(reg.id);
-                                        setIsWeighInOpen(true);
-                                      }}
-                                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
-                                    >
-                                      <Scale className="w-3.5 h-3.5" />
-                                      Зважити
-                                    </Button>
-                                  )}
-                                  {isTeamRegCard && (
-                                    <Button
-                                      size="sm"
-                                      onClick={() => changeStatus(reg.id, reg.status === "confirmed" ? "pending" : "confirmed")}
-                                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
-                                    >
-                                      <UserCheck className="w-3.5 h-3.5" />
-                                      {reg.status === "confirmed" ? "Зняти допуск" : "Дати допуск"}
-                                    </Button>
-                                  )}
-
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => togglePaymentStatus(reg.id, reg.payment_status)}
-                                    className="border-slate-800 text-slate-300 hover:bg-slate-950 font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
-                                  >
-                                    <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
-                                    {reg.payment_status === "paid" ? "Борг" : "Оплачено"}
-                                  </Button>
-                                </div>
-
-                                <div className="flex gap-2 pt-1">
-                                  <Button
-                                    size="sm"
-                                    variant={reg.status === "pending" ? "default" : "outline"}
-                                    onClick={() => changeStatus(reg.id, "pending")}
-                                    className="text-[10px] font-bold py-1 flex-1 rounded-lg"
-                                  >
-                                    Очікує
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant={reg.status === "confirmed" ? "sport" : "outline"}
-                                    onClick={() => changeStatus(reg.id, "confirmed")}
-                                    className="text-[10px] font-bold py-1 flex-1 rounded-lg"
-                                  >
-                                    Допущено
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant={reg.status === "withdrawn" ? "destructive" : "outline"}
-                                    onClick={() => changeStatus(reg.id, "withdrawn")}
-                                    className="text-[10px] font-bold py-1 flex-1 rounded-lg"
-                                  >
-                                    Знято
-                                  </Button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                      reg={reg}
+                      isCurrentScanned={!!isCurrentScanned}
+                      isStaffOrOrganizer={isStaffOrOrganizer}
+                      onWeighIn={(regId, currentWeight) => {
+                        setWeighInValue(currentWeight);
+                        setTargetRegId(regId);
+                        setIsWeighInOpen(true);
+                      }}
+                      onTogglePayment={togglePaymentStatus}
+                      onChangeStatus={changeStatus}
+                    />
                   );
                 })
               )}
@@ -582,8 +558,9 @@ export default function VerificationPage() {
           </DialogHeader>
 
           <div className="py-4 space-y-2">
-            <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Фактична вага (кг):</label>
+            <label htmlFor="weigh-in-verification-input" className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Фактична вага (кг):</label>
             <Input
+              id="weigh-in-verification-input"
               type="number"
               step="0.01"
               value={weighInValue}

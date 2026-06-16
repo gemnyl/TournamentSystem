@@ -19,6 +19,17 @@ import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { BracketView } from "@/components/bracket/BracketView";
 import type { Tournament, Registration, Category, Match, BracketResponse } from "@/types/api";
 
+function getStatusBadgeClass(status: string) {
+  switch (status) {
+    case "confirmed":
+      return "bg-emerald-600/20 text-emerald-400 border border-emerald-500/20";
+    case "withdrawn":
+      return "bg-rose-600/20 text-rose-400 border border-rose-500/20";
+    default:
+      return "bg-yellow-600/20 text-yellow-400 border border-yellow-500/20";
+  }
+}
+
 export default function StaffDashboardPage() {
   useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -31,7 +42,7 @@ export default function StaffDashboardPage() {
   const initialPayment = searchParams.get("payment") || "all";
   const initialStatus = searchParams.get("status") || "all";
 
-  const [activeTab, setActiveTabState] = useState(initialTab);
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
@@ -44,10 +55,10 @@ export default function StaffDashboardPage() {
   const [isConnected, setIsConnected] = useState(false);
 
   // Filters
-  const [searchQuery, setSearchQueryState] = useState(initialSearch);
-  const [selectedCategoryFilter, setSelectedCategoryFilterState] = useState(initialCategory);
-  const [paymentFilter, setPaymentFilterState] = useState(initialPayment);
-  const [statusFilter, setStatusFilterState] = useState(initialStatus);
+  const [searchQuery, setSearchQuery] = useState(initialSearch);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(initialCategory);
+  const [paymentFilter, setPaymentFilter] = useState(initialPayment);
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
 
   // Weigh-in dialog
   const [weighInReg, setWeighInReg] = useState<Registration | null>(null);
@@ -66,28 +77,28 @@ export default function StaffDashboardPage() {
     }, { replace: true });
   };
 
-  const setActiveTab = (val: string) => {
-    setActiveTabState(val);
+  const handleActiveTabChange = (val: string) => {
+    setActiveTab(val);
     updateQueryParam("tab", val);
   };
 
-  const setSearchQuery = (val: string) => {
-    setSearchQueryState(val);
+  const handleSearchQueryChange = (val: string) => {
+    setSearchQuery(val);
     updateQueryParam("search", val);
   };
 
-  const setSelectedCategoryFilter = (val: string) => {
-    setSelectedCategoryFilterState(val);
+  const handleCategoryFilterChange = (val: string) => {
+    setSelectedCategoryFilter(val);
     updateQueryParam("category", val);
   };
 
-  const setPaymentFilter = (val: string) => {
-    setPaymentFilterState(val);
+  const handlePaymentFilterChange = (val: string) => {
+    setPaymentFilter(val);
     updateQueryParam("payment", val);
   };
 
-  const setStatusFilter = (val: string) => {
-    setStatusFilterState(val);
+  const handleStatusFilterChange = (val: string) => {
+    setStatusFilter(val);
     updateQueryParam("status", val);
   };
 
@@ -207,7 +218,7 @@ export default function StaffDashboardPage() {
     let weightVal = 0.0;
     if (!weighInReg.team) {
       weightVal = parseFloat(weighInValue);
-      if (isNaN(weightVal) || weightVal <= 0) {
+      if (Number.isNaN(weightVal) || weightVal <= 0) {
         toast({
           title: "Некоректна вага",
           description: "Будь ласка, введіть дійсне число більше нуля.",
@@ -410,7 +421,7 @@ export default function StaffDashboardPage() {
             </div>
 
             {/* Main Tabs */}
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
+            <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="w-full space-y-4">
               <TabsList className="bg-slate-900 border border-slate-800 p-1">
                 <TabsTrigger value="registrations" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
                   Реєстрації ({filteredRegistrations.length})
@@ -429,13 +440,13 @@ export default function StaffDashboardPage() {
                       placeholder="Пошук атлета чи клубу..."
                       className="pl-10 border-slate-800 bg-slate-950 text-slate-200 placeholder-slate-500"
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => handleSearchQueryChange(e.target.value)}
                     />
                   </div>
 
                   <div className="flex flex-wrap gap-3 w-full md:w-auto">
                     {/* Category Filter */}
-                    <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
+                    <Select value={selectedCategoryFilter} onValueChange={handleCategoryFilterChange}>
                       <SelectTrigger className="w-[180px] border-slate-800 bg-slate-950 text-slate-200">
                         <SelectValue placeholder="Категорія" />
                       </SelectTrigger>
@@ -450,7 +461,7 @@ export default function StaffDashboardPage() {
                     </Select>
 
                     {/* Status Filter */}
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <Select value={statusFilter} onValueChange={handleStatusFilterChange}>
                       <SelectTrigger className="w-[140px] border-slate-800 bg-slate-950 text-slate-200">
                         <SelectValue placeholder="Статус" />
                       </SelectTrigger>
@@ -463,7 +474,7 @@ export default function StaffDashboardPage() {
                     </Select>
 
                     {/* Payment Filter */}
-                    <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+                    <Select value={paymentFilter} onValueChange={handlePaymentFilterChange}>
                       <SelectTrigger className="w-[140px] border-slate-800 bg-slate-950 text-slate-200">
                         <SelectValue placeholder="Оплата" />
                       </SelectTrigger>
@@ -574,11 +585,7 @@ export default function StaffDashboardPage() {
                                 </Select>
                               </TableCell>
                               <TableCell className="text-center">
-                                <Badge className={
-                                  reg.status === "confirmed" ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/20" :
-                                  reg.status === "withdrawn" ? "bg-rose-600/20 text-rose-400 border border-rose-500/20" :
-                                  "bg-yellow-600/20 text-yellow-400 border border-yellow-500/20"
-                                }>
+                                <Badge className={getStatusBadgeClass(reg.status)}>
                                   {reg.status_display}
                                 </Badge>
                               </TableCell>
@@ -759,10 +766,11 @@ export default function StaffDashboardPage() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-300">
+                  <label htmlFor="weigh-in-weight-input" className="text-sm font-medium text-slate-300">
                     Фактична вага спортсмена (кг):
                   </label>
                   <Input
+                    id="weigh-in-weight-input"
                     type="number"
                     step="0.01"
                     placeholder="Наприклад: 73.4"
@@ -860,6 +868,20 @@ function CategoryBracketDialog({ categoryId, onClose }: CategoryBracketDialogPro
     },
   });
 
+  const renderBracketContent = () => {
+    if (isLoading && !bracket) {
+      return <Loader2 className="w-8 h-8 animate-spin text-amber-500" />;
+    }
+    if (bracket && bracket.rounds.length > 0) {
+      return (
+        <div className="w-full">
+          <BracketView bracket={bracket} />
+        </div>
+      );
+    }
+    return <p className="text-slate-500 text-sm">Сітка порожня або виникла помилка завантаження.</p>;
+  };
+
   return (
     <Dialog open={categoryId !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-slate-950 border-slate-800 text-slate-100">
@@ -874,15 +896,7 @@ function CategoryBracketDialog({ categoryId, onClose }: CategoryBracketDialogPro
         </DialogHeader>
 
         <div className="py-4 overflow-x-auto min-h-[300px] flex items-center justify-center">
-          {isLoading && !bracket ? (
-            <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
-          ) : bracket && bracket.rounds.length > 0 ? (
-            <div className="w-full">
-              <BracketView bracket={bracket} />
-            </div>
-          ) : (
-            <p className="text-slate-500 text-sm">Сітка порожня або виникла помилка завантаження.</p>
-          )}
+          {renderBracketContent()}
         </div>
       </DialogContent>
     </Dialog>

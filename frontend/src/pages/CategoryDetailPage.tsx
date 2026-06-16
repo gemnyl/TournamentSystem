@@ -27,6 +27,17 @@ import {
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
 
+function getWeightRange(minWeight: number | null, maxWeight: number | null): string {
+  if (minWeight !== null && maxWeight !== null) {
+    return `${minWeight}–${maxWeight} кг`;
+  } else if (minWeight !== null) {
+    return `від ${minWeight} кг`;
+  } else if (maxWeight !== null) {
+    return `до ${maxWeight} кг`;
+  }
+  return "без обмежень";
+}
+
 interface CategoryResultRowProps {
   res: CategoryResult;
   resultsPersisted: boolean;
@@ -272,10 +283,12 @@ export default function CategoryDetailPage() {
         api.get<Tournament>(`/tournaments/${catRes.data.tournament}/`),
         api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${catRes.data.tournament}`),
       ]);
-      setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as { results: Tatami[] }).results || []);
+      const tatamiData = tatamiRes.data;
+      setTatamis(Array.isArray(tatamiData) ? tatamiData : (tatamiData.results ?? []));
       setTournament(tournRes.data);
 
-      const allMatches = Array.isArray(matchRes.data) ? matchRes.data : matchRes.data.results || [];
+      const matchData = matchRes.data;
+      const allMatches = Array.isArray(matchData) ? matchData : (matchData.results ?? []);
       setMatches(allMatches);
 
       const categoryMatches = allMatches.filter((m: Match) => m.category === Number(id));
@@ -596,22 +609,28 @@ export default function CategoryDetailPage() {
         hour: "2-digit",
         minute: "2-digit",
       });
-      estimateBanner = !estimate.isTatamiActive ? (
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20 mt-3 w-fit">
-          <Clock className="w-3.5 h-3.5" />
-          Роботу татамі №{estimate.tatamiNumber} призупинено (черга не активна)
-        </div>
-      ) : estimate.isLive ? (
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-400 border border-green-500/20 mt-3 w-fit animate-pulse">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-          ТРИВАЄ ЗАРАЗ НА ТАТАМІ №{estimate.tatamiNumber}
-        </div>
-      ) : (
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 mt-3 w-fit">
-          <Clock className="w-3.5 h-3.5" />
-          Очікуваний час початку: {timeStr} {estimate.tatamiNumber ? `(Татамі №${estimate.tatamiNumber})` : ""}
-        </div>
-      );
+      if (!estimate.isTatamiActive) {
+        estimateBanner = (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20 mt-3 w-fit">
+            <Clock className="w-3.5 h-3.5" />
+            Роботу татамі №{estimate.tatamiNumber} призупинено (черга не активна)
+          </div>
+        );
+      } else if (estimate.isLive) {
+        estimateBanner = (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-400 border border-green-500/20 mt-3 w-fit animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+            ТРИВАЄ ЗАРАЗ НА ТАТАМІ №{estimate.tatamiNumber}
+          </div>
+        );
+      } else {
+        estimateBanner = (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 mt-3 w-fit">
+            <Clock className="w-3.5 h-3.5" />
+            Очікуваний час початку: {timeStr} {estimate.tatamiNumber ? `(Татамі №${estimate.tatamiNumber})` : ""}
+          </div>
+        );
+      }
     }
   }
 
@@ -630,15 +649,7 @@ export default function CategoryDetailPage() {
           </div>
           <div className="flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">
-              {category.confirmed_registrations_count} учасників · {
-                category.min_weight !== null && category.max_weight !== null
-                  ? `${category.min_weight}–${category.max_weight} кг`
-                  : category.min_weight !== null
-                  ? `від ${category.min_weight} кг`
-                  : category.max_weight !== null
-                  ? `до ${category.max_weight} кг`
-                  : "без обмежень за вагою"
-              } · {category.min_age}–{category.max_age} р.
+              {category.confirmed_registrations_count} учасників · {getWeightRange(category.min_weight, category.max_weight)} · {category.min_age}–{category.max_age} р.
             </p>
             {estimateBanner}
           </div>

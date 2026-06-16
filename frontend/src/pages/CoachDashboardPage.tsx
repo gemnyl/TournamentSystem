@@ -108,6 +108,8 @@ const athleteSchema = z.object({
   weight: z.coerce.number().min(20, "Мінімальна вага 20 кг").max(300, "Максимальна вага 300 кг"),
   skill_level: z.string().optional(),
 });
+
+
 type AthleteForm = z.infer<typeof athleteSchema>;
 
 export default function CoachDashboardPage() {
@@ -127,7 +129,7 @@ export default function CoachDashboardPage() {
   const initialLiveSearch = searchParams.get("liveSearch") || "";
 
   // Active sub-tab state
-  const [activeTab, setActiveTabState] = useState<"roster" | "register" | "billing" | "active" | "leaderboard" | "live">(initialTab);
+  const [activeTab, setActiveTab] = useState<"roster" | "register" | "billing" | "active" | "leaderboard" | "live">(initialTab);
 
   const updateQueryParam = (key: string, value: string) => {
     setSearchParams((prev) => {
@@ -141,8 +143,8 @@ export default function CoachDashboardPage() {
     }, { replace: true });
   };
 
-  const setActiveTab = (tab: "roster" | "register" | "billing" | "active" | "leaderboard" | "live") => {
-    setActiveTabState(tab);
+  const handleActiveTabChange = (tab: "roster" | "register" | "billing" | "active" | "leaderboard" | "live") => {
+    setActiveTab(tab);
     updateQueryParam("tab", tab);
   };
 
@@ -189,20 +191,20 @@ export default function CoachDashboardPage() {
   const [tournamentSearch, setTournamentSearch] = useState("");
 
   // Search, sort & registration states
-  const [rosterSearch, setRosterSearchState] = useState(initialRosterSearch);
-  const [rosterSort, setRosterSortState] = useState(initialRosterSort);
+  const [rosterSearch, setRosterSearch] = useState(initialRosterSearch);
+  const [rosterSort, setRosterSort] = useState(initialRosterSort);
   const [regSearch, setRegSearch] = useState("");
   const [teamSearch, setTeamSearch] = useState("");
   const [teamCategorySearch, setTeamCategorySearch] = useState("");
   const [showAutofillWarning, setShowAutofillWarning] = useState(false);
 
-  const setRosterSearch = (val: string) => {
-    setRosterSearchState(val);
+  const handleRosterSearchChange = (val: string) => {
+    setRosterSearch(val);
     updateQueryParam("rosterSearch", val);
   };
 
-  const setRosterSort = (val: string) => {
-    setRosterSortState(val);
+  const handleRosterSortChange = (val: string) => {
+    setRosterSort(val);
     updateQueryParam("rosterSort", val);
   };
 
@@ -214,6 +216,27 @@ export default function CoachDashboardPage() {
   const setRegSubTab = (val: "mass" | "team") => {
     setRegSubTabState(val);
     updateQueryParam("regSubTab", val);
+  };
+
+  const handleMassCategoryClick = (athleteId: number, categoryId: number, isSelected: boolean) => {
+    setMassSelectedCategories((prev) => {
+      const current = prev[athleteId] || [];
+      const updated = isSelected ? current.filter((id) => id !== categoryId) : [...current, categoryId];
+      return { ...prev, [athleteId]: updated };
+    });
+  };
+
+  const handleTeamAthleteCheckboxChange = (athlete: Athlete, checked: boolean, teamSize: number) => {
+    if (checked) {
+      setTeamRegAthletes((prev) => {
+        if (prev.length < teamSize) {
+          return [...prev, athlete];
+        }
+        return prev;
+      });
+    } else {
+      setTeamRegAthletes((prev) => prev.filter((a) => a.id !== athlete.id));
+    }
   };
 
   // Simplified team registration states (on-the-fly)
@@ -1700,22 +1723,22 @@ export default function CoachDashboardPage() {
 
         {/* Dashboard Navigation Tabs */}
         <div className="flex flex-wrap gap-2 bg-muted/30 p-1 rounded-xl border border-border/20">
-          <Button variant={activeTab === "roster" ? "sport" : "ghost"} size="sm" onClick={() => setActiveTab("roster")}>
+          <Button variant={activeTab === "roster" ? "sport" : "ghost"} size="sm" onClick={() => handleActiveTabChange("roster")}>
             <Users className="w-4 h-4 mr-1.5" /> Реєстр клубу
           </Button>
-          <Button variant={activeTab === "register" ? "sport" : "ghost"} size="sm" onClick={() => setActiveTab("register")}>
+          <Button variant={activeTab === "register" ? "sport" : "ghost"} size="sm" onClick={() => handleActiveTabChange("register")}>
             <Plus className="w-4 h-4 mr-1.5" /> Реєстрація на турнір
           </Button>
-          <Button variant={activeTab === "billing" ? "sport" : "ghost"} size="sm" onClick={() => setActiveTab("billing")}>
+          <Button variant={activeTab === "billing" ? "sport" : "ghost"} size="sm" onClick={() => handleActiveTabChange("billing")}>
             <CreditCard className="w-4 h-4 mr-1.5" /> Рахунки та оплата
           </Button>
-          <Button variant={activeTab === "active" ? "sport" : "ghost"} size="sm" onClick={() => setActiveTab("active")}>
+          <Button variant={activeTab === "active" ? "sport" : "ghost"} size="sm" onClick={() => handleActiveTabChange("active")}>
             <FileText className="w-4 h-4 mr-1.5" /> Активні заявки
           </Button>
-          <Button variant={activeTab === "leaderboard" ? "sport" : "ghost"} size="sm" onClick={() => setActiveTab("leaderboard")}>
+          <Button variant={activeTab === "leaderboard" ? "sport" : "ghost"} size="sm" onClick={() => handleActiveTabChange("leaderboard")}>
             <Trophy className="w-4 h-4 mr-1.5" /> Рейтинг заліку
           </Button>
-          <Button variant={activeTab === "live" ? "sport" : "ghost"} size="sm" onClick={() => setActiveTab("live")}>
+          <Button variant={activeTab === "live" ? "sport" : "ghost"} size="sm" onClick={() => handleActiveTabChange("live")}>
             <Activity className="w-4 h-4 mr-1.5" /> Live Scoreboard
           </Button>
         </div>
@@ -1802,12 +1825,12 @@ export default function CoachDashboardPage() {
                 placeholder="Пошук спортсмена..."
                 className="pl-9 h-9 rounded-xl text-xs"
                 value={rosterSearch}
-                onChange={(e) => setRosterSearch(e.target.value)}
+                onChange={(e) => handleRosterSearchChange(e.target.value)}
               />
             </div>
             <div className="flex items-center gap-2 w-full md:w-auto shrink-0 justify-end">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Сортувати за:</span>
-              <Select value={rosterSort} onValueChange={setRosterSort}>
+              <Select value={rosterSort} onValueChange={handleRosterSortChange}>
                 <SelectTrigger className="w-full md:w-[180px] h-9 rounded-xl text-xs">
                   <SelectValue placeholder="Сортування" />
                 </SelectTrigger>
@@ -2280,19 +2303,7 @@ export default function CoachDashboardPage() {
                                               key={c.id}
                                               type="button"
                                               disabled={isRegistered}
-                                              onClick={() => {
-                                                if (isSelected) {
-                                                  setMassSelectedCategories((prev) => ({
-                                                    ...prev,
-                                                    [ath.id]: (prev[ath.id] || []).filter((id) => id !== c.id),
-                                                  }));
-                                                } else {
-                                                  setMassSelectedCategories((prev) => ({
-                                                    ...prev,
-                                                    [ath.id]: [...(prev[ath.id] || []), c.id],
-                                                  }));
-                                                }
-                                              }}
+                                              onClick={() => handleMassCategoryClick(ath.id, c.id, isSelected)}
                                               className={cn(
                                                 "text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all",
                                                 isRegistered
@@ -2490,15 +2501,7 @@ export default function CoachDashboardPage() {
                                             type="checkbox"
                                             checked={isChecked}
                                             disabled={!isChecked && isLimitReached}
-                                            onChange={(e) => {
-                                              if (e.target.checked) {
-                                                if (teamRegAthleteIds.length < selectedCategory.team_size) {
-                                                  setTeamRegAthletes((prev) => [...prev, ath]);
-                                                }
-                                              } else {
-                                                setTeamRegAthletes((prev) => prev.filter((a) => a.id !== ath.id));
-                                              }
-                                            }}
+                                            onChange={(e) => handleTeamAthleteCheckboxChange(ath, e.target.checked, selectedCategory.team_size)}
                                             className="rounded text-amber-500 focus:ring-amber-500 focus:ring-opacity-50"
                                           />
                                           <div className="flex flex-col">

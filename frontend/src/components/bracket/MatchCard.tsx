@@ -79,7 +79,19 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
   if (isTeam && !compact) {
     return (
       <div
+        role={onClick && !isBye ? "button" : undefined}
+        tabIndex={onClick && !isBye ? 0 : undefined}
         onClick={handleClick}
+        onKeyDown={
+          onClick && !isBye
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleClick();
+                }
+              }
+            : undefined
+        }
         className={cn(
           "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-between",
           !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
@@ -184,7 +196,19 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
   if (isTeam && compact) {
     return (
       <div
+        role={onClick && !isBye ? "button" : undefined}
+        tabIndex={onClick && !isBye ? 0 : undefined}
         onClick={handleClick}
+        onKeyDown={
+          onClick && !isBye
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleClick();
+                }
+              }
+            : undefined
+        }
         className={cn(
           "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-center",
           !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
@@ -220,7 +244,19 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
 
   return (
     <div
+      role={onClick && !isBye ? "button" : undefined}
+      tabIndex={onClick && !isBye ? 0 : undefined}
       onClick={handleClick}
+      onKeyDown={
+        onClick && !isBye
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleClick();
+              }
+            }
+          : undefined
+      }
       className={cn(
         "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm",
         "min-h-[108px] py-1.5 h-auto flex flex-col justify-center",

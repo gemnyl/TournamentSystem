@@ -188,30 +188,8 @@ class Match(models.Model):
         ]
 
     def __str__(self):
-        f = (
-            self.athlete_first.get_full_name()
-            if self.athlete_first
-            else (
-                self.reg_first.athlete.get_full_name()
-                if (self.reg_first and self.reg_first.athlete)
-                else (
-                    self.reg_first.team.name if (self.reg_first and self.reg_first.team) else "TBD"
-                )
-            )
-        )
-        s = (
-            self.athlete_second.get_full_name()
-            if self.athlete_second
-            else (
-                self.reg_second.athlete.get_full_name()
-                if (self.reg_second and self.reg_second.athlete)
-                else (
-                    self.reg_second.team.name
-                    if (self.reg_second and self.reg_second.team)
-                    else "TBD"
-                )
-            )
-        )
+        f = self._get_competitor_name(self.athlete_first, self.reg_first)
+        s = self._get_competitor_name(self.athlete_second, self.reg_second)
         suffix = f" (Бій {self.bout_index})" if self.parent_team_match else ""
         return f"R{self.round_index}.{self.match_order}{suffix}: {f} vs {s}"
 
@@ -264,6 +242,15 @@ class Match(models.Model):
                         timer_duration_ms=self.timer_duration_ms,
                         status=self.Status.SCHEDULED,
                     )
+
+    def _get_competitor_name(self, athlete, reg):
+        if athlete:
+            return athlete.get_full_name()
+        if reg and reg.athlete:
+            return reg.athlete.get_full_name()
+        if reg and reg.team:
+            return reg.team.name
+        return "TBD"
 
     @transaction.atomic
     def set_winner(self, winner_registration, method=WinMethod.DECISION):

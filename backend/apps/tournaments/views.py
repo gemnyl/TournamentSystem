@@ -841,7 +841,9 @@ class RegistrationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        registrations = Registration.objects.filter(id__in=registration_ids)
+        registrations = Registration.objects.filter(id__in=registration_ids).select_related(
+            "athlete__coach", "team__coach"
+        )
         if registrations.filter(category__tournament__status="completed").exists():
             return Response(
                 {"detail": "Недійсний запит: один або кілька турнірів завершено."},

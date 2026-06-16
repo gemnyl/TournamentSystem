@@ -391,7 +391,7 @@ export default function TournamentDetailPage() {
       if (data.ruleset_prices) {
         Object.entries(data.ruleset_prices).forEach(([key, val]) => {
           const num = Number(val);
-          if (!isNaN(num) && num > 0) {
+          if (!Number.isNaN(num) && num > 0) {
             cleanedPrices[key] = num;
           }
         });
@@ -400,7 +400,7 @@ export default function TournamentDetailPage() {
       if (data.ruleset_team_prices) {
         Object.entries(data.ruleset_team_prices).forEach(([key, val]) => {
           const num = Number(val);
-          if (!isNaN(num) && num > 0) {
+          if (!Number.isNaN(num) && num > 0) {
             cleanedTeamPrices[key] = num;
           }
         });
@@ -449,7 +449,8 @@ export default function TournamentDetailPage() {
       toast({ title: "Розподіл завершено!", description: res.data.detail });
       fetchAll();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Помилка розподілу по татамі";
+      const errObj = err as { response?: { data?: { detail?: string } } };
+      const msg = errObj?.response?.data?.detail ?? "Помилка розподілу по татамі";
       toast({ title: msg, variant: "destructive" });
     } finally {
       setDistributingTatamis(false);
