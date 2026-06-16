@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search, Loader2, Check, ShieldAlert, Award, Calendar, MapPin, RefreshCw } from "lucide-react";
@@ -28,6 +28,12 @@ function getStatusBadgeClass(status: string) {
     default:
       return "bg-yellow-600/20 text-yellow-400 border border-yellow-500/20";
   }
+}
+
+function getCategoryStatusLabel(status: string) {
+  if (status === "registration") return "Реєстрація";
+  if (status === "active") return "Активний";
+  return "Завершено";
 }
 
 export default function StaffDashboardPage() {
@@ -121,6 +127,7 @@ export default function StaffDashboardPage() {
           handleSelectTournament(preselected || list[0]);
         }
       } catch (err) {
+        console.error("fetchTournaments error:", err);
         toast({
           title: "Помилка завантаження",
           description: "Не вдалося завантажити призначені турніри.",
@@ -179,12 +186,12 @@ export default function StaffDashboardPage() {
       // Live update the updated registration
       setRegistrations((prev) => {
         const index = prev.findIndex((r) => r.id === updatedReg.id);
-        if (index !== -1) {
+        if (index === -1) {
+          return [updatedReg, ...prev];
+        } else {
           const next = [...prev];
           next[index] = updatedReg;
           return next;
-        } else {
-          return [updatedReg, ...prev];
         }
       });
     },
@@ -215,9 +222,9 @@ export default function StaffDashboardPage() {
   // Submit weigh-in weight
   const handleWeighInSubmit = async () => {
     if (!weighInReg) return;
-    let weightVal = 0.0;
+    let weightVal = 0;
     if (!weighInReg.team) {
-      weightVal = parseFloat(weighInValue);
+      weightVal = Number.parseFloat(weighInValue);
       if (Number.isNaN(weightVal) || weightVal <= 0) {
         toast({
           title: "Некоректна вага",
@@ -273,7 +280,7 @@ export default function StaffDashboardPage() {
     try {
       const res = await api.patch<Registration>(`/registrations/${regId}/`, {
         payment_status: newPaymentStatus,
-        payment_method: newPaymentStatus === "paid" ? "offline" : "offline",
+        payment_method: "offline",
       });
       setRegistrations((prev) =>
         prev.map((r) => (r.id === regId ? res.data : r))
@@ -299,7 +306,7 @@ export default function StaffDashboardPage() {
         clubName.includes(searchQuery.toLowerCase());
 
       const matchesCategory =
-        selectedCategoryFilter === "all" || (reg.category && reg.category.toString() === selectedCategoryFilter);
+        selectedCategoryFilter === "all" || reg.category?.toString() === selectedCategoryFilter;
 
       const matchesPayment =
         paymentFilter === "all" || reg.payment_status === paymentFilter;
@@ -310,6 +317,159 @@ export default function StaffDashboardPage() {
       return matchesSearch && matchesCategory && matchesPayment && matchesStatus;
     });
   }, [registrations, searchQuery, selectedCategoryFilter, paymentFilter, statusFilter]);
+
+  const renderRegistrationsTableBody = () => {
+    if (!selectedTournament) return null;
+    const colSpanCount = selectedTournament.use_check_in ? 9 : 8;
+    if (loadingData) {
+      return (
+        <TableRow>
+          <TableCell colSpan={colSpanCount} className="h-40 text-center">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-500" />
+            <p className="mt-2 text-sm text-slate-400">Завантаження реєстрацій...</p>
+          </TableCell>
+        </TableRow>
+      );
+    }
+    if (filteredRegistrations.length === 0) {
+      return (
+        <TableRow>
+          <TableCell colSpan={colSpanCount} className="h-32 text-center text-slate-500">
+            Не знайдено реєстрацій за вказаними фільтрами.
+          </TableCell>
+        </TableRow>
+      );
+    }
+    return filteredRegistrations.map((reg) => {
+      const athlete = reg.athlete;
+      return (
+        <TableRow key={reg.id} className="hover:bg-slate-900/40 border-b border-slate-800/80 transition-colors">
+          <TableCell className="font-medium">
+            <div>
+              {athlete ? (
+                <>
+                  <p className="text-sm text-slate-200">
+                    {athlete.last_name} {athlete.first_name}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {athlete.gender === "male" ? "Чоловік" : "Жінка"},{" "}
+                    {new Date().getFullYear() - new Date(athlete.birth_date).getFullYear()} років,{" "}
+                    Вага: {athlete.base_weight} кг
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-slate-200 font-semibold">{formatRegistrationName(reg)} (Команда)</p>
+              )}
+            </div>
+          </TableCell>
+          <TableCell className="text-sm text-slate-300">
+            {formatRegistrationClub(reg) || "Особисто"}
+          </TableCell>
+          <TableCell className="text-sm text-slate-300">
+            {reg.coach_name_short || "—"}
+          </TableCell>
+          <TableCell className="text-xs text-slate-400 max-w-[180px] truncate">
+            {reg.category_name}
+          </TableCell>
+          <TableCell>
+            {reg.recorded_weight ? (
+              <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                {reg.recorded_weight} кг
+              </Badge>
+            ) : (
+              <span className="text-xs text-slate-500">—</span>
+            )}
+          </TableCell>
+          <TableCell className="text-center">
+            <Select
+              value={reg.payment_status}
+              onValueChange={(val) => handlePaymentStatusChange(reg.id, val)}
+            >
+              <SelectTrigger className="h-7 w-[100px] mx-auto text-xs border-slate-800 bg-slate-950 text-slate-300">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
+                <SelectItem value="paid">Сплачено</SelectItem>
+                <SelectItem value="unpaid">Борг</SelectItem>
+              </SelectContent>
+            </Select>
+          </TableCell>
+          <TableCell className="text-center">
+            <Badge className={getStatusBadgeClass(reg.status)}>
+              {reg.status_display}
+            </Badge>
+          </TableCell>
+
+          {selectedTournament.use_check_in && (
+            <TableCell className="text-center">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleCheckInToggle(reg)}
+                className={`h-7 px-2.5 text-xs rounded transition-all ${
+                  reg.checked_in
+                    ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
+                    : "bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800"
+                }`}
+              >
+                {reg.checked_in ? (
+                  <>
+                    <Check className="mr-1 h-3.5 w-3.5" />
+                    Прибув
+                  </>
+                ) : (
+                  "Немає"
+                )}
+              </Button>
+            </TableCell>
+          )}
+
+          <TableCell className="text-right">
+            <div className="flex justify-end gap-1.5">
+              {/* Confirm Weigh-in Button */}
+              {selectedTournament.weigh_in_required && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 border border-indigo-500/10"
+                  onClick={() => openWeighIn(reg)}
+                >
+                  {reg.team ? "Допуск" : "Зважити"}
+                </Button>
+              )}
+
+              {/* Quick Status Select */}
+              <Select
+                value={reg.status}
+                onValueChange={(val) => handleStatusChange(reg.id, val)}
+              >
+                <SelectTrigger className="h-7 w-[120px] text-xs border-slate-800 bg-slate-950 text-slate-300">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
+                  <SelectItem value="pending">Очікує</SelectItem>
+                  <SelectItem value="confirmed">Підтверджено</SelectItem>
+                  <SelectItem value="withdrawn">Знято</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </TableCell>
+        </TableRow>
+      );
+    });
+  };
+
+  const getWeighInSubmitContent = () => {
+    if (submittingWeighIn) {
+      return (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Збереження...
+        </>
+      );
+    }
+    return weighInReg?.team ? "Допустити команду" : "Підтвердити";
+  };
 
   if (loadingTournaments) {
     return (
@@ -516,138 +676,7 @@ export default function StaffDashboardPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {loadingData ? (
-                        <TableRow>
-                          <TableCell colSpan={selectedTournament.use_check_in ? 9 : 8} className="h-40 text-center">
-                            <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-500" />
-                            <p className="mt-2 text-sm text-slate-400">Завантаження реєстрацій...</p>
-                          </TableCell>
-                        </TableRow>
-                      ) : filteredRegistrations.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={selectedTournament.use_check_in ? 9 : 8} className="h-32 text-center text-slate-500">
-                            Не знайдено реєстрацій за вказаними фільтрами.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filteredRegistrations.map((reg) => {
-                          const athlete = reg.athlete;
-                          return (
-                            <TableRow key={reg.id} className="hover:bg-slate-900/40 border-b border-slate-800/80 transition-colors">
-                              <TableCell className="font-medium">
-                                <div>
-                                  {athlete ? (
-                                    <>
-                                      <p className="text-sm text-slate-200">
-                                        {athlete.last_name} {athlete.first_name}
-                                      </p>
-                                      <p className="text-xs text-slate-400">
-                                        {athlete.gender === "male" ? "Чоловік" : "Жінка"},{" "}
-                                        {new Date().getFullYear() - new Date(athlete.birth_date).getFullYear()} років,{" "}
-                                        Вага: {athlete.base_weight} кг
-                                      </p>
-                                    </>
-                                  ) : (
-                                    <p className="text-sm text-slate-200 font-semibold">{formatRegistrationName(reg)} (Команда)</p>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm text-slate-300">
-                                {formatRegistrationClub(reg) || "Особисто"}
-                              </TableCell>
-                              <TableCell className="text-sm text-slate-300">
-                                {reg.coach_name_short || "—"}
-                              </TableCell>
-                              <TableCell className="text-xs text-slate-400 max-w-[180px] truncate">
-                                {reg.category_name}
-                              </TableCell>
-                              <TableCell>
-                                {reg.recorded_weight ? (
-                                  <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                    {reg.recorded_weight} кг
-                                  </Badge>
-                                ) : (
-                                  <span className="text-xs text-slate-500">—</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <Select
-                                  value={reg.payment_status}
-                                  onValueChange={(val) => handlePaymentStatusChange(reg.id, val)}
-                                >
-                                  <SelectTrigger className="h-7 w-[100px] mx-auto text-xs border-slate-800 bg-slate-950 text-slate-300">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
-                                    <SelectItem value="paid">Сплачено</SelectItem>
-                                    <SelectItem value="unpaid">Борг</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <Badge className={getStatusBadgeClass(reg.status)}>
-                                  {reg.status_display}
-                                </Badge>
-                              </TableCell>
-
-                              {selectedTournament.use_check_in && (
-                                <TableCell className="text-center">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleCheckInToggle(reg)}
-                                    className={`h-7 px-2.5 text-xs rounded transition-all ${
-                                      reg.checked_in
-                                        ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
-                                        : "bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800"
-                                    }`}
-                                  >
-                                    {reg.checked_in ? (
-                                      <>
-                                        <Check className="mr-1 h-3.5 w-3.5" />
-                                        Прибув
-                                      </>
-                                    ) : (
-                                      "Немає"
-                                    )}
-                                  </Button>
-                                </TableCell>
-                              )}
-
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-1.5">
-                                  {/* Confirm Weigh-in Button */}
-                                  {selectedTournament.weigh_in_required && (
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      className="h-7 text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 border border-indigo-500/10"
-                                      onClick={() => openWeighIn(reg)}
-                                    >
-                                      {reg.team ? "Допуск" : "Зважити"}
-                                    </Button>
-                                  )}
-
-                                  {/* Quick Status Select */}
-                                  <Select
-                                    value={reg.status}
-                                    onValueChange={(val) => handleStatusChange(reg.id, val)}
-                                  >
-                                    <SelectTrigger className="h-7 w-[120px] text-xs border-slate-800 bg-slate-950 text-slate-300">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent className="bg-slate-950 border-slate-800 text-slate-300">
-                                      <SelectItem value="pending">Очікує</SelectItem>
-                                      <SelectItem value="confirmed">Підтверджено</SelectItem>
-                                      <SelectItem value="withdrawn">Знято</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
+                      {renderRegistrationsTableBody()}
                     </TableBody>
                   </Table>
                 </Card>
@@ -671,7 +700,7 @@ export default function StaffDashboardPage() {
                         <div className="flex justify-between">
                           <span>Статус:</span>
                           <Badge className="bg-slate-800 text-slate-300 hover:bg-slate-800/80">
-                            {cat.status === "registration" ? "Реєстрація" : cat.status === "active" ? "Активний" : "Завершено"}
+                            {getCategoryStatusLabel(cat.status)}
                           </Badge>
                         </div>
                         <div className="flex justify-between">
@@ -788,14 +817,7 @@ export default function StaffDashboardPage() {
               Скасувати
             </Button>
             <Button onClick={handleWeighInSubmit} disabled={submittingWeighIn} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-              {submittingWeighIn ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Збереження...
-                </>
-              ) : (
-                weighInReg?.team ? "Допустити команду" : "Підтвердити"
-              )}
+              {getWeighInSubmitContent()}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -811,12 +833,18 @@ export default function StaffDashboardPage() {
   );
 }
 
+function updateMatchInRounds(rounds: Match[][], updatedMatch: Match): Match[][] {
+  return rounds.map(round =>
+    round.map(m => m.id === updatedMatch.id ? updatedMatch : m)
+  );
+}
+
 interface CategoryBracketDialogProps {
   categoryId: number;
   onClose: () => void;
 }
 
-function CategoryBracketDialog({ categoryId, onClose }: CategoryBracketDialogProps) {
+function CategoryBracketDialog({ categoryId, onClose }: Readonly<CategoryBracketDialogProps>) {
   const [bracket, setBracket] = useState<BracketResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -855,9 +883,7 @@ function CategoryBracketDialog({ categoryId, onClose }: CategoryBracketDialogPro
       if (!prev) return prev;
       return {
         ...prev,
-        rounds: prev.rounds.map((round) =>
-          round.map((m) => m.id === updatedMatch.id ? updatedMatch : m)
-        ),
+        rounds: updateMatchInRounds(prev.rounds, updatedMatch),
       };
     });
   }, [fetchBracket]);
@@ -883,7 +909,7 @@ function CategoryBracketDialog({ categoryId, onClose }: CategoryBracketDialogPro
   };
 
   return (
-    <Dialog open={categoryId !== null} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-slate-950 border-slate-800 text-slate-100">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold flex items-center gap-2">

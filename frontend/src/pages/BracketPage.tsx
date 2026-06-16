@@ -95,12 +95,7 @@ export default function BracketPage() {
       };
     });
 
-    setSelectedMatch((prev) => {
-      if (prev && prev.id === updatedMatch.id) {
-        return updatedMatch;
-      }
-      return prev;
-    });
+    setSelectedMatch((prev) => (prev?.id === updatedMatch.id ? updatedMatch : prev));
 
     setMatchBouts((prevBouts) => {
       return prevBouts.map((b) => b.id === updatedMatch.id ? updatedMatch : b);
@@ -108,7 +103,9 @@ export default function BracketPage() {
 
     // Silently re-fetch standings to keep standings updated in real-time
     api.get<CategoryStanding[]>(`/categories/${id}/results/`).then((res) => {
-      setStandings(res.data.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)));
+      const filtered = res.data.filter(r => r.place != null && (r.place ?? 0) > 0);
+      const sortedStandings = [...filtered].sort((a, b) => (a.place ?? 0) - (b.place ?? 0));
+      setStandings(sortedStandings);
     }).catch(() => {});
   }, [id, fetchBracket]);
 
@@ -127,7 +124,8 @@ export default function BracketPage() {
       setMatchBouts([]);
       try {
         const res = await api.get<Match[]>(`/matches/?parent_team_match=${match.id}`);
-        setMatchBouts(res.data.sort((a, b) => (a.bout_index ?? 0) - (b.bout_index ?? 0)));
+        const sortedBouts = [...res.data].sort((a, b) => (a.bout_index ?? 0) - (b.bout_index ?? 0));
+        setMatchBouts(sortedBouts);
       } catch (err) {
         console.error("Error fetching team sub-bouts", err);
       } finally {

@@ -63,6 +63,70 @@ interface RegistrationCardProps {
   onChangeStatus: (regId: number, newStatus: string) => void;
 }
 
+interface RegistrationCardActionsProps {
+  readonly reg: any;
+  readonly isTeamRegCard: boolean;
+  readonly onWeighIn: (regId: number, currentWeight: string) => void;
+  readonly onTogglePayment: (regId: number, currentStatus: string) => void;
+  readonly onChangeStatus: (regId: number, newStatus: string) => void;
+}
+
+function RegistrationCardActions({
+  reg,
+  isTeamRegCard,
+  onWeighIn,
+  onTogglePayment,
+  onChangeStatus,
+}: Readonly<RegistrationCardActionsProps>) {
+  if (reg.tournament_status === "completed") {
+    return (
+      <div className="p-3 bg-slate-950/40 border border-slate-900 rounded-xl text-center text-xs text-slate-500 font-semibold">
+        🔒 Турнір завершено. Редагування даних заблоковано.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        {!isTeamRegCard && (
+          <Button
+            size="sm"
+            onClick={() => onWeighIn(reg.id, reg.recorded_weight ? reg.recorded_weight.toString() : "")}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
+          >
+            <Scale className="w-3.5 h-3.5" /> Зважити
+          </Button>
+        )}
+        {isTeamRegCard && (
+          <Button
+            size="sm"
+            onClick={() => onChangeStatus(reg.id, reg.status === "confirmed" ? "pending" : "confirmed")}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            {reg.status === "confirmed" ? "Зняти допуск" : "Дати допуск"}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onTogglePayment(reg.id, reg.payment_status)}
+          className="border-slate-800 text-slate-300 hover:bg-slate-950 font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
+        >
+          <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
+          {reg.payment_status === "paid" ? "Борг" : "Оплачено"}
+        </Button>
+      </div>
+      <div className="flex gap-2 pt-1">
+        <Button size="sm" variant={reg.status === "pending" ? "default" : "outline"} onClick={() => onChangeStatus(reg.id, "pending")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Очікує</Button>
+        <Button size="sm" variant={reg.status === "confirmed" ? "sport" : "outline"} onClick={() => onChangeStatus(reg.id, "confirmed")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Допущено</Button>
+        <Button size="sm" variant={reg.status === "withdrawn" ? "destructive" : "outline"} onClick={() => onChangeStatus(reg.id, "withdrawn")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Знято</Button>
+      </div>
+    </>
+  );
+}
+
 function RegistrationCard({
   reg,
   isCurrentScanned,
@@ -70,8 +134,23 @@ function RegistrationCard({
   onWeighIn,
   onTogglePayment,
   onChangeStatus,
-}: RegistrationCardProps) {
+}: Readonly<RegistrationCardProps>) {
   const isTeamRegCard = !!reg.team;
+
+  let weighInStatusText = "Не пройдено";
+  if (isTeamRegCard) {
+    weighInStatusText = "—";
+  } else if (reg.recorded_weight !== null) {
+    weighInStatusText = `${reg.recorded_weight} кг`;
+  }
+
+  let statusBadgeClass = "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+  if (reg.status === "confirmed") {
+    statusBadgeClass = "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+  } else if (reg.status === "withdrawn") {
+    statusBadgeClass = "bg-rose-500/10 text-rose-400 border border-rose-500/20";
+  }
+
   return (
     <Card
       className={`w-full bg-slate-900/60 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 ${
@@ -123,7 +202,7 @@ function RegistrationCard({
           <div>
             <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">Зважування</div>
             <span className="text-[10px] font-bold text-slate-200">
-              {isTeamRegCard ? "—" : reg.recorded_weight !== null ? `${reg.recorded_weight} кг` : "Не пройдено"}
+              {weighInStatusText}
             </span>
           </div>
           <div>
@@ -138,13 +217,7 @@ function RegistrationCard({
           </div>
           <div>
             <div className="text-[8px] font-black uppercase tracking-wider text-slate-500 mb-1">Допуск</div>
-            <span className={`font-bold uppercase text-[9px] px-1.5 py-0.5 rounded ${
-              reg.status === "confirmed"
-                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                : reg.status === "withdrawn"
-                ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-            }`}>
+            <span className={`font-bold uppercase text-[9px] px-1.5 py-0.5 rounded ${statusBadgeClass}`}>
               {reg.status_display}
             </span>
           </div>
@@ -155,54 +228,49 @@ function RegistrationCard({
               <ShieldAlert className="w-3.5 h-3.5 text-blue-500" />
               Адміністрування категорії
             </div>
-            {reg.tournament_status === "completed" ? (
-              <div className="p-3 bg-slate-950/40 border border-slate-900 rounded-xl text-center text-xs text-slate-500 font-semibold">
-                🔒 Турнір завершено. Редагування даних заблоковано.
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  {!isTeamRegCard && (
-                    <Button
-                      size="sm"
-                      onClick={() => onWeighIn(reg.id, reg.recorded_weight ? reg.recorded_weight.toString() : "")}
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
-                    >
-                      <Scale className="w-3.5 h-3.5" /> Зважити
-                    </Button>
-                  )}
-                  {isTeamRegCard && (
-                    <Button
-                      size="sm"
-                      onClick={() => onChangeStatus(reg.id, reg.status === "confirmed" ? "pending" : "confirmed")}
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
-                    >
-                      <UserCheck className="w-3.5 h-3.5" />
-                      {reg.status === "confirmed" ? "Зняти допуск" : "Дати допуск"}
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onTogglePayment(reg.id, reg.payment_status)}
-                    className="border-slate-800 text-slate-300 hover:bg-slate-950 font-bold flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl"
-                  >
-                    <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
-                    {reg.payment_status === "paid" ? "Борг" : "Оплачено"}
-                  </Button>
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <Button size="sm" variant={reg.status === "pending" ? "default" : "outline"} onClick={() => onChangeStatus(reg.id, "pending")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Очікує</Button>
-                  <Button size="sm" variant={reg.status === "confirmed" ? "sport" : "outline"} onClick={() => onChangeStatus(reg.id, "confirmed")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Допущено</Button>
-                  <Button size="sm" variant={reg.status === "withdrawn" ? "destructive" : "outline"} onClick={() => onChangeStatus(reg.id, "withdrawn")} className="text-[10px] font-bold py-1 flex-1 rounded-lg">Знято</Button>
-                </div>
-              </>
-            )}
+            <RegistrationCardActions
+              reg={reg}
+              isTeamRegCard={isTeamRegCard}
+              onWeighIn={onWeighIn}
+              onTogglePayment={onTogglePayment}
+              onChangeStatus={onChangeStatus}
+            />
           </div>
         )}
       </CardContent>
     </Card>
   );
+}
+
+function getUpdatedPassData(passData: any, type: string | undefined, updatedReg: any): any {
+  if (!passData) return null;
+
+  if (type === "registration") {
+    if (passData.id === updatedReg.id) {
+      return {
+        ...updatedReg,
+        other_registrations: passData.other_registrations
+      };
+    }
+    if (passData.other_registrations) {
+      return {
+        ...passData,
+        other_registrations: passData.other_registrations.map((r: any) =>
+          r.id === updatedReg.id ? updatedReg : r
+        )
+      };
+    }
+  } else if (type === "athlete") {
+    if (passData.registrations) {
+      return {
+        ...passData,
+        registrations: passData.registrations.map((r: any) =>
+          r.id === updatedReg.id ? updatedReg : r
+        )
+      };
+    }
+  }
+  return passData;
 }
 
 export default function VerificationPage() {
@@ -247,32 +315,7 @@ export default function VerificationPage() {
   const [targetRegId, setTargetRegId] = useState<number | null>(null);
 
   const updateRegistrationInState = (updatedReg: any) => {
-    if (!passData) return;
-
-    if (type === "registration") {
-      if (passData.id === updatedReg.id) {
-        setPassData({
-          ...updatedReg,
-          other_registrations: passData.other_registrations
-        });
-      } else if (passData.other_registrations) {
-        setPassData({
-          ...passData,
-          other_registrations: passData.other_registrations.map((r: any) =>
-            r.id === updatedReg.id ? updatedReg : r
-          )
-        });
-      }
-    } else if (type === "athlete") {
-      if (passData.registrations) {
-        setPassData({
-          ...passData,
-          registrations: passData.registrations.map((r: any) =>
-            r.id === updatedReg.id ? updatedReg : r
-          )
-        });
-      }
-    }
+    setPassData((prev: any) => getUpdatedPassData(prev, type, updatedReg));
   };
 
   const handleWeighInSubmit = async () => {

@@ -124,3 +124,15 @@ export function formatRegistrationClub(reg: any): string {
   if (!reg) return "";
   return reg.athlete?.club?.name ?? reg.team?.club?.name ?? "";
 }
+
+// Calculate age as of reference date
+export function getAgeAsOf(birthDateStr: string, refDateStr: string): number {
+  const birthDate = new Date(birthDateStr);
+  const refDate = new Date(refDateStr);
+  let age = refDate.getFullYear() - birthDate.getFullYear();
+  const m = refDate.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && refDate.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}

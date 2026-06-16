@@ -389,18 +389,22 @@ export default function OperatorPanelPage() {
 
   const getAvailableAkaAthletes = useCallback((_boutId?: number) => {
     const allAthletes = currentMatch?.reg_first?.team?.athletes ?? [];
-    const assignedIds = subBouts
-      .filter(b => b.athlete_first)
-      .map(b => b.athlete_first?.id);
-    return allAthletes.filter(a => !assignedIds.includes(a.id));
+    const assignedIds = new Set(
+      subBouts
+        .filter(b => b.athlete_first)
+        .map(b => b.athlete_first?.id)
+    );
+    return allAthletes.filter(a => !assignedIds.has(a.id));
   }, [currentMatch, subBouts]);
 
   const getAvailableAoAthletes = useCallback((_boutId?: number) => {
     const allAthletes = currentMatch?.reg_second?.team?.athletes ?? [];
-    const assignedIds = subBouts
-      .filter(b => b.athlete_second)
-      .map(b => b.athlete_second?.id);
-    return allAthletes.filter(a => !assignedIds.includes(a.id));
+    const assignedIds = new Set(
+      subBouts
+        .filter(b => b.athlete_second)
+        .map(b => b.athlete_second?.id)
+    );
+    return allAthletes.filter(a => !assignedIds.has(a.id));
   }, [currentMatch, subBouts]);
 
   const handleSaveLineup = async (boutId: number) => {

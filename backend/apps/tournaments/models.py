@@ -143,7 +143,7 @@ class Tournament(models.Model):
             category__tournament=self,
             payment_status="paid",
             payment_method="offline",
-        )
+        ).select_related("category")
         total_offline_debt = 0
         for reg in offline_regs:
             price = reg.category.get_athlete_fee()
@@ -416,25 +416,24 @@ class Registration(models.Model):
         participant = self.athlete if self.athlete else self.team
         return f"{participant} → {self.category.name}"
 
+    def _validate_category_participant(self):
+        if self.category.is_team:
+            if not self.team:
+                raise ValidationError("Для групової категорії необхідно вказати команду.")
+            if self.athlete:
+                raise ValidationError(
+                    "Для групової категорії не можна вказувати окремого спортсмена."
+                )
+        else:
+            if not self.athlete:
+                raise ValidationError("Для індивідуальної категорії необхідно вказати спортсмена.")
+            if self.team:
+                raise ValidationError("Для індивідуальної категорії не можна вказувати команду.")
+
     def clean(self):
         super().clean()
         if self.category:
-            if self.category.is_team:
-                if not self.team:
-                    raise ValidationError("Для групової категорії необхідно вказати команду.")
-                if self.athlete:
-                    raise ValidationError(
-                        "Для групової категорії не можна вказувати окремого спортсмена."
-                    )
-            else:
-                if not self.athlete:
-                    raise ValidationError(
-                        "Для індивідуальної категорії необхідно вказати спортсмена."
-                    )
-                if self.team:
-                    raise ValidationError(
-                        "Для індивідуальної категорії не можна вказувати команду."
-                    )
+            self._validate_category_participant()
 
     def confirm_weigh_in(self, weight):
         """Підтверджує зважування та переводить заявку у статус CONFIRMED."""

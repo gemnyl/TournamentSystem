@@ -59,6 +59,40 @@ class BaseRuleSet(ABC):
         """Чи підтримує цей рулсет індивідуальні поєдинки в межах команд."""
         return self.judging_mode == JudgingMode.POINTS
 
+    def _calculate_wins(self, completed_bouts, reg_first_id, reg_second_id) -> tuple[int, int]:
+        wins_first = sum(1 for b in completed_bouts if b.winner_id == reg_first_id)
+        wins_second = sum(1 for b in completed_bouts if b.winner_id == reg_second_id)
+        return wins_first, wins_second
+
+    def _determine_winner_from_regular_bouts(
+        self, team_match, regular_bouts, wins_first, wins_second, total_slots
+    ) -> tuple[bool, int | None, str]:
+        reg_first_id = team_match.reg_first_id
+        reg_second_id = team_match.reg_second_id
+
+        if wins_first > wins_second:
+            return True, reg_first_id, "points"
+        if wins_second > wins_first:
+            return True, reg_second_id, "points"
+
+        # Нічия за кількістю виграних боїв -> Порівнюємо сумарні технічні бали
+        points_first = sum(b.score_first for b in regular_bouts)
+        points_second = sum(b.score_second for b in regular_bouts)
+
+        if points_first > points_second:
+            return True, reg_first_id, "points"
+        if points_second > points_first:
+            return True, reg_second_id, "points"
+
+        # Абсолютна нічия -> перевіряємо, чи є додатковий бій (Extra Bout)
+        completed_bouts = [b for b in team_match.team_bouts.all() if b.status == "completed"]
+        extra_bouts = [b for b in completed_bouts if getattr(b, "bout_index", 0) > total_slots]
+        if extra_bouts:
+            last_extra = extra_bouts[-1]
+            if last_extra.winner_id:
+                return True, last_extra.winner_id, last_extra.win_method
+        return False, None, ""
+
     def determine_team_winner(self, team_match) -> tuple[bool, int | None, str]:
         """
         Визначає переможця командної зустрічі на основі завершених поєдинків (bouts).
@@ -74,8 +108,7 @@ class BaseRuleSet(ABC):
             return False, None, ""
 
         # Підрахунок виграних боїв
-        wins_first = sum(1 for b in completed_bouts if b.winner_id == reg_first_id)
-        wins_second = sum(1 for b in completed_bouts if b.winner_id == reg_second_id)
+        wins_first, wins_second = self._calculate_wins(completed_bouts, reg_first_id, reg_second_id)
 
         # Математична перемога (більшість із запланованих боїв)
         total_slots = getattr(team_match.category, "team_size", 3)
@@ -89,29 +122,9 @@ class BaseRuleSet(ABC):
         # Якщо всі регулярні бої завершено
         regular_bouts = [b for b in completed_bouts if getattr(b, "bout_index", 0) <= total_slots]
         if len(regular_bouts) == total_slots:
-            if wins_first > wins_second:
-                return True, reg_first_id, "points"
-            elif wins_second > wins_first:
-                return True, reg_second_id, "points"
-            else:
-                # Нічия за кількістю виграних боїв -> Порівнюємо сумарні технічні бали
-                points_first = sum(b.score_first for b in regular_bouts)
-                points_second = sum(b.score_second for b in regular_bouts)
-
-                if points_first > points_second:
-                    return True, reg_first_id, "points"
-                elif points_second > points_first:
-                    return True, reg_second_id, "points"
-                else:
-                    # Абсолютна нічия -> перевіряємо, чи є додатковий бій (Extra Bout)
-                    extra_bouts = [
-                        b for b in completed_bouts if getattr(b, "bout_index", 0) > total_slots
-                    ]
-                    if extra_bouts:
-                        last_extra = extra_bouts[-1]
-                        if last_extra.winner_id:
-                            return True, last_extra.winner_id, last_extra.win_method
-                    return False, None, ""
+            return self._determine_winner_from_regular_bouts(
+                team_match, regular_bouts, wins_first, wins_second, total_slots
+            )
 
         return False, None, ""
 

@@ -215,7 +215,7 @@ class TestAthleteRegistration(TournamentAPITestCase):
         # Create staff user
         staff_user = User.objects.create_user(
             email="staff@test.local",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Секретар",
             last_name="Турнірний",
             role=User.Role.STAFF,
@@ -265,7 +265,7 @@ class TestAthleteRegistration(TournamentAPITestCase):
         """Інший тренер або сторонній персонал не може відмітити явку."""
         other_coach = User.objects.create_user(
             email="other_coach@test.local",
-            password="test12345",
+            password="test12345",  # NOSONAR
             first_name="Інший",
             last_name="Тренер",
             role=User.Role.COACH,

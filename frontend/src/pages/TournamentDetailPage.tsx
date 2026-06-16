@@ -196,9 +196,9 @@ export default function TournamentDetailPage() {
   };
 
   const toggleTatamiExpand = (tatamiId: string, allTatamiIds: string[]) => {
-    const currentExpanded = expandedTatamis !== null
-      ? new Set(expandedTatamis)
-      : new Set(allTatamiIds);
+    const currentExpanded = expandedTatamis === null
+      ? new Set(allTatamiIds)
+      : new Set(expandedTatamis);
 
     if (currentExpanded.has(tatamiId)) {
       currentExpanded.delete(tatamiId);
@@ -222,7 +222,11 @@ export default function TournamentDetailPage() {
   const getTatamiGroupName = (key: string) => {
     if (key === "unassigned") return "Не призначено до татамі";
     const tatami = tatamis.find((t) => String(t.id) === key);
-    return tatami ? `Татамі №${tatami.number} ${tatami.name ? `(${tatami.name})` : ""}` : `Татамі ID ${key}`;
+    if (tatami) {
+      const namePart = tatami.name ? ` (${tatami.name})` : "";
+      return `Татамі №${tatami.number}${namePart}`;
+    }
+    return `Татамі ID ${key}`;
   };
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
@@ -299,7 +303,7 @@ export default function TournamentDetailPage() {
       setSearchingStaff(true);
       try {
         const res = await api.get(`/auth/users/?role=staff&search=${encodeURIComponent(staffSearch)}`);
-        const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        const list = Array.isArray(res.data) ? res.data : res.data?.results || [];
         setStaffSearchResults(list);
       } catch (e) {
         console.error(e);
@@ -356,7 +360,7 @@ export default function TournamentDetailPage() {
     if (staffIds.length > 0) {
       try {
         const res = await api.get(`/auth/users/?ids=${staffIds.join(",")}`);
-        const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        const list = Array.isArray(res.data) ? res.data : res.data?.results || [];
         setAssignedStaffList(list);
       } catch (e) {
         console.error("Failed to fetch assigned staff profiles", e);
@@ -382,6 +386,14 @@ export default function TournamentDetailPage() {
       ruleset_team_prices: tournament.ruleset_team_prices || {},
     });
     setEditDialogOpen(true);
+  };
+
+  const handleRemoveStaff = (sid: number) => {
+    const currentStaff = editTournamentForm.getValues("staff_members") || [];
+    editTournamentForm.setValue(
+      "staff_members",
+      currentStaff.filter((id: number) => id !== sid)
+    );
   };
 
   const onEditTournamentSubmit = async (data: EditTournamentForm) => {
@@ -583,6 +595,201 @@ export default function TournamentDetailPage() {
     new Date() > new Date(tournament.registration_end);
 
   const displayStatus = isRegClosed ? "registration_closed" : tournament.status;
+
+  const renderCategoriesContent = () => {
+    if (sortedCategories.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 gap-3 text-center border border-dashed border-border rounded-xl">
+          <p className="text-sm text-muted-foreground">Категорій не знайдено за вашим запитом</p>
+        </div>
+      );
+    }
+
+    if (catGroupBy === "tatami") {
+      return (
+        <div className="space-y-4">
+          {activeGroupKeys.map((key) => {
+            const catsInGroup = groupedCategories![key];
+            const isExpanded = isTatamiExpanded(key);
+            const groupName = getTatamiGroupName(key);
+
+            return (
+              <div key={key} className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-900/10 backdrop-blur-md">
+                {/* Заголовок секції */}
+                <button
+                  onClick={() => toggleTatamiExpand(key, activeGroupKeys)}
+                  className="flex items-center justify-between w-full p-4 bg-zinc-900/30 hover:bg-zinc-900/50 transition-colors text-left border-b border-zinc-850"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-base font-bold text-zinc-200">{groupName}</span>
+                    <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/20">
+                      Категорій: {catsInGroup.length}
+                    </span>
+                  </div>
+                  <div className="text-zinc-400 hover:text-zinc-200 transition-colors">
+                    {isExpanded ? (
+                      <span className="text-xs font-semibold flex items-center gap-1">Згорнути ▲</span>
+                    ) : (
+                      <span className="text-xs font-semibold flex items-center gap-1">Розгорнути ▼</span>
+                    )}
+                  </div>
+                </button>
+
+                {/* Контент секції */}
+                {isExpanded && (
+                  <div className="p-4">
+                    {catView === "cards" ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        {(() => {
+                          const { categoryEstimates } = estimateSchedule(tatamis, matches, catsInGroup);
+                          return catsInGroup.map((c) => (
+                            <CategoryCard key={c.id} category={c} estimate={categoryEstimates[c.id]} />
+                          ));
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950/20 overflow-hidden backdrop-blur-md">
+                        <Table>
+                          <TableHeader className="bg-zinc-950/50">
+                            <TableRow className="border-b border-zinc-800 hover:bg-transparent">
+                              <TableHead className="text-zinc-400">Назва</TableHead>
+                              <TableHead className="text-zinc-400">Вікова група</TableHead>
+                              <TableHead className="text-zinc-400">Вага</TableHead>
+                              <TableHead className="text-zinc-400">Правила</TableHead>
+                              <TableHead className="text-center text-zinc-400">Учасники</TableHead>
+                              <TableHead className="text-center text-zinc-400">Статус</TableHead>
+                              <TableHead className="text-right text-zinc-400">Дія</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {catsInGroup.map((c) => {
+                              let weightStr = "без обмежень";
+                              if (c.min_weight !== null && c.max_weight !== null) {
+                                weightStr = `${c.min_weight}–${c.max_weight} кг`;
+                              } else if (c.min_weight !== null) {
+                                weightStr = `від ${c.min_weight} кг`;
+                              } else if (c.max_weight !== null) {
+                                weightStr = `до ${c.max_weight} кг`;
+                              }
+                              return (
+                                <TableRow key={c.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/30">
+                                  <TableCell className="font-semibold text-zinc-200">
+                                    <Link to={`/categories/${c.id}`} className="hover:text-amber-500 transition-colors flex items-center gap-2">
+                                      {c.name}
+                                      {c.is_team && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                                          Команда
+                                        </span>
+                                      )}
+                                      {!c.has_bracket && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
+                                          Без сітки
+                                        </span>
+                                      )}
+                                    </Link>
+                                  </TableCell>
+                                  <TableCell className="text-zinc-300">{c.min_age}–{c.max_age} років</TableCell>
+                                  <TableCell className="text-zinc-300">{weightStr}</TableCell>
+                                  <TableCell className="text-zinc-300">{getRulesetName(c.ruleset_key)}</TableCell>
+                                  <TableCell className="text-center font-semibold text-zinc-300">{c.confirmed_registrations_count}</TableCell>
+                                  <TableCell className="text-center">
+                                    <StatusBadge status={c.status} type="category" />
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button variant="ghost" size="sm" asChild className="h-7 text-xs hover:bg-zinc-800 hover:text-zinc-100">
+                                      <Link to={`/categories/${c.id}`}>Деталі</Link>
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (catView === "cards") {
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {(() => {
+            const { categoryEstimates } = estimateSchedule(tatamis, matches, sortedCategories);
+            return sortedCategories.map((c) => (
+              <CategoryCard key={c.id} category={c} estimate={categoryEstimates[c.id]} />
+            ));
+          })()}
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/20 overflow-hidden backdrop-blur-md">
+        <Table>
+          <TableHeader className="bg-zinc-950/50">
+            <TableRow className="border-b border-zinc-800 hover:bg-transparent">
+              <TableHead className="text-zinc-400">Назва</TableHead>
+              <TableHead className="text-zinc-400">Вікова група</TableHead>
+              <TableHead className="text-zinc-400">Вага</TableHead>
+              <TableHead className="text-zinc-400">Правила</TableHead>
+              <TableHead className="text-center text-zinc-400">Учасники</TableHead>
+              <TableHead className="text-center text-zinc-400">Статус</TableHead>
+              <TableHead className="text-right text-zinc-400">Дія</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedCategories.map((c) => {
+              let weightStr = "без обмежень";
+              if (c.min_weight !== null && c.max_weight !== null) {
+                weightStr = `${c.min_weight}–${c.max_weight} кг`;
+              } else if (c.min_weight !== null) {
+                weightStr = `від ${c.min_weight} кг`;
+              } else if (c.max_weight !== null) {
+                weightStr = `до ${c.max_weight} кг`;
+              }
+              return (
+                <TableRow key={c.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/30">
+                  <TableCell className="font-semibold text-zinc-200">
+                    <Link to={`/categories/${c.id}`} className="hover:text-amber-500 transition-colors flex items-center gap-2">
+                      {c.name}
+                      {c.is_team && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                          Команда
+                        </span>
+                      )}
+                      {!c.has_bracket && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
+                          Без сітки
+                        </span>
+                      )}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-zinc-300">{c.min_age}–{c.max_age} років</TableCell>
+                  <TableCell className="text-zinc-300">{weightStr}</TableCell>
+                  <TableCell className="text-zinc-300">{getRulesetName(c.ruleset_key)}</TableCell>
+                  <TableCell className="text-center font-semibold text-zinc-300">{c.confirmed_registrations_count}</TableCell>
+                  <TableCell className="text-center">
+                    <StatusBadge status={c.status} type="category" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" asChild className="h-7 text-xs hover:bg-zinc-800 hover:text-zinc-100">
+                      <Link to={`/categories/${c.id}`}>Деталі</Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  };
 
   return (
     <div className="container py-8 space-y-6">
@@ -802,186 +1009,7 @@ export default function TournamentDetailPage() {
               </div>
             </div>
 
-            {sortedCategories.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-3 text-center border border-dashed border-border rounded-xl">
-                <p className="text-sm text-muted-foreground">Категорій не знайдено за вашим запитом</p>
-              </div>
-            ) : catGroupBy === "tatami" ? (
-              <div className="space-y-4">
-                {activeGroupKeys.map((key) => {
-                  const catsInGroup = groupedCategories![key];
-                  const isExpanded = isTatamiExpanded(key);
-                  const groupName = getTatamiGroupName(key);
-
-                  return (
-                    <div key={key} className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-900/10 backdrop-blur-md">
-                      {/* Заголовок секції */}
-                      <button
-                        onClick={() => toggleTatamiExpand(key, activeGroupKeys)}
-                        className="flex items-center justify-between w-full p-4 bg-zinc-900/30 hover:bg-zinc-900/50 transition-colors text-left border-b border-zinc-850"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-base font-bold text-zinc-200">{groupName}</span>
-                          <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/20">
-                            Категорій: {catsInGroup.length}
-                          </span>
-                        </div>
-                        <div className="text-zinc-400 hover:text-zinc-200 transition-colors">
-                          {isExpanded ? (
-                            <span className="text-xs font-semibold flex items-center gap-1">Згорнути ▲</span>
-                          ) : (
-                            <span className="text-xs font-semibold flex items-center gap-1">Розгорнути ▼</span>
-                          )}
-                        </div>
-                      </button>
-
-                      {/* Контент секції */}
-                      {isExpanded && (
-                        <div className="p-4">
-                          {catView === "cards" ? (
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                              {(() => {
-                                const { categoryEstimates } = estimateSchedule(tatamis, matches, catsInGroup);
-                                return catsInGroup.map((c) => (
-                                  <CategoryCard key={c.id} category={c} estimate={categoryEstimates[c.id]} />
-                                ));
-                              })()}
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-zinc-800 bg-zinc-950/20 overflow-hidden backdrop-blur-md">
-                              <Table>
-                                <TableHeader className="bg-zinc-950/50">
-                                  <TableRow className="border-b border-zinc-800 hover:bg-transparent">
-                                    <TableHead className="text-zinc-400">Назва</TableHead>
-                                    <TableHead className="text-zinc-400">Вікова група</TableHead>
-                                    <TableHead className="text-zinc-400">Вага</TableHead>
-                                    <TableHead className="text-zinc-400">Правила</TableHead>
-                                    <TableHead className="text-center text-zinc-400">Учасники</TableHead>
-                                    <TableHead className="text-center text-zinc-400">Статус</TableHead>
-                                    <TableHead className="text-right text-zinc-400">Дія</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {catsInGroup.map((c) => {
-                                    let weightStr = "без обмежень";
-                                    if (c.min_weight !== null && c.max_weight !== null) {
-                                      weightStr = `${c.min_weight}–${c.max_weight} кг`;
-                                    } else if (c.min_weight !== null) {
-                                      weightStr = `від ${c.min_weight} кг`;
-                                    } else if (c.max_weight !== null) {
-                                      weightStr = `до ${c.max_weight} кг`;
-                                    }
-                                    return (
-                                      <TableRow key={c.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/30">
-                                        <TableCell className="font-semibold text-zinc-200">
-                                          <Link to={`/categories/${c.id}`} className="hover:text-amber-500 transition-colors flex items-center gap-2">
-                                            {c.name}
-                                            {c.is_team && (
-                                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                                                Команда
-                                              </span>
-                                            )}
-                                            {!c.has_bracket && (
-                                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
-                                                Без сітки
-                                              </span>
-                                            )}
-                                          </Link>
-                                        </TableCell>
-                                        <TableCell className="text-zinc-300">{c.min_age}–{c.max_age} років</TableCell>
-                                        <TableCell className="text-zinc-300">{weightStr}</TableCell>
-                                        <TableCell className="text-zinc-300">{getRulesetName(c.ruleset_key)}</TableCell>
-                                        <TableCell className="text-center font-semibold text-zinc-300">{c.confirmed_registrations_count}</TableCell>
-                                        <TableCell className="text-center">
-                                          <StatusBadge status={c.status} type="category" />
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                          <Button variant="ghost" size="sm" asChild className="h-7 text-xs hover:bg-zinc-800 hover:text-zinc-100">
-                                            <Link to={`/categories/${c.id}`}>Деталі</Link>
-                                          </Button>
-                                        </TableCell>
-                                      </TableRow>
-                                    );
-                                  })}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : catView === "cards" ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {(() => {
-                  const { categoryEstimates } = estimateSchedule(tatamis, matches, sortedCategories);
-                  return sortedCategories.map((c) => (
-                    <CategoryCard key={c.id} category={c} estimate={categoryEstimates[c.id]} />
-                  ));
-                })()}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/20 overflow-hidden backdrop-blur-md">
-                <Table>
-                  <TableHeader className="bg-zinc-950/50">
-                    <TableRow className="border-b border-zinc-800 hover:bg-transparent">
-                      <TableHead className="text-zinc-400">Назва</TableHead>
-                      <TableHead className="text-zinc-400">Вікова група</TableHead>
-                      <TableHead className="text-zinc-400">Вага</TableHead>
-                      <TableHead className="text-zinc-400">Правила</TableHead>
-                      <TableHead className="text-center text-zinc-400">Учасники</TableHead>
-                      <TableHead className="text-center text-zinc-400">Статус</TableHead>
-                      <TableHead className="text-right text-zinc-400">Дія</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedCategories.map((c) => {
-                      let weightStr = "без обмежень";
-                      if (c.min_weight !== null && c.max_weight !== null) {
-                        weightStr = `${c.min_weight}–${c.max_weight} кг`;
-                      } else if (c.min_weight !== null) {
-                        weightStr = `від ${c.min_weight} кг`;
-                      } else if (c.max_weight !== null) {
-                        weightStr = `до ${c.max_weight} кг`;
-                      }
-                      return (
-                        <TableRow key={c.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/30">
-                          <TableCell className="font-semibold text-zinc-200">
-                            <Link to={`/categories/${c.id}`} className="hover:text-amber-500 transition-colors flex items-center gap-2">
-                              {c.name}
-                              {c.is_team && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                                  Команда
-                                </span>
-                              )}
-                              {!c.has_bracket && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
-                                  Без сітки
-                                </span>
-                              )}
-                            </Link>
-                          </TableCell>
-                          <TableCell className="text-zinc-300">{c.min_age}–{c.max_age} років</TableCell>
-                          <TableCell className="text-zinc-300">{weightStr}</TableCell>
-                          <TableCell className="text-zinc-300">{getRulesetName(c.ruleset_key)}</TableCell>
-                          <TableCell className="text-center font-semibold text-zinc-300">{c.confirmed_registrations_count}</TableCell>
-                          <TableCell className="text-center">
-                            <StatusBadge status={c.status} type="category" />
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" asChild className="h-7 text-xs hover:bg-zinc-800 hover:text-zinc-100">
-                              <Link to={`/categories/${c.id}`}>Деталі</Link>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
+            {renderCategoriesContent()}
           </div>
         )}
       </div>
@@ -1298,7 +1326,7 @@ export default function TournamentDetailPage() {
             </div>
 
             {/* Ціни за рулсети */}
-            {rulesets.filter(r => r.sport_type === editTournamentForm.watch("sport_type")).length > 0 && (
+            {rulesets.some(r => r.sport_type === editTournamentForm.watch("sport_type")) && (
               <div className="border-t border-border pt-4 space-y-3">
                 <h4 className="text-sm font-semibold text-foreground">Вартість внесків за правилами (рулсетами)</h4>
                 <div className="space-y-3 p-3 bg-muted/40 border border-border/50 rounded-lg">
@@ -1350,12 +1378,7 @@ export default function TournamentDetailPage() {
                         {label}
                         <button
                           type="button"
-                          onClick={() => {
-                            editTournamentForm.setValue(
-                              "staff_members",
-                              staffIds.filter((id: number) => id !== sid)
-                            );
-                          }}
+                          onClick={() => handleRemoveStaff(sid)}
                           className="hover:text-destructive text-muted-foreground font-bold shrink-0 ml-0.5"
                         >
                           ✕

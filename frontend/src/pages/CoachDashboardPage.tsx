@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import { useEffect, useState, useMemo } from "react";
+import type { FormEvent } from "react";
 import {
   Users,
   Trophy,
@@ -34,7 +35,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { cn, formatSportType, formatRegistrationName } from "@/lib/utils";
+import { cn, formatSportType, formatRegistrationName, getAgeAsOf } from "@/lib/utils";
+import { PhotoUploadField } from "@/components/ui/photo-upload-field";
 import type { Athlete, Tournament, Category, Registration, Team, PaginatedResponse } from "@/types/api";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -85,18 +87,6 @@ const getRelativePathForApi = (url: string | null) => {
     path = path.slice(4);
   }
   return path;
-};
-
-// Calculate age as of reference date
-const getAgeAsOf = (birthDateStr: string, refDateStr: string) => {
-  const birthDate = new Date(birthDateStr);
-  const refDate = new Date(refDateStr);
-  let age = refDate.getFullYear() - birthDate.getFullYear();
-  const m = refDate.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && refDate.getDate() < birthDate.getDate())) {
-    age--;
-  }
-  return age;
 };
 
 const athleteSchema = z.object({
@@ -180,9 +170,9 @@ export default function CoachDashboardPage() {
   // Smart mass registration states
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [hasLoadedTournaments, setHasLoadedTournaments] = useState(false);
-  const [selectedTournamentId, setSelectedTournamentIdState] = useState<string>(initialRegTournamentId);
+  const [selectedTournamentId, setSelectedTournamentId] = useState<string>(initialRegTournamentId);
   const [tournamentCategories, setTournamentCategories] = useState<Category[]>([]);
-  const [regSubTab, setRegSubTabState] = useState<"mass" | "team">(initialRegSubTab);
+  const [regSubTab, setRegSubTab] = useState<"mass" | "team">(initialRegSubTab);
   const [massSelectedCategories, setMassSelectedCategories] = useState<Record<number, number[]>>({});
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
   const [liabilityWaiver, setLiabilityWaiver] = useState(false);
@@ -208,13 +198,13 @@ export default function CoachDashboardPage() {
     updateQueryParam("rosterSort", val);
   };
 
-  const setSelectedTournamentId = (val: string) => {
-    setSelectedTournamentIdState(val);
+  const handleSelectedTournamentIdChange = (val: string) => {
+    setSelectedTournamentId(val);
     updateQueryParam("regTournamentId", val);
   };
 
-  const setRegSubTab = (val: "mass" | "team") => {
-    setRegSubTabState(val);
+  const handleRegSubTabChange = (val: "mass" | "team") => {
+    setRegSubTab(val);
     updateQueryParam("regSubTab", val);
   };
 
@@ -226,17 +216,17 @@ export default function CoachDashboardPage() {
     });
   };
 
-  const handleTeamAthleteCheckboxChange = (athlete: Athlete, checked: boolean, teamSize: number) => {
-    if (checked) {
-      setTeamRegAthletes((prev) => {
-        if (prev.length < teamSize) {
-          return [...prev, athlete];
-        }
-        return prev;
-      });
-    } else {
-      setTeamRegAthletes((prev) => prev.filter((a) => a.id !== athlete.id));
-    }
+  const handleSelectTeamAthlete = (athlete: Athlete, teamSize: number) => {
+    setTeamRegAthletes((prev) => {
+      if (prev.length < teamSize) {
+        return [...prev, athlete];
+      }
+      return prev;
+    });
+  };
+
+  const handleDeselectTeamAthlete = (athlete: Athlete) => {
+    setTeamRegAthletes((prev) => prev.filter((a) => a.id !== athlete.id));
   };
 
   // Simplified team registration states (on-the-fly)
@@ -270,22 +260,22 @@ export default function CoachDashboardPage() {
 
   // Tournament filter states
   const [billingTournamentFilter, setBillingTournamentFilter] = useState<string>("all");
-  const [activeTournamentFilter, setActiveTournamentFilterState] = useState(initialActiveTournamentFilter);
-  const [activeSearch, setActiveSearchState] = useState(initialActiveSearch);
-  const [activeSort, setActiveSortState] = useState(initialActiveSort);
+  const [activeTournamentFilter, setActiveTournamentFilter] = useState(initialActiveTournamentFilter);
+  const [activeSearch, setActiveSearch] = useState(initialActiveSearch);
+  const [activeSort, setActiveSort] = useState(initialActiveSort);
 
-  const setActiveSearch = (val: string) => {
-    setActiveSearchState(val);
+  const handleActiveSearchChange = (val: string) => {
+    setActiveSearch(val);
     updateQueryParam("activeSearch", val);
   };
 
-  const setActiveSort = (val: string) => {
-    setActiveSortState(val);
+  const handleActiveSortChange = (val: string) => {
+    setActiveSort(val);
     updateQueryParam("activeSort", val);
   };
 
-  const setActiveTournamentFilter = (val: string) => {
-    setActiveTournamentFilterState(val);
+  const handleActiveTournamentFilterChange = (val: string) => {
+    setActiveTournamentFilter(val);
     updateQueryParam("activeTournamentFilter", val);
   };
 
@@ -344,7 +334,7 @@ export default function CoachDashboardPage() {
     }
   };
 
-  const handleImportAthletes = async (e: React.FormEvent) => {
+  const handleImportAthletes = async (e: FormEvent) => {
     e.preventDefault();
     if (!importFile) return;
     setIsImporting(true);
@@ -405,11 +395,11 @@ export default function CoachDashboardPage() {
 
   // Live monitor states
   const [liveMatches, setLiveMatches] = useState<any[]>([]);
-  const [liveSearch, setLiveSearchState] = useState(initialLiveSearch);
+  const [liveSearch, setLiveSearch] = useState(initialLiveSearch);
   const [massCategorySearch, setMassCategorySearch] = useState("");
 
-  const setLiveSearch = (val: string) => {
-    setLiveSearchState(val);
+  const handleLiveSearchChange = (val: string) => {
+    setLiveSearch(val);
     updateQueryParam("liveSearch", val);
   };
 
@@ -1405,7 +1395,7 @@ export default function CoachDashboardPage() {
     if (hasLoadedTournaments && selectedTournamentId) {
       const exists = tournaments.some((t) => t.id.toString() === selectedTournamentId);
       if (!exists) {
-        setSelectedTournamentId("");
+        handleSelectedTournamentIdChange("");
       }
     }
   }, [hasLoadedTournaments, tournaments, selectedTournamentId]);
@@ -2106,8 +2096,15 @@ export default function CoachDashboardPage() {
                 {/* Backdrop to close dropdown */}
                 {isTournamentDropdownOpen && (
                   <div
-                    className="fixed inset-0 z-40 bg-transparent"
+                    className="fixed inset-0 z-40 bg-transparent cursor-default"
+                    role="button"
+                    tabIndex={-1}
                     onClick={() => setIsTournamentDropdownOpen(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
+                        setIsTournamentDropdownOpen(false);
+                      }
+                    }}
                   />
                 )}
 
@@ -2156,7 +2153,7 @@ export default function CoachDashboardPage() {
                                 key={t.id}
                                 type="button"
                                 onClick={() => {
-                                  setSelectedTournamentId(t.id.toString());
+                                  handleSelectedTournamentIdChange(t.id.toString());
                                   setTeamCategorySearch("");
                                   setIsTournamentDropdownOpen(false);
                                   setTournamentSearch("");
@@ -2189,7 +2186,7 @@ export default function CoachDashboardPage() {
                     <Button
                       variant={regSubTab === "mass" ? "sport" : "outline"}
                       size="sm"
-                      onClick={() => setRegSubTab("mass")}
+                      onClick={() => handleRegSubTabChange("mass")}
                       className="rounded-xl text-xs h-8"
                     >
                       <Users className="w-3.5 h-3.5 mr-1" /> Масова реєстрація
@@ -2197,7 +2194,7 @@ export default function CoachDashboardPage() {
                     <Button
                       variant={regSubTab === "team" ? "sport" : "outline"}
                       size="sm"
-                      onClick={() => setRegSubTab("team")}
+                      onClick={() => handleRegSubTabChange("team")}
                       className="rounded-xl text-xs h-8"
                     >
                       <Trophy className="w-3.5 h-3.5 mr-1" /> Реєстрація команд
@@ -2501,7 +2498,13 @@ export default function CoachDashboardPage() {
                                             type="checkbox"
                                             checked={isChecked}
                                             disabled={!isChecked && isLimitReached}
-                                            onChange={(e) => handleTeamAthleteCheckboxChange(ath, e.target.checked, selectedCategory.team_size)}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                handleSelectTeamAthlete(ath, selectedCategory.team_size);
+                                              } else {
+                                                handleDeselectTeamAthlete(ath);
+                                              }
+                                            }}
                                             className="rounded text-amber-500 focus:ring-amber-500 focus:ring-opacity-50"
                                           />
                                           <div className="flex flex-col">
@@ -2809,13 +2812,13 @@ export default function CoachDashboardPage() {
                 placeholder="Пошук за ім'ям, категорією або турніром..."
                 className="pl-9 h-9 rounded-xl text-xs"
                 value={activeSearch}
-                onChange={(e) => setActiveSearch(e.target.value)}
+                onChange={(e) => handleActiveSearchChange(e.target.value)}
               />
             </div>
             <div className="flex flex-wrap items-center gap-4 w-full md:w-auto shrink-0 justify-end">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">Турнір:</span>
-                <Select value={activeTournamentFilter} onValueChange={setActiveTournamentFilter}>
+                <Select value={activeTournamentFilter} onValueChange={handleActiveTournamentFilterChange}>
                   <SelectTrigger className="w-[180px] h-9 rounded-xl text-xs">
                     <SelectValue placeholder="Всі турніри" />
                   </SelectTrigger>
@@ -2831,7 +2834,7 @@ export default function CoachDashboardPage() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">Сортувати за:</span>
-                <Select value={activeSort} onValueChange={setActiveSort}>
+                <Select value={activeSort} onValueChange={handleActiveSortChange}>
                   <SelectTrigger className="w-[180px] h-9 rounded-xl text-xs">
                     <SelectValue placeholder="Сортування" />
                   </SelectTrigger>
@@ -2998,7 +3001,7 @@ export default function CoachDashboardPage() {
                 placeholder="Пошук за учасником, категорією або турніром..."
                 className="pl-9 h-9 rounded-xl text-xs"
                 value={liveSearch}
-                onChange={(e) => setLiveSearch(e.target.value)}
+                onChange={(e) => handleLiveSearchChange(e.target.value)}
               />
             </div>
             {liveMatches.length > 0 && (
@@ -3245,33 +3248,11 @@ export default function CoachDashboardPage() {
               </div>
             </div>
 
-            <div className="space-y-1.5 p-3 border border-border rounded-lg bg-muted/20">
-              <Label>Фото профілю</Label>
-              <Input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (files && files.length > 0) {
-                    setSelectedFile(files[0]);
-                  }
-                }}
-              />
-              {(selectedFile || editingAthlete?.photo) && (
-                <div className="flex items-center gap-3 mt-3">
-                  <div className="w-12 h-12 rounded-full overflow-hidden border border-border bg-muted">
-                    <img
-                      src={selectedFile ? URL.createObjectURL(selectedFile) : editingAthlete?.photo ?? ""}
-                      alt="Preview"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {selectedFile ? "Нове фото обрано" : "Поточне фото профілю"}
-                  </span>
-                </div>
-              )}
-            </div>
+            <PhotoUploadField
+              selectedFile={selectedFile}
+              onFileChange={setSelectedFile}
+              currentPhotoUrl={editingAthlete?.photo}
+            />
 
             <DialogFooter className="pt-2">
               <Button

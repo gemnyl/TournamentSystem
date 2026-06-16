@@ -524,7 +524,7 @@ export default function TatamiAdminPage() {
     }
   };
 
-  if (tournament && tournament.status === "completed") {
+  if (tournament?.status === "completed") {
     return (
       <div className="container py-12 flex flex-col items-center justify-center min-h-[50vh] text-center gap-4">
         <h2 className="text-3xl font-extrabold text-destructive">Турнір завершено</h2>
@@ -625,7 +625,7 @@ export default function TatamiAdminPage() {
                 let matchText = "—";
 
                 if (hasMatch) {
-                  const m = currentMatchObj as Match;
+                  const m = currentMatchObj;
                   nameFirst = formatMatchParticipant(m.reg_first, m.athlete_first);
                   nameSecond = formatMatchParticipant(m.reg_second, m.athlete_second);
                   matchText = `R${m.round_index}.${m.match_order}: ${nameFirst} vs ${nameSecond}`;

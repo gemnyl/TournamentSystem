@@ -43,7 +43,10 @@ export function BracketRound({ roundIndex, totalRounds, matches, onMatchClick }:
   // Висота картки H: 108px для індивідуальних, 140px або 180px для командних
   const isTeam = matches.some(m => m.category_is_team);
   const maxBouts = matches.reduce((max, m) => Math.max(max, m.team_bouts?.length ?? 0), 0);
-  const cardHeight = isTeam ? (maxBouts > 3 ? 180 : 140) : 108;
+  let cardHeight = 108;
+  if (isTeam) {
+    cardHeight = maxBouts > 3 ? 180 : 140;
+  }
   const baseGap = 16;
   const { gap: gapBetween, paddingTop } = getRoundSpacing(roundIndex, cardHeight, baseGap);
 

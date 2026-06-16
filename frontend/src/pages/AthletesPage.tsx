@@ -10,6 +10,7 @@ import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PhotoUploadField } from "@/components/ui/photo-upload-field";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -65,6 +66,43 @@ const athleteSchemaCoach = z.object({
 
 type AthleteFormOrganizer = z.infer<typeof athleteSchemaOrganizer>;
 type AthleteForm = AthleteFormOrganizer | z.infer<typeof athleteSchemaCoach>;
+
+function getFilteredAthletes(athletes: Athlete[], searchQuery: string): Athlete[] {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return athletes;
+  return athletes.filter((a) => {
+    const name = `${a.first_name} ${a.last_name} ${a.patronymic ?? ""} ${a.full_name ?? ""}`.toLowerCase();
+    return name.includes(q) || (a.club?.name ?? "").toLowerCase().includes(q);
+  });
+}
+
+function prepareAthleteFormData(
+  data: AthleteForm,
+  isCoachOnly: boolean,
+  userClubId?: number,
+  selectedFile?: File | null
+): FormData {
+  const genderMap = { M: "male", F: "female" };
+  const clubId = isCoachOnly ? userClubId : ("club" in data ? data.club : undefined);
+
+  const formData = new FormData();
+  formData.append("first_name", data.first_name);
+  formData.append("last_name", data.last_name);
+  if (data.patronymic) {
+    formData.append("patronymic", data.patronymic);
+  }
+  formData.append("birth_date", data.date_of_birth);
+  formData.append("gender", genderMap[data.gender]);
+  formData.append("base_weight", String(data.weight));
+  formData.append("skill_level", data.skill_level || "");
+  if (clubId) {
+    formData.append("club_id", String(clubId));
+  }
+  if (selectedFile) {
+    formData.append("photo", selectedFile);
+  }
+  return formData;
+}
 
 export default function AthletesPage() {
   const { user, isOrganizer, isCoach } = useAuth();
@@ -153,13 +191,7 @@ export default function AthletesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(true); }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return athletes.filter((a) => {
-      const name = `${a.first_name} ${a.last_name} ${a.patronymic ?? ""} ${a.full_name ?? ""}`.toLowerCase();
-      return name.includes(q) || (a.club?.name ?? "").toLowerCase().includes(q);
-    });
-  }, [athletes, search]);
+  const filtered = useMemo(() => getFilteredAthletes(athletes, search), [athletes, search]);
 
   const startEdit = (athlete: Athlete) => {
     setEditingAthlete(athlete);
@@ -196,27 +228,8 @@ export default function AthletesPage() {
   const onSubmit = async (data: AthleteForm) => {
     setIsCreating(true);
     try {
-      const genderMap = { M: "male", F: "female" };
       const isCoachOnly = isCoach && !isOrganizer;
-      const clubId = isCoachOnly ? user?.club?.id : ("club" in data ? data.club : undefined);
-
-      const formData = new FormData();
-      formData.append("first_name", data.first_name);
-      formData.append("last_name", data.last_name);
-      if (data.patronymic) {
-        formData.append("patronymic", data.patronymic);
-      }
-      formData.append("birth_date", data.date_of_birth);
-      formData.append("gender", genderMap[data.gender as "M" | "F"]);
-      formData.append("base_weight", String(data.weight));
-      formData.append("skill_level", data.skill_level || "");
-      if (clubId) {
-        formData.append("club_id", String(clubId));
-      }
-
-      if (selectedFile) {
-        formData.append("photo", selectedFile);
-      }
+      const formData = prepareAthleteFormData(data, isCoachOnly, user?.club?.id, selectedFile);
 
       const headers = {
         "Content-Type": "multipart/form-data",
@@ -267,10 +280,11 @@ export default function AthletesPage() {
     setDeleteConfirmOpen(true);
   };
 
-  const getSubmitLabel = () => {
-    if (isCreating) return <Loader2 className="w-4 h-4 animate-spin" />;
-    return editingAthlete ? "Зберегти" : "Додати";
-  };
+  const submitLabel = isCreating ? (
+    <Loader2 className="w-4 h-4 animate-spin" />
+  ) : (
+    editingAthlete ? "Зберегти" : "Додати"
+  );
 
   return (
     <div className="container py-8 space-y-6">
@@ -598,33 +612,11 @@ export default function AthletesPage() {
             )}
 
             {/* Завантаження фото */}
-            <div className="space-y-1.5 p-3 border border-border rounded-lg bg-muted/20">
-              <Label>Фото профілю</Label>
-              <Input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (files && files.length > 0) {
-                    setSelectedFile(files[0]);
-                  }
-                }}
-              />
-              {(selectedFile || editingAthlete?.photo) && (
-                <div className="flex items-center gap-3 mt-3">
-                  <div className="w-12 h-12 rounded-full overflow-hidden border border-border bg-muted">
-                    <img
-                      src={selectedFile ? URL.createObjectURL(selectedFile) : editingAthlete?.photo ?? ""}
-                      alt="Preview"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {selectedFile ? "Нове фото обрано" : "Поточне фото профілю"}
-                  </span>
-                </div>
-              )}
-            </div>
+            <PhotoUploadField
+              selectedFile={selectedFile}
+              onFileChange={setSelectedFile}
+              currentPhotoUrl={editingAthlete?.photo}
+            />
 
             <DialogFooter className="pt-2">
               <Button
@@ -639,7 +631,7 @@ export default function AthletesPage() {
                 Скасувати
               </Button>
               <Button type="submit" variant="sport" disabled={isCreating}>
-                {getSubmitLabel()}
+                {submitLabel}
               </Button>
             </DialogFooter>
           </form>

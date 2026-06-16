@@ -39,6 +39,56 @@ function mapMatchTimerState(match: Match) {
   };
 }
 
+interface UpcomingQueueProps {
+  readonly tatami: Tatami;
+  readonly currentMatch: Match | null;
+}
+
+function UpcomingQueueSection({ tatami, currentMatch }: Readonly<UpcomingQueueProps>) {
+  const upcoming = (tatami.upcoming_matches ?? []).filter(m => m.id !== currentMatch?.id);
+  if (upcoming.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 pt-2 border-t border-border/40">
+      <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+        Черга сутичок (наступні):
+      </p>
+      <div className="space-y-1">
+        {upcoming.slice(0, 3).map((nm) => {
+          const ao = formatRegistrationName(nm.reg_second) || "TBD";
+          const aka = formatRegistrationName(nm.reg_first) || "TBD";
+          return (
+            <div key={nm.id} className="text-[10px] py-1 px-2 rounded bg-card/60 border border-border/30 flex flex-col gap-0.5">
+              <div className="flex items-center justify-between text-[8px] text-muted-foreground font-semibold">
+                <span>
+                  Раунд {nm.round_index} · Бій {nm.match_order}
+                </span>
+                {nm.category_name && (
+                  <span className="truncate max-w-[120px] text-amber-500/80">
+                    {nm.category_name}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-col gap-1 mt-0.5">
+                <div className="flex items-start gap-1 text-[11px] font-medium min-w-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0 mt-1" />
+                  <span className="text-muted-foreground text-[9px] uppercase font-bold shrink-0 mt-0.5">AO:</span>
+                  <span className="text-foreground break-words flex-1 min-w-0 leading-tight">{ao}</span>
+                </div>
+                <div className="flex items-start gap-1 text-[11px] font-medium min-w-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 mt-1" />
+                  <span className="text-muted-foreground text-[9px] uppercase font-bold shrink-0 mt-0.5">AKA:</span>
+                  <span className="text-foreground break-words flex-1 min-w-0 leading-tight">{aka}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted }: TatamiCardProps) {
   const { isOrganizer, user } = useAuth();
   const [tatami, setTatami] = useState<Tatami>(initialTatami);
@@ -181,50 +231,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted }: Tatami
               )}
 
               {/* Upcoming Matches Queue */}
-              {isActive && (() => {
-                const upcoming = (tatami.upcoming_matches ?? []).filter(m => m.id !== currentMatch?.id);
-                if (upcoming.length === 0) return null;
-
-                return (
-                  <div className="space-y-1.5 pt-2 border-t border-border/40">
-                    <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Черга сутичок (наступні):
-                    </p>
-                    <div className="space-y-1">
-                      {upcoming.slice(0, 3).map((nm) => {
-                        const ao = formatRegistrationName(nm.reg_second) || "TBD";
-                        const aka = formatRegistrationName(nm.reg_first) || "TBD";
-                        return (
-                          <div key={nm.id} className="text-[10px] py-1 px-2 rounded bg-card/60 border border-border/30 flex flex-col gap-0.5">
-                            <div className="flex items-center justify-between text-[8px] text-muted-foreground font-semibold">
-                              <span>
-                                Раунд {nm.round_index} · Бій {nm.match_order}
-                              </span>
-                              {nm.category_name && (
-                                <span className="truncate max-w-[120px] text-amber-500/80">
-                                  {nm.category_name}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-col gap-1 mt-0.5">
-                              <div className="flex items-start gap-1 text-[11px] font-medium min-w-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0 mt-1" />
-                                <span className="text-muted-foreground text-[9px] uppercase font-bold shrink-0 mt-0.5">AO:</span>
-                                <span className="text-foreground break-words flex-1 min-w-0 leading-tight">{ao}</span>
-                              </div>
-                              <div className="flex items-start gap-1 text-[11px] font-medium min-w-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 mt-1" />
-                                <span className="text-muted-foreground text-[9px] uppercase font-bold shrink-0 mt-0.5">AKA:</span>
-                                <span className="text-foreground break-words flex-1 min-w-0 leading-tight">{aka}</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
+              <UpcomingQueueSection tatami={tatami} currentMatch={currentMatch} />
             </div>
 
             {/* Open operator panel link for organizer/judge, scoreboard for spectator */}

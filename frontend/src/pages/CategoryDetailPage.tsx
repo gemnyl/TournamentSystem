@@ -12,7 +12,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { toast } from "@/hooks/use-toast";
-import { cn, formatSportType, formatRegistrationName, formatRegistrationClub } from "@/lib/utils";
+import { cn, formatSportType, formatRegistrationName, formatRegistrationClub, getAgeAsOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,16 +54,44 @@ function CategoryResultRow({
   onPlaceOverrideChange,
 }: Readonly<CategoryResultRowProps>) {
   const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
-  const medal =
-    placeVal === 1
-      ? "🥇"
-      : placeVal === 2
-      ? "🥈"
-      : placeVal === 3
-      ? "🥉"
-      : placeVal != null
-      ? `${placeVal}`
-      : "—";
+  let medal = "—";
+  if (placeVal === 1) {
+    medal = "🥇";
+  } else if (placeVal === 2) {
+    medal = "🥈";
+  } else if (placeVal === 3) {
+    medal = "🥉";
+  } else if (placeVal != null) {
+    medal = String(placeVal);
+  }
+
+  const clubContent = (() => {
+    if (res.registration.athlete?.club) {
+      return (
+        <span>
+          {res.registration.athlete.club.name}
+          {res.registration.athlete.club.region && (
+            <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
+              {res.registration.athlete.club.region}
+            </span>
+          )}
+        </span>
+      );
+    }
+    if (res.registration.team?.club) {
+      return (
+        <span>
+          {res.registration.team.club.name}
+          {res.registration.team.club.region && (
+            <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
+              {res.registration.team.club.region}
+            </span>
+          )}
+        </span>
+      );
+    }
+    return "—";
+  })();
 
   return (
     <TableRow className="hover:bg-muted/10">
@@ -105,27 +133,7 @@ function CategoryResultRow({
         {formatRegistrationName(res.registration)}
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">
-        {res.registration.athlete?.club ? (
-          <span>
-            {res.registration.athlete.club.name}
-            {res.registration.athlete.club.region && (
-              <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
-                {res.registration.athlete.club.region}
-              </span>
-            )}
-          </span>
-        ) : res.registration.team?.club ? (
-          <span>
-            {res.registration.team.club.name}
-            {res.registration.team.club.region && (
-              <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
-                {res.registration.team.club.region}
-              </span>
-            )}
-          </span>
-        ) : (
-          "—"
-        )}
+        {clubContent}
       </TableCell>
       <TableCell className="text-center font-semibold text-sm">
         <span className="text-green-500 font-bold">{res.wins}</span>
@@ -465,19 +473,8 @@ export default function CategoryDetailPage() {
   };
 
   const getMatchingCategories = (reg: Registration, _enteredWeight: number) => {
-    if (!tournament || !tournament.categories || !reg.athlete) return [];
+    if (!tournament?.categories || !reg.athlete) return [];
     const athlete = reg.athlete;
-
-    const getAgeAsOf = (birthDateStr: string, refDateStr: string) => {
-      const birthDate = new Date(birthDateStr);
-      const refDate = new Date(refDateStr);
-      let age = refDate.getFullYear() - birthDate.getFullYear();
-      const m = refDate.getMonth() - birthDate.getMonth();
-      if (m < 0 || (m === 0 && refDate.getDate() < birthDate.getDate())) {
-        age--;
-      }
-      return age;
-    };
 
     const athleteAge = getAgeAsOf(athlete.birth_date, tournament.start_date);
 
@@ -1051,8 +1048,8 @@ export default function CategoryDetailPage() {
             {/* Валідація ваги та перенесення в іншу категорію */}
             {(() => {
               const watchedWeight = watch("weight");
-              const weightNum = watchedWeight ? parseFloat(String(watchedWeight)) : NaN;
-              const isWeightOutOfRange = !isNaN(weightNum) && category && (
+              const weightNum = watchedWeight ? Number.parseFloat(String(watchedWeight)) : Number.NaN;
+              const isWeightOutOfRange = !Number.isNaN(weightNum) && category && (
                 (category.min_weight && weightNum < category.min_weight) ||
                 (category.max_weight && weightNum > category.max_weight)
               );

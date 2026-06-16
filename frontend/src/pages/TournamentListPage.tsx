@@ -222,6 +222,61 @@ export default function TournamentListPage() {
     }
   };
 
+  const renderListContent = () => {
+    if (isLoading && sortedTournaments.length === 0) {
+      return (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+        </div>
+      );
+    }
+
+    if (sortedTournaments.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
+            <Trophy className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <div>
+            <p className="font-medium text-foreground">Турнірів не знайдено</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {search ? "Спробуйте змінити пошуковий запит" : "У цій категорії поки немає турнірів"}
+            </p>
+          </div>
+          {isOrganizer && !search && activeTab === "active" && (
+            <Button variant="sport" size="sm" onClick={() => setDialogOpen(true)} disabled={hasDebt}>
+              <Plus className="w-4 h-4" /> Створити турнір
+            </Button>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {sortedTournaments.map((t) => (
+            <TournamentCard key={t.id} tournament={t} />
+          ))}
+        </div>
+
+        {/* Пагінація "Завантажити ще" */}
+        {nextUrl && (
+          <div className="flex justify-center pt-6">
+            <Button
+              variant="outline"
+              onClick={() => fetchTournaments(false)}
+              disabled={isLoading}
+            >
+              {isLoading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Завантажити ще
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="container py-8 space-y-6">
       {/* Заборгованість перед платформою */}
@@ -377,50 +432,7 @@ export default function TournamentListPage() {
       </div>
 
       {/* Список */}
-      {isLoading && sortedTournaments.length === 0 ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
-        </div>
-      ) : sortedTournaments.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-            <Trophy className="w-8 h-8 text-muted-foreground" />
-          </div>
-          <div>
-            <p className="font-medium text-foreground">Турнірів не знайдено</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {search ? "Спробуйте змінити пошуковий запит" : "У цій категорії поки немає турнірів"}
-            </p>
-          </div>
-          {isOrganizer && !search && activeTab === "active" && (
-            <Button variant="sport" size="sm" onClick={() => setDialogOpen(true)} disabled={hasDebt}>
-              <Plus className="w-4 h-4" /> Створити турнір
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {sortedTournaments.map((t) => (
-              <TournamentCard key={t.id} tournament={t} />
-            ))}
-          </div>
-
-          {/* Пагінація "Завантажити ще" */}
-          {nextUrl && (
-            <div className="flex justify-center pt-6">
-              <Button
-                variant="outline"
-                onClick={() => fetchTournaments(false)}
-                disabled={isLoading}
-              >
-                {isLoading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                Завантажити ще
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      {renderListContent()}
 
       {/* Діалог створення */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

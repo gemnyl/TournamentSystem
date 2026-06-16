@@ -96,6 +96,34 @@ function getStandingMedal(place: number): string {
   return "";
 }
 
+function getCompetitorName(match: Match, side: "aka" | "ao") {
+  const isAka = side === "aka";
+  const athlete = isAka ? match.athlete_first : match.athlete_second;
+  const reg = isAka ? match.reg_first : match.reg_second;
+  if (athlete) {
+    return formatAthleteName(athlete);
+  }
+  return formatRegistrationName(reg) || "";
+}
+
+function getCompetitorClub(match: Match, side: "aka" | "ao") {
+  const isAka = side === "aka";
+  const athlete = isAka ? match.athlete_first : match.athlete_second;
+  const reg = isAka ? match.reg_first : match.reg_second;
+  if (athlete) {
+    return reg?.team?.name ?? "";
+  }
+  return reg?.athlete?.club?.name ?? reg?.team?.club?.name ?? "";
+}
+
+function getCompetitorScore(match: Match, side: "aka" | "ao") {
+  const isAka = side === "aka";
+  if (match.judging_mode === "flags") {
+    return isAka ? (match.flags_aka ?? 0) : (match.flags_ao ?? 0);
+  }
+  return isAka ? match.score_first : match.score_second;
+}
+
 export default function KumiteWKFScoreboard({
   match,
   timerState,
@@ -105,8 +133,6 @@ export default function KumiteWKFScoreboard({
   resultsCategoryName = "",
 }: Readonly<KumiteWKFScoreboardProps>) {
   void timerState;
-  const aka = match?.reg_first;
-  const ao  = match?.reg_second;
 
   const isCompleted = match?.status === "completed";
   const winnerIsAka = isCompleted && match?.winner === match?.reg_first?.id;
@@ -120,114 +146,116 @@ export default function KumiteWKFScoreboard({
     .filter((r): r is typeof r & { place: number } => r.place != null && r.place > 0)
     .sort((a, b) => a.place - b.place);
 
+  const renderStandings = () => {
+    return (
+      <div className="col-span-3 h-full w-full bg-[#0b0f15] flex flex-col items-center justify-center p-12 z-50 select-none">
+        <div className="text-center space-y-3 mb-10 w-full max-w-4xl">
+          <h1 className="text-white font-extrabold tracking-tight text-5xl uppercase font-scoreboard">
+            {resultsCategoryName}
+          </h1>
+          <div className="text-amber-500 font-bold tracking-[0.2em] uppercase text-sm font-scoreboard">
+            ПІДСУМКОВИЙ ЗАЛІК ЗМАГАНЬ
+          </div>
+          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-2" />
+        </div>
+
+        {/* Standings List */}
+        <div className="w-full max-w-3xl bg-zinc-950/60 border border-zinc-800/60 rounded-2xl p-6 shadow-2xl backdrop-blur-md space-y-3">
+          {finalStandings.map((res) => {
+            const place = res.place;
+            const name = formatRegistrationName(res.registration) || res.name || "—";
+            const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
+            const region = res.registration?.athlete?.club?.region ?? res.registration?.team?.club?.region;
+
+            const badgeClass = getStandingBadgeClass(place);
+            const rowClass = getStandingRowClass(place);
+            const medal = getStandingMedal(place);
+
+            return (
+              <div
+                key={res.registration?.id || res.id}
+                className={cn(
+                  "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
+                  rowClass
+                )}
+              >
+                <div className="flex items-center gap-5">
+                  {/* Place Number */}
+                  <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center text-xl uppercase tracking-wider font-bold shrink-0", badgeClass)}>
+                    {place}
+                  </div>
+
+                  {/* Name and Club */}
+                  <div className="flex flex-col">
+                    <span className="text-2xl font-bold tracking-wide uppercase text-white">
+                      {name}
+                    </span>
+                    <span className="text-sm text-zinc-400 font-medium uppercase tracking-wider">
+                      {club}{region ? ` (${region})` : ""}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Medals/Icons if desired, or just clean layout */}
+                <div className="text-2xl select-none">
+                  {medal}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderActiveMatch = () => {
+    if (!match) return null;
+    const isKata = match.judging_mode === "flags";
+    return (
+      <>
+        {/* RED / AKA (LEFT) */}
+        <AthleteColumn
+          side="aka"
+          name={getCompetitorName(match, "aka")}
+          club={getCompetitorClub(match, "aka")}
+          score={getCompetitorScore(match, "aka")}
+          warnings={match.warnings_first}
+          hasSenshu={match.senshu === "aka"}
+          isWinner={winnerIsAka}
+          isKata={isKata}
+        />
+
+        {/* CENTER COLUMN (TIMER ONLY) */}
+        <div className="center-col">
+          {(!isKata || match.show_timer) && (
+            <div className="timer-digits">
+              {formatTimer(remainingMs)}
+            </div>
+          )}
+        </div>
+
+        {/* BLUE / AO (RIGHT) */}
+        <AthleteColumn
+          side="ao"
+          name={getCompetitorName(match, "ao")}
+          club={getCompetitorClub(match, "ao")}
+          score={getCompetitorScore(match, "ao")}
+          warnings={match.warnings_second}
+          hasSenshu={match.senshu === "ao"}
+          isWinner={winnerIsAo}
+          isKata={isKata}
+        />
+      </>
+    );
+  };
+
   const renderContent = () => {
     if (match) {
-      return (
-        <>
-          {/* RED / AKA (LEFT) */}
-          <AthleteColumn
-            side="aka"
-            name={match.athlete_first
-              ? formatAthleteName(match.athlete_first)
-              : (formatRegistrationName(aka) || "")}
-            club={match.athlete_first
-              ? (aka?.team?.name ?? "")
-              : (aka?.athlete?.club?.name ?? aka?.team?.club?.name ?? "")}
-            score={match.judging_mode === "flags" ? (match.flags_aka ?? 0) : match.score_first}
-            warnings={match.warnings_first}
-            hasSenshu={match.senshu === "aka"}
-            isWinner={winnerIsAka}
-            isKata={match.judging_mode === "flags"}
-          />
-
-          {/* CENTER COLUMN (TIMER ONLY) */}
-          <div className="center-col">
-            {(match.judging_mode !== "flags" || match.show_timer) && (
-              <div className="timer-digits">
-                {formatTimer(remainingMs)}
-              </div>
-            )}
-          </div>
-
-          {/* BLUE / AO (RIGHT) */}
-          <AthleteColumn
-            side="ao"
-            name={match.athlete_second
-              ? formatAthleteName(match.athlete_second)
-              : (formatRegistrationName(ao) || "")}
-            club={match.athlete_second
-              ? (ao?.team?.name ?? "")
-              : (ao?.athlete?.club?.name ?? ao?.team?.club?.name ?? "")}
-            score={match.judging_mode === "flags" ? (match.flags_ao ?? 0) : match.score_second}
-            warnings={match.warnings_second}
-            hasSenshu={match.senshu === "ao"}
-            isWinner={winnerIsAo}
-            isKata={match.judging_mode === "flags"}
-          />
-        </>
-      );
+      return renderActiveMatch();
     }
 
     if (categoryResults && finalStandings.length > 0) {
-      return (
-        <div className="col-span-3 h-full w-full bg-[#0b0f15] flex flex-col items-center justify-center p-12 z-50 select-none">
-          <div className="text-center space-y-3 mb-10 w-full max-w-4xl">
-            <h1 className="text-white font-extrabold tracking-tight text-5xl uppercase font-scoreboard">
-              {resultsCategoryName}
-            </h1>
-            <div className="text-amber-500 font-bold tracking-[0.2em] uppercase text-sm font-scoreboard">
-              ПІДСУМКОВИЙ ЗАЛІК ЗМАГАНЬ
-            </div>
-            <div className="w-32 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-2" />
-          </div>
-
-          {/* Standings List */}
-          <div className="w-full max-w-3xl bg-zinc-950/60 border border-zinc-800/60 rounded-2xl p-6 shadow-2xl backdrop-blur-md space-y-3">
-            {finalStandings.map((res) => {
-              const place = res.place;
-              const name = formatRegistrationName(res.registration) || res.name || "—";
-              const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
-              const region = res.registration?.athlete?.club?.region ?? res.registration?.team?.club?.region;
-
-              const badgeClass = getStandingBadgeClass(place);
-              const rowClass = getStandingRowClass(place);
-              const medal = getStandingMedal(place);
-
-              return (
-                <div
-                  key={res.registration?.id || res.id}
-                  className={cn(
-                    "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
-                    rowClass
-                  )}
-                >
-                  <div className="flex items-center gap-5">
-                    {/* Place Number */}
-                    <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center text-xl uppercase tracking-wider font-bold shrink-0", badgeClass)}>
-                      {place}
-                    </div>
-
-                    {/* Name and Club */}
-                    <div className="flex flex-col">
-                      <span className="text-2xl font-bold tracking-wide uppercase text-white">
-                        {name}
-                      </span>
-                      <span className="text-sm text-zinc-400 font-medium uppercase tracking-wider">
-                        {club}{region ? ` (${region})` : ""}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Medals/Icons if desired, or just clean layout */}
-                  <div className="text-2xl select-none">
-                    {medal}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      );
+      return renderStandings();
     }
 
     return (

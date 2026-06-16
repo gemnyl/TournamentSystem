@@ -130,7 +130,7 @@ class TournamentSerializer(serializers.ModelSerializer):
                 if has_debt:
                     raise serializers.ValidationError(
                         "Неможливо створити турнір, оскільки у вас є "
-                        "неоплачена комісія за попередні турніри."
+                        + "неоплачена комісія за попередні турніри."
                     )
         return attrs
 
@@ -255,6 +255,139 @@ class RegistrationSerializer(serializers.ModelSerializer):
             v for v in self.validators if not isinstance(v, serializers.UniqueTogetherValidator)
         ]
 
+    def _validate_bracket_lock(self, category):
+        if category.matches.exists():
+            raise serializers.ValidationError(
+                "Категорія заблокована: сітка змагань уже сформована."
+            )
+
+    def _validate_tournament_status(self, category, athlete, team):
+        tournament = category.tournament
+        if tournament.status != tournament.Status.REGISTRATION:
+            raise serializers.ValidationError(
+                "Реєстрація можлива лише тоді, коли турнір знаходиться у статусі 'Реєстрація'."
+            )
+
+        from django.utils import timezone
+
+        now = timezone.now()
+        if tournament.registration_start and now < tournament.registration_start:
+            raise serializers.ValidationError("Реєстрація на цей турнір ще не розпочалася.")
+        if tournament.registration_end and now > tournament.registration_end:
+            raise serializers.ValidationError("Реєстрація на цей турнір вже завершилася.")
+
+        # Uniqueness checks (since we removed UniqueTogetherValidators)
+        if athlete and Registration.objects.filter(athlete=athlete, category=category).exists():
+            raise serializers.ValidationError("Спортсмен уже зареєстрований у цій категорії.")
+        if team and Registration.objects.filter(team=team, category=category).exists():
+            raise serializers.ValidationError("Команда уже зареєстрована у цій категорії.")
+
+    def _validate_individual_vs_team(self, category, athlete, team, is_create):
+        if category.is_team:
+            if not team and is_create:
+                raise serializers.ValidationError(
+                    "Для групової категорії необхідно вказати команду."
+                )
+            if athlete:
+                raise serializers.ValidationError(
+                    "Для групової категорії не можна вказувати окремого спортсмена."
+                )
+        else:
+            if not athlete and is_create:
+                raise serializers.ValidationError(
+                    "Для індивідуальної категорії необхідно вказати спортсмена."
+                )
+            if team:
+                raise serializers.ValidationError(
+                    "Для індивідуальної категорії не можна вказувати команду."
+                )
+
+    def _validate_coach_ownership(self, athlete, team):
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            if request.user.role == "coach":
+                if athlete and athlete.coach != request.user:
+                    raise serializers.ValidationError(
+                        "Ви можете реєструвати лише власних спортсменів."
+                    )
+                if team and team.coach != request.user:
+                    raise serializers.ValidationError("Ви можете реєструвати лише власні команди.")
+
+    def _validate_individual_athlete_audit(self, category, athlete, tournament):
+        if athlete:
+            is_eligible, reasons = category.validate_athlete_eligibility(
+                athlete, tournament.start_date
+            )
+            if not is_eligible:
+                raise serializers.ValidationError(
+                    f"Спортсмен не підходить до цієї категорії: {', '.join(reasons)}"
+                )
+            if category.allowed_skill_level and category.allowed_skill_level.strip():
+                if (
+                    not athlete.skill_level
+                    or athlete.skill_level.strip().lower()
+                    != category.allowed_skill_level.strip().lower()
+                ):
+                    raise serializers.ValidationError(
+                        f"Рівень майстерності '{athlete.skill_level}' не "
+                        + f"відповідає вимогам категорії ({category.allowed_skill_level})."
+                    )
+
+    def _validate_team_athletes_audit(self, category, team, tournament):
+        if team:
+            for tm_athlete in team.athletes.all():
+                is_eligible, reasons = category.validate_athlete_eligibility(
+                    tm_athlete, tournament.start_date
+                )
+                if not is_eligible:
+                    raise serializers.ValidationError(
+                        f"Спортсмен команди {tm_athlete.get_full_name()} "
+                        f"не підходить до цієї категорії: {', '.join(reasons)}"
+                    )
+                if category.allowed_skill_level and category.allowed_skill_level.strip():
+                    if (
+                        not tm_athlete.skill_level
+                        or tm_athlete.skill_level.strip().lower()
+                        != category.allowed_skill_level.strip().lower()
+                    ):
+                        raise serializers.ValidationError(
+                            f"Рівень майстерності '{tm_athlete.skill_level}' у "
+                            + f"спортсмена {tm_athlete.get_full_name()} не "
+                            + f"відповідає вимогам категорії ({category.allowed_skill_level})."
+                        )
+
+    def _validate_category_audit(self, category, athlete, team):
+        tournament = category.tournament
+        if not category.is_team:
+            self._validate_individual_athlete_audit(category, athlete, tournament)
+        else:
+            self._validate_team_athletes_audit(category, team, tournament)
+
+    def _validate_recorded_weight_range(self, weight, curr_category):
+        min_w = curr_category.min_weight
+        if min_w is not None and weight < float(min_w):
+            raise serializers.ValidationError(
+                f"Вага при зважуванні ({weight} кг) менша за мінімально "
+                + f"допустиму для цієї категорії ({min_w} кг)."
+            )
+        max_w = curr_category.max_weight
+        if max_w is not None and weight > float(max_w):
+            raise serializers.ValidationError(
+                f"Вага при зважуванні ({weight} кг) більша за максимально "
+                + f"допустиму для цієї категорії ({max_w} кг)."
+            )
+
+    def _validate_weight_status(self, curr_category, attrs):
+        status = attrs.get("status", self.instance.status if self.instance else "pending")
+        if status == "confirmed":
+            recorded_weight = self.instance.recorded_weight if self.instance else None
+            if curr_category.tournament.weigh_in_required and recorded_weight is None:
+                raise serializers.ValidationError(
+                    "Неможливо підтвердити реєстрацію без проходження зважування."
+                )
+            if recorded_weight is not None:
+                self._validate_recorded_weight_range(float(recorded_weight), curr_category)
+
     def validate(self, attrs):
         category = attrs.get("category")
         athlete = attrs.get("athlete")
@@ -266,141 +399,17 @@ class RegistrationSerializer(serializers.ModelSerializer):
             category = self.instance.category
 
         if category:
-            # 1. Bracket Lock Check
-            if category.matches.exists():
-                raise serializers.ValidationError(
-                    "Категорія заблокована: сітка змагань уже сформована."
-                )
-
-            # 2. Tournament status check (only on create)
+            self._validate_bracket_lock(category)
             if is_create:
-                tournament = category.tournament
-                if tournament.status != tournament.Status.REGISTRATION:
-                    raise serializers.ValidationError(
-                        "Реєстрація можлива лише тоді, коли турнір знаходиться "
-                        "у статусі 'Реєстрація'."
-                    )
+                self._validate_tournament_status(category, athlete, team)
+            self._validate_individual_vs_team(category, athlete, team, is_create)
+            self._validate_coach_ownership(athlete, team)
+            self._validate_category_audit(category, athlete, team)
 
-                from django.utils import timezone
-
-                now = timezone.now()
-                if tournament.registration_start and now < tournament.registration_start:
-                    raise serializers.ValidationError("Реєстрація на цей турнір ще не розпочалася.")
-                if tournament.registration_end and now > tournament.registration_end:
-                    raise serializers.ValidationError("Реєстрація на цей турнір вже завершилася.")
-
-                # Uniqueness checks (since we removed UniqueTogetherValidators)
-                if (
-                    athlete
-                    and Registration.objects.filter(athlete=athlete, category=category).exists()
-                ):
-                    raise serializers.ValidationError(
-                        "Спортсмен уже зареєстрований у цій категорії."
-                    )
-                if team and Registration.objects.filter(team=team, category=category).exists():
-                    raise serializers.ValidationError("Команда уже зареєстрована у цій категорії.")
-
-            # 3. Clean logic check (individual vs team category)
-            if category.is_team:
-                if not team and is_create:
-                    raise serializers.ValidationError(
-                        "Для групової категорії необхідно вказати команду."
-                    )
-                if athlete:
-                    raise serializers.ValidationError(
-                        "Для групової категорії не можна вказувати окремого спортсмена."
-                    )
-            else:
-                if not athlete and is_create:
-                    raise serializers.ValidationError(
-                        "Для індивідуальної категорії необхідно вказати спортсмена."
-                    )
-                if team:
-                    raise serializers.ValidationError(
-                        "Для індивідуальної категорії не можна вказувати команду."
-                    )
-
-            # 4. Coach ownership check (if coach is requesting)
-            request = self.context.get("request")
-            if request and request.user and request.user.is_authenticated:
-                if request.user.role == "coach":
-                    if athlete and athlete.coach != request.user:
-                        raise serializers.ValidationError(
-                            "Ви можете реєструвати лише власних спортсменів."
-                        )
-                    if team and team.coach != request.user:
-                        raise serializers.ValidationError(
-                            "Ви можете реєструвати лише власні команди."
-                        )
-
-            # 5. Smart Category Audit (Age, Weight, Gender, Skill Level)
-            tournament = category.tournament
-            if not category.is_team:
-                if athlete:
-                    is_eligible, reasons = category.validate_athlete_eligibility(
-                        athlete, tournament.start_date
-                    )
-                    if not is_eligible:
-                        raise serializers.ValidationError(
-                            f"Спортсмен не підходить до цієї категорії: {', '.join(reasons)}"
-                        )
-                    if category.allowed_skill_level and category.allowed_skill_level.strip():
-                        if (
-                            not athlete.skill_level
-                            or athlete.skill_level.strip().lower()
-                            != category.allowed_skill_level.strip().lower()
-                        ):
-                            raise serializers.ValidationError(
-                                f"Рівень майстерності '{athlete.skill_level}' не "
-                                f"відповідає вимогам категорії ({category.allowed_skill_level})."
-                            )
-            else:
-                if team:
-                    for tm_athlete in team.athletes.all():
-                        is_eligible, reasons = category.validate_athlete_eligibility(
-                            tm_athlete, tournament.start_date
-                        )
-                        if not is_eligible:
-                            raise serializers.ValidationError(
-                                f"Спортсмен команди {tm_athlete.get_full_name()} "
-                                f"не підходить до цієї категорії: {', '.join(reasons)}"
-                            )
-                        if category.allowed_skill_level and category.allowed_skill_level.strip():
-                            if (
-                                not tm_athlete.skill_level
-                                or tm_athlete.skill_level.strip().lower()
-                                != category.allowed_skill_level.strip().lower()
-                            ):
-                                raise serializers.ValidationError(
-                                    f"Рівень майстерності '{tm_athlete.skill_level}' у "
-                                    f"спортсмена {tm_athlete.get_full_name()} не відповідає "
-                                    f"вимогам категорії ({category.allowed_skill_level})."
-                                )
-        # 6. Weight/weigh-in validation for confirmed status
         curr_category = category or (self.instance.category if self.instance else None)
         if curr_category:
-            status = attrs.get("status", self.instance.status if self.instance else "pending")
-            if status == "confirmed":
-                recorded_weight = self.instance.recorded_weight if self.instance else None
-                if curr_category.tournament.weigh_in_required:
-                    if recorded_weight is None:
-                        raise serializers.ValidationError(
-                            "Неможливо підтвердити реєстрацію без проходження зважування."
-                        )
-                if recorded_weight is not None:
-                    weight = float(recorded_weight)
-                    min_w = curr_category.min_weight
-                    if min_w is not None and weight < float(min_w):
-                        raise serializers.ValidationError(
-                            f"Вага при зважуванні ({weight} кг) менша за мінімально "
-                            f"допустиму для цієї категорії ({min_w} кг)."
-                        )
-                    max_w = curr_category.max_weight
-                    if max_w is not None and weight > float(max_w):
-                        raise serializers.ValidationError(
-                            f"Вага при зважуванні ({weight} кг) більша за максимально "
-                            f"допустиму для цієї категорії ({max_w} кг)."
-                        )
+            self._validate_weight_status(curr_category, attrs)
+
         return attrs
 
     def create(self, validated_data):

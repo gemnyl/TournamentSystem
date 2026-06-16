@@ -30,7 +30,7 @@ export function ConfirmDialog({
   cancelText = "Скасувати",
   variant = "default",
   isLoading = false,
-}: ConfirmDialogProps) {
+}: Readonly<ConfirmDialogProps>) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[425px]">

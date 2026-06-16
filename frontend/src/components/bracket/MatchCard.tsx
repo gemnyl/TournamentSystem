@@ -78,22 +78,12 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
 
   if (isTeam && !compact) {
     return (
-      <div
-        role={onClick && !isBye ? "button" : undefined}
-        tabIndex={onClick && !isBye ? 0 : undefined}
+      <button
+        type="button"
+        disabled={!onClick || isBye}
         onClick={handleClick}
-        onKeyDown={
-          onClick && !isBye
-            ? (e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleClick();
-                }
-              }
-            : undefined
-        }
         className={cn(
-          "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-between",
+          "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-between text-left outline-none focus:ring-1 focus:ring-amber-500/50",
           !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
           isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 animate-pulse bg-amber-500/5",
           "w-72 py-1.5",
@@ -165,7 +155,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
                   "font-mono text-[9px] font-black w-[14%] text-center shrink-0",
                   isBoutLive ? "text-amber-400 animate-pulse" : "text-foreground/70"
                 )}>
-                  {bout.status !== "scheduled" ? `${scoreA}:${scoreB}` : "—"}
+                  {bout.status === "scheduled" ? "—" : `${scoreA}:${scoreB}`}
                 </span>
 
                 {/* AO Athlete */}
@@ -183,34 +173,24 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
 
         {/* Win method details if completed */}
         {isDone && match.win_method && (
-          <div className="px-3 py-1 border-t border-border/30 bg-muted/10 text-center">
+          <div className="px-3 py-1 border-t border-border/30 bg-muted/10 text-center w-full">
             <span className="text-[8px] text-amber-500/90 font-bold tracking-wider uppercase">
               Перемога: {match.win_method}
             </span>
           </div>
         )}
-      </div>
+      </button>
     );
   }
 
   if (isTeam && compact) {
     return (
-      <div
-        role={onClick && !isBye ? "button" : undefined}
-        tabIndex={onClick && !isBye ? 0 : undefined}
+      <button
+        type="button"
+        disabled={!onClick || isBye}
         onClick={handleClick}
-        onKeyDown={
-          onClick && !isBye
-            ? (e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleClick();
-                }
-              }
-            : undefined
-        }
         className={cn(
-          "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-center",
+          "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-center text-left outline-none focus:ring-1 focus:ring-amber-500/50",
           !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
           isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 animate-pulse bg-amber-500/5",
           isBye && "opacity-30",
@@ -238,27 +218,17 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
             </p>
           </div>
         </div>
-      </div>
+      </button>
     );
   }
 
   return (
-    <div
-      role={onClick && !isBye ? "button" : undefined}
-      tabIndex={onClick && !isBye ? 0 : undefined}
+    <button
+      type="button"
+      disabled={!onClick || isBye}
       onClick={handleClick}
-      onKeyDown={
-        onClick && !isBye
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                handleClick();
-              }
-            }
-          : undefined
-      }
       className={cn(
-        "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm",
+        "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm text-left outline-none focus:ring-1 focus:ring-amber-500/50",
         "min-h-[108px] py-1.5 h-auto flex flex-col justify-center",
         !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
         isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 animate-pulse bg-amber-500/5",
@@ -355,12 +325,12 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
 
       {/* Метод перемоги */}
       {isDone && match.win_method && !compact && (
-        <div className="px-3 pb-2.5 pt-1 border-t border-border/30 bg-muted/10">
+        <div className="px-3 pb-2.5 pt-1 border-t border-border/30 bg-muted/10 w-full">
           <span className="text-[9px] text-amber-500/90 font-bold tracking-wider uppercase">
             Перемога: {match.win_method}
           </span>
         </div>
       )}
-    </div>
+    </button>
   );
 }

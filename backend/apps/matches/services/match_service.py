@@ -396,39 +396,7 @@ class MatchService:
 
         return True, ""
 
-    @transaction.atomic
-    def reset_match(self, judge=None) -> Match:
-        """Повністю скидає стан поєдинку, з каскадним видаленням переможця з наступного бою."""
-        m = self.match
-        can_reset, error_msg = self.can_reset_match()
-        if not can_reset:
-            raise ValidationError(error_msg)
-
-        # Якщо це батьківський командний поєдинок, скидаємо також усі його суб-бої
-        if m.category.is_team and not m.parent_team_match:
-            for bout in m.team_bouts.all():
-                bout.score_first = 0
-                bout.score_second = 0
-                bout.warnings_first = 0
-                bout.warnings_second = 0
-                bout.senshu = Match.Senshu.NONE
-                bout.winner = None
-                bout.win_method = ""
-                bout.status = Match.Status.SCHEDULED
-                bout.timer_status = Match.TimerStatus.NOT_STARTED
-                bout.timer_elapsed_ms = 0
-                bout.timer_started_at = None
-                bout.completed_at = None
-                bout.started_at = None
-                bout.flags_aka = None
-                bout.flags_ao = None
-                bout.save()
-                from apps.common.broadcast import broadcast_match_update
-
-                broadcast_match_update(bout)
-
-        self._clear_winner_from_next_match()
-
+    def _reset_match_fields(self, m: Match):
         m.score_first = 0
         m.score_second = 0
         m.warnings_first = 0
@@ -445,7 +413,15 @@ class MatchService:
         m.flags_aka = None
         m.flags_ao = None
 
-        # Скидаємо тривалість таймера до значення категорії або за замовчуванням
+    def _reset_team_bouts(self, m: Match):
+        from apps.common.broadcast import broadcast_match_update
+
+        for bout in m.team_bouts.all():
+            self._reset_match_fields(bout)
+            bout.save()
+            broadcast_match_update(bout)
+
+    def _resolve_default_duration(self, m: Match) -> int:
         category_duration = m.category.match_duration_seconds
         if not category_duration:
             try:
@@ -458,8 +434,77 @@ class MatchService:
                     category_duration = ruleset.get_default_duration_seconds()
             except Exception:
                 pass
+        return category_duration or 180
 
-        m.timer_duration_ms = (category_duration * 1000) if category_duration else 180000
+    def _handle_parent_reset_update(self, m: Match):
+        parent = m.parent_team_match
+        parent.refresh_from_db()
+
+        # Перераховуємо рахунок батьківського матчу
+        completed_bouts = parent.team_bouts.filter(status=Match.Status.COMPLETED)
+        parent.score_first = completed_bouts.filter(winner_id=parent.reg_first_id).count()
+        parent.score_second = completed_bouts.filter(winner_id=parent.reg_second_id).count()
+
+        from apps.rulesets.registry import get_ruleset
+
+        try:
+            ruleset = get_ruleset(parent.category.ruleset_key)
+            is_finished, parent_winner_id, parent_win_method = ruleset.determine_team_winner(parent)
+        except Exception:
+            is_finished, parent_winner_id, parent_win_method = False, None, ""
+
+        if is_finished and parent_winner_id:
+            parent_winner_reg = (
+                parent.reg_first if parent.reg_first_id == parent_winner_id else parent.reg_second
+            )
+            parent.set_winner(parent_winner_reg, parent_win_method)
+        else:
+            # Батьківська зустріч більше не завершена (якщо була завершена)
+            if parent.status == Match.Status.COMPLETED or parent.winner is not None:
+                # Очищуємо переможця батьківської зустрічі з наступного кола сітки
+                parent_svc = MatchService(parent)
+                parent_svc._clear_winner_from_next_match()
+
+                parent.winner = None
+                parent.win_method = ""
+                parent.completed_at = None
+
+            # Визначаємо новий статус батьківської зустрічі
+            active_statuses = [Match.Status.ONGOING, Match.Status.COMPLETED]
+            has_active = parent.team_bouts.filter(status__in=active_statuses).exists()
+            parent.status = Match.Status.ONGOING if has_active else Match.Status.SCHEDULED
+            parent.save(
+                update_fields=[
+                    "score_first",
+                    "score_second",
+                    "winner",
+                    "win_method",
+                    "completed_at",
+                    "status",
+                ]
+            )
+
+            from apps.common.broadcast import broadcast_match_update
+
+            broadcast_match_update(parent)
+
+    @transaction.atomic
+    def reset_match(self, judge=None) -> Match:
+        """Повністю скидає стан поєдинку, з каскадним видаленням переможця з наступного бою."""
+        m = self.match
+        can_reset, error_msg = self.can_reset_match()
+        if not can_reset:
+            raise ValidationError(error_msg)
+
+        # Якщо це батьківський командний поєдинок, скидаємо також усі його суб-бої
+        if m.category.is_team and not m.parent_team_match:
+            self._reset_team_bouts(m)
+
+        self._clear_winner_from_next_match()
+
+        self._reset_match_fields(m)
+        category_duration = self._resolve_default_duration(m)
+        m.timer_duration_ms = category_duration * 1000
 
         # Очищуємо зафіксовані місця в категорії, бо результати вже не є остаточними
         from apps.tournaments.models import Registration
@@ -470,60 +515,7 @@ class MatchService:
 
         # Якщо це суб-бой командного матчу, оновлюємо рахунок та статус батьківського матчу
         if m.parent_team_match:
-            parent = m.parent_team_match
-            parent.refresh_from_db()
-
-            # Перераховуємо рахунок батьківського матчу
-            completed_bouts = parent.team_bouts.filter(status=Match.Status.COMPLETED)
-            parent.score_first = completed_bouts.filter(winner_id=parent.reg_first_id).count()
-            parent.score_second = completed_bouts.filter(winner_id=parent.reg_second_id).count()
-
-            from apps.rulesets.registry import get_ruleset
-
-            try:
-                ruleset = get_ruleset(parent.category.ruleset_key)
-                is_finished, parent_winner_id, parent_win_method = ruleset.determine_team_winner(
-                    parent
-                )
-            except Exception:
-                is_finished, parent_winner_id, parent_win_method = False, None, ""
-
-            if is_finished and parent_winner_id:
-                parent_winner_reg = (
-                    parent.reg_first
-                    if parent.reg_first_id == parent_winner_id
-                    else parent.reg_second
-                )
-                parent.set_winner(parent_winner_reg, parent_win_method)
-            else:
-                # Батьківська зустріч більше не завершена (якщо була завершена)
-                if parent.status == Match.Status.COMPLETED or parent.winner is not None:
-                    # Очищуємо переможця батьківської зустрічі з наступного кола сітки
-                    parent_svc = MatchService(parent)
-                    parent_svc._clear_winner_from_next_match()
-
-                    parent.winner = None
-                    parent.win_method = ""
-                    parent.completed_at = None
-
-                # Визначаємо новий статус батьківської зустрічі
-                active_statuses = [Match.Status.ONGOING, Match.Status.COMPLETED]
-                has_active = parent.team_bouts.filter(status__in=active_statuses).exists()
-                parent.status = Match.Status.ONGOING if has_active else Match.Status.SCHEDULED
-                parent.save(
-                    update_fields=[
-                        "score_first",
-                        "score_second",
-                        "winner",
-                        "win_method",
-                        "completed_at",
-                        "status",
-                    ]
-                )
-
-                from apps.common.broadcast import broadcast_match_update
-
-                broadcast_match_update(parent)
+            self._handle_parent_reset_update(m)
 
         event = self._write_event(MatchEvent.EventType.RESET, {}, judge)
 
