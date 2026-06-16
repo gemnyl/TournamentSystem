@@ -1,4 +1,5 @@
-import { useEffect, useState} from "react";
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2, Clock, Trophy, Award, Unlock
@@ -11,7 +12,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { toast } from "@/hooks/use-toast";
-import { cn, formatSportType } from "@/lib/utils";
+import { cn, formatSportType, formatRegistrationName, formatRegistrationClub, getAgeAsOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,17 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
+
+function getWeightRange(minWeight: number | null, maxWeight: number | null): string {
+  if (minWeight !== null && maxWeight !== null) {
+    return `${minWeight}–${maxWeight} кг`;
+  } else if (minWeight !== null) {
+    return `від ${minWeight} кг`;
+  } else if (maxWeight !== null) {
+    return `до ${maxWeight} кг`;
+  }
+  return "без обмежень";
+}
 
 interface CategoryResultRowProps {
   res: CategoryResult;
@@ -42,16 +54,44 @@ function CategoryResultRow({
   onPlaceOverrideChange,
 }: Readonly<CategoryResultRowProps>) {
   const placeVal = resultsPersisted ? res.registration?.place : placeOverrides[res.registration.id];
-  const medal =
-    placeVal === 1
-      ? "🥇"
-      : placeVal === 2
-      ? "🥈"
-      : placeVal === 3
-      ? "🥉"
-      : placeVal != null
-      ? `${placeVal}`
-      : "—";
+  let medal = "—";
+  if (placeVal === 1) {
+    medal = "🥇";
+  } else if (placeVal === 2) {
+    medal = "🥈";
+  } else if (placeVal === 3) {
+    medal = "🥉";
+  } else if (placeVal != null) {
+    medal = String(placeVal);
+  }
+
+  const clubContent = (() => {
+    if (res.registration.athlete?.club) {
+      return (
+        <span>
+          {res.registration.athlete.club.name}
+          {res.registration.athlete.club.region && (
+            <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
+              {res.registration.athlete.club.region}
+            </span>
+          )}
+        </span>
+      );
+    }
+    if (res.registration.team?.club) {
+      return (
+        <span>
+          {res.registration.team.club.name}
+          {res.registration.team.club.region && (
+            <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
+              {res.registration.team.club.region}
+            </span>
+          )}
+        </span>
+      );
+    }
+    return "—";
+  })();
 
   return (
     <TableRow className="hover:bg-muted/10">
@@ -90,21 +130,10 @@ function CategoryResultRow({
         )}
       </TableCell>
       <TableCell className="font-bold text-foreground">
-        {res.registration.athlete.full_name}
+        {formatRegistrationName(res.registration)}
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">
-        {res.registration.athlete.club ? (
-          <span>
-            {res.registration.athlete.club.name}
-            {res.registration.athlete.club.region && (
-              <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
-                {res.registration.athlete.club.region}
-              </span>
-            )}
-          </span>
-        ) : (
-          "—"
-        )}
+        {clubContent}
       </TableCell>
       <TableCell className="text-center font-semibold text-sm">
         <span className="text-green-500 font-bold">{res.wins}</span>
@@ -138,10 +167,15 @@ interface CategoryResult {
   registration: {
     id: number;
     place?: number | null;
-    athlete: {
+    athlete?: {
       full_name: string;
       club?: { name?: string; region?: string } | null;
-    };
+    } | null;
+    team?: {
+      name: string;
+      club?: { name?: string; region?: string } | null;
+      athletes?: { last_name: string }[] | null;
+    } | null;
   };
 }
 
@@ -204,6 +238,12 @@ export default function CategoryDetailPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedTatamiId, setSelectedTatamiId] = useState<string>("");
   const [assigningTatami, setAssigningTatami] = useState(false);
+  const confirmedPaidTeamsCount = useMemo(() => {
+    return registrations.filter(
+      (r) => r.status === "confirmed" && r.payment_status === "paid"
+    ).length;
+  }, [registrations]);
+
   const [rulesets, setRulesets] = useState<RulesetOption[]>([]);
 
   const categoryMatches = matches.filter((m: Match) => m.category === Number(id));
@@ -211,11 +251,15 @@ export default function CategoryDetailPage() {
   const categoryTatami = (firstMatchWithTatami && Array.isArray(tatamis))
     ? tatamis.find((t: Tatami) => t.id === firstMatchWithTatami.tatami)
     : undefined;
-  const canFinalizeOrUnlock = isOrganizer || (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id);
+  const isCompleted = tournament?.status === "completed";
+  const canFinalizeOrUnlock = !isCompleted && (isOrganizer || (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id));
 
   // Delete registration state
   const [deleteRegDialog, setDeleteRegDialog] = useState<Registration | null>(null);
   const [isDeletingReg, setIsDeletingReg] = useState(false);
+
+  const [targetCategoryId, setTargetCategoryId] = useState<string>("");
+  const [isTransferring, setIsTransferring] = useState(false);
 
   // Tab states and results engine states
   const [activeTab, setActiveTab] = useState<"registrations" | "results">("registrations");
@@ -228,7 +272,7 @@ export default function CategoryDetailPage() {
     resolver: zodResolver(editCategorySchema),
   });
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<WeighInForm>({
+  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<WeighInForm>({
     resolver: zodResolver(weighInSchema),
   });
 
@@ -247,10 +291,12 @@ export default function CategoryDetailPage() {
         api.get<Tournament>(`/tournaments/${catRes.data.tournament}/`),
         api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${catRes.data.tournament}`),
       ]);
-      setTatamis(Array.isArray(tatamiRes.data) ? tatamiRes.data : (tatamiRes.data as { results: Tatami[] }).results || []);
+      const tatamiData = tatamiRes.data;
+      setTatamis(Array.isArray(tatamiData) ? tatamiData : (tatamiData.results ?? []));
       setTournament(tournRes.data);
 
-      const allMatches = Array.isArray(matchRes.data) ? matchRes.data : matchRes.data.results || [];
+      const matchData = matchRes.data;
+      const allMatches = Array.isArray(matchData) ? matchData : (matchData.results ?? []);
       setMatches(allMatches);
 
       const categoryMatches = allMatches.filter((m: Match) => m.category === Number(id));
@@ -312,6 +358,16 @@ export default function CategoryDetailPage() {
     } finally {
       setGeneratingBracket(false);
     }
+  };
+
+  const handleOpenGenerateBracket = () => {
+    if (category?.is_team) {
+      const suggested = confirmedPaidTeamsCount >= 6 ? "single_elimination" : "round_robin";
+      setChosenFormat(suggested);
+    } else {
+      setChosenFormat(category?.bracket_format ?? "single_elimination");
+    }
+    setGenerateBracketDialogOpen(true);
   };
 
   const handleOpenEditCat = async () => {
@@ -416,6 +472,44 @@ export default function CategoryDetailPage() {
     }
   };
 
+  const getMatchingCategories = (reg: Registration, _enteredWeight: number) => {
+    if (!tournament?.categories || !reg.athlete) return [];
+    const athlete = reg.athlete;
+
+    const athleteAge = getAgeAsOf(athlete.birth_date, tournament.start_date);
+
+    return (tournament.categories || []).filter((cat: Category) => {
+      if (cat.id === category?.id) return false;
+
+      const genderMatches = cat.allowed_gender === "mixed" ||
+        (cat.allowed_gender === "male" && athlete.gender === "male") ||
+        (cat.allowed_gender === "female" && athlete.gender === "female");
+
+      const ageMatches = athleteAge >= cat.min_age && athleteAge <= cat.max_age;
+
+      return genderMatches && ageMatches;
+    });
+  };
+
+  const handleTransfer = async () => {
+    if (!weighInDialog || !targetCategoryId) return;
+    setIsTransferring(true);
+    try {
+      await api.patch(`/registrations/${weighInDialog.id}/`, {
+        category: Number(targetCategoryId),
+      });
+      toast({ title: "Спортсмена перенесено в іншу категорію!" });
+      setWeighInDialog(null);
+      setTargetCategoryId("");
+      reset();
+      fetchAll();
+    } catch {
+      // toast з interceptor
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
   // Видалення заявки
   const handleDeleteRegistration = async () => {
     if (!deleteRegDialog) return;
@@ -499,8 +593,8 @@ export default function CategoryDetailPage() {
   }
   if (!category) return null;
 
-  const canGenerateBracket = isOrganizer && category.status !== "completed" && registrations.some(r => r.status === "confirmed");
-  const canRegister = (isOrganizer || isCoach) && category.status === "registration";
+  const canGenerateBracket = !isCompleted && isOrganizer && category.status !== "completed" && registrations.some(r => r.status === "confirmed");
+  const canRegister = !isCompleted && (isOrganizer || isCoach) && category.status === "registration";
 
   // Обчислюємо оцінку розкладу для поточної категорії
   let estimateBanner = null;
@@ -512,22 +606,28 @@ export default function CategoryDetailPage() {
         hour: "2-digit",
         minute: "2-digit",
       });
-      estimateBanner = !estimate.isTatamiActive ? (
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20 mt-3 w-fit">
-          <Clock className="w-3.5 h-3.5" />
-          Роботу татамі №{estimate.tatamiNumber} призупинено (черга не активна)
-        </div>
-      ) : estimate.isLive ? (
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-400 border border-green-500/20 mt-3 w-fit animate-pulse">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-          ТРИВАЄ ЗАРАЗ НА ТАТАМІ №{estimate.tatamiNumber}
-        </div>
-      ) : (
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 mt-3 w-fit">
-          <Clock className="w-3.5 h-3.5" />
-          Очікуваний час початку: {timeStr} {estimate.tatamiNumber ? `(Татамі №${estimate.tatamiNumber})` : ""}
-        </div>
-      );
+      if (!estimate.isTatamiActive) {
+        estimateBanner = (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20 mt-3 w-fit">
+            <Clock className="w-3.5 h-3.5" />
+            Роботу татамі №{estimate.tatamiNumber} призупинено (черга не активна)
+          </div>
+        );
+      } else if (estimate.isLive) {
+        estimateBanner = (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 text-green-400 border border-green-500/20 mt-3 w-fit animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+            ТРИВАЄ ЗАРАЗ НА ТАТАМІ №{estimate.tatamiNumber}
+          </div>
+        );
+      } else {
+        estimateBanner = (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 mt-3 w-fit">
+            <Clock className="w-3.5 h-3.5" />
+            Очікуваний час початку: {timeStr} {estimate.tatamiNumber ? `(Татамі №${estimate.tatamiNumber})` : ""}
+          </div>
+        );
+      }
     }
   }
 
@@ -546,19 +646,11 @@ export default function CategoryDetailPage() {
           </div>
           <div className="flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">
-              {category.confirmed_registrations_count} учасників · {
-                category.min_weight !== null && category.max_weight !== null
-                  ? `${category.min_weight}–${category.max_weight} кг`
-                  : category.min_weight !== null
-                  ? `від ${category.min_weight} кг`
-                  : category.max_weight !== null
-                  ? `до ${category.max_weight} кг`
-                  : "без обмежень за вагою"
-              } · {category.min_age}–{category.max_age} р.
+              {category.confirmed_registrations_count} учасників · {getWeightRange(category.min_weight, category.max_weight)} · {category.min_age}–{category.max_age} р.
             </p>
             {estimateBanner}
           </div>
-          {isOrganizer && tatamis.length > 0 && category.has_bracket && (
+          {isOrganizer && tatamis.length > 0 && category.has_bracket && !isCompleted && (
             <div
               className="flex items-center gap-2 mt-3 border rounded-lg px-3 py-1.5 w-fit shadow-md text-zinc-100"
               style={{ backgroundColor: '#18181b', borderColor: '#27272a' }}
@@ -597,12 +689,12 @@ export default function CategoryDetailPage() {
             </Button>
           )}
           {canGenerateBracket && !category.has_bracket && (
-            <Button variant="sport" size="sm" onClick={() => { setChosenFormat(category.bracket_format); setGenerateBracketDialogOpen(true); }}>
+            <Button variant="sport" size="sm" onClick={handleOpenGenerateBracket}>
               <GitBranch className="w-4 h-4" />
               Згенерувати сітку
             </Button>
           )}
-          {isOrganizer && category.has_bracket && (
+          {isOrganizer && category.has_bracket && !isCompleted && (
             <Button variant="destructive" size="sm" onClick={() => setDeleteBracketDialogOpen(true)}>
               Вилучити сітку
             </Button>
@@ -614,7 +706,7 @@ export default function CategoryDetailPage() {
               </Link>
             </Button>
           ) : null}
-          {isOrganizer && (
+          {isOrganizer && !isCompleted && (
             <>
               <Button variant="outline" size="sm" onClick={handleOpenEditCat}>
                 Редагувати
@@ -661,57 +753,128 @@ export default function CategoryDetailPage() {
               <TableRow className="hover:bg-transparent">
                 <TableHead>Атлет</TableHead>
                 <TableHead>Клуб</TableHead>
-                {(isOrganizer || isCoach || isJudge) && <TableHead>Вага (факт.)</TableHead>}
-                <TableHead>Статус</TableHead>
-                {isOrganizer && <TableHead className="w-28 text-right">Дії</TableHead>}
+                {(isOrganizer || isCoach || isJudge) && <TableHead className="text-center">Вага (факт.)</TableHead>}
+                <TableHead className="text-center">Статус</TableHead>
+                <TableHead className="text-center">Оплата</TableHead>
+                {(isOrganizer || isCoach || (user && tournament?.staff_members?.includes(user.id))) && !isCompleted && (
+                  <TableHead className="w-56 text-right">Дії</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {registrations.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={isOrganizer ? 5 : 4} className="text-center text-muted-foreground py-8">
+                  <TableCell
+                    colSpan={
+                      5 +
+                      (((isOrganizer || isCoach || (user && tournament?.staff_members?.includes(user.id))) && !isCompleted) ? 1 : 0)
+                    }
+                    className="text-center text-muted-foreground py-8"
+                  >
                     Реєстрацій поки немає
                   </TableCell>
                 </TableRow>
-              ) : registrations.map((reg) => (
-                <TableRow key={reg.id}>
-                  <TableCell className="font-medium">{reg.athlete.full_name}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">{reg.athlete.club?.name}</TableCell>
-                  {(isOrganizer || isCoach || isJudge) && (
-                    <TableCell className="font-mono text-sm">
-                      {reg.recorded_weight != null ? `${reg.recorded_weight} кг` : "—"}
-                    </TableCell>
-                  )}
-                  <TableCell>
-                    <StatusBadge status={reg.status} type="registration" />
-                  </TableCell>
-                  {isOrganizer && (
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {reg.status === "pending" && tournament?.weigh_in_required !== false && (
-                          <Button
-                            variant="ghost" size="sm"
-                            onClick={() => setWeighInDialog(reg)}
-                          >
-                            <Scale className="w-3.5 h-3.5 mr-1" /> Зважити
-                          </Button>
+              ) : (
+                (() => {
+                  const isStaffOrOrg = user && (
+                    user.id === tournament?.organizer ||
+                    tournament?.staff_members?.includes(user.id) ||
+                    user.role === "admin"
+                  );
+                  return registrations.map((reg) => {
+                    const canDeleteReg = !isCompleted && (isOrganizer || (
+                      isCoach && (
+                        reg.athlete?.coach?.id === user?.id ||
+                        reg.team?.coach?.id === user?.id
+                      )
+                    ));
+                    const showActionsCell = (isOrganizer || isCoach || isStaffOrOrg) && !isCompleted;
+
+                    return (
+                      <TableRow key={reg.id}>
+                        <TableCell className="font-medium">
+                          {formatRegistrationName(reg)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {formatRegistrationClub(reg) || "—"}
+                        </TableCell>
+                        {(isOrganizer || isCoach || isJudge) && (
+                          <TableCell className="text-center font-mono text-sm">
+                            {reg.recorded_weight != null ? `${reg.recorded_weight} кг` : "—"}
+                          </TableCell>
                         )}
-                        {reg.status === "confirmed" && (
-                          <span className="flex items-center gap-1 text-xs text-green-500 mr-2">
-                            <CheckCircle className="w-3.5 h-3.5" /> OK
-                          </span>
+                        <TableCell className="text-center">
+                          <StatusBadge status={reg.status} type="registration" />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {reg.payment_status === "paid" ? (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-green-500/10 text-green-500 border border-green-500/20">
+                              Сплачено
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-red-500/10 text-red-500 border border-red-500/20">
+                              Не сплачено
+                            </span>
+                          )}
+                        </TableCell>
+                        {showActionsCell && (
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Кнопка зважування для організатора/персоналу */}
+                              {isStaffOrOrg && !isCompleted && reg.status === "pending" && tournament?.weigh_in_required !== false && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs"
+                                  onClick={() => setWeighInDialog(reg)}
+                                >
+                                  <Scale className="w-3.5 h-3.5 mr-1" /> Зважити
+                                </Button>
+                              )}
+
+                              {/* Підтвердження оплати для організатора/персоналу */}
+                              {isStaffOrOrg && !isCompleted && reg.payment_status === "unpaid" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs text-green-500 hover:text-green-400 hover:bg-green-500/10"
+                                  onClick={async () => {
+                                    try {
+                                      await api.post("/registrations/bulk_pay/", {
+                                        registration_ids: [reg.id],
+                                      });
+                                      toast({ title: "Оплату підтверджено!" });
+                                      fetchAll();
+                                    } catch {
+                                      // handled by interceptor
+                                    }
+                                  }}
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5 mr-1" /> Сплачено
+                                </Button>
+                              )}
+
+                              {/* Кнопка видалення/вилучення */}
+                              {canDeleteReg && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  disabled={category?.has_bracket}
+                                  onClick={() => setDeleteRegDialog(reg)}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                  {isOrganizer ? "Видалити" : "Вилучити"}
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
                         )}
-                        <Button
-                          variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => setDeleteRegDialog(reg)}
-                        >
-                          <Trash2 className="w-3.5 h-3.5 mr-1" /> Видалити
-                        </Button>
-                      </div>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
+                      </TableRow>
+                    );
+                  });
+                })()
+              )}
             </TableBody>
           </Table>
         </div>
@@ -881,6 +1044,74 @@ export default function CategoryDetailPage() {
               <Input type="number" step="0.1" placeholder="49.8" {...register("weight")} />
               {errors.weight && <p className="text-xs text-destructive">{errors.weight.message}</p>}
             </div>
+
+            {/* Валідація ваги та перенесення в іншу категорію */}
+            {(() => {
+              const watchedWeight = watch("weight");
+              const weightNum = watchedWeight ? Number.parseFloat(String(watchedWeight)) : Number.NaN;
+              const isWeightOutOfRange = !Number.isNaN(weightNum) && category && (
+                (category.min_weight && weightNum < category.min_weight) ||
+                (category.max_weight && weightNum > category.max_weight)
+              );
+
+              if (!isWeightOutOfRange || !weighInDialog) return null;
+
+              return (
+                <div className="space-y-3 p-3 border border-destructive/20 bg-destructive/5 text-destructive rounded-lg">
+                  <p className="text-xs font-semibold flex items-center gap-1.5">
+                    ⚠️ Невідповідність ваговій категорії!
+                  </p>
+                  <p className="text-[11px] leading-tight">
+                    Фактична вага ({weightNum} кг) не вкладається у встановлені ліміти категорії ({category.min_weight || 0} - {category.max_weight || "∞"} кг).
+                  </p>
+
+                  {/* Секція перенесення */}
+                  {(() => {
+                    const matchingCats = getMatchingCategories(weighInDialog, weightNum);
+                    if (matchingCats.length === 0) {
+                      return (
+                        <p className="text-[10px] text-muted-foreground">
+                          Немає інших відповідних категорій для цього віку та статі.
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="space-y-1.5 pt-2 border-t border-destructive/10">
+                        <Label className="text-xs text-foreground font-semibold">Перенести в іншу категорію:</Label>
+                        <div className="flex gap-2">
+                          <Select value={targetCategoryId} onValueChange={setTargetCategoryId}>
+                            <SelectTrigger className="h-8 text-xs bg-background text-foreground border-input">
+                              <SelectValue placeholder="Оберіть категорію..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {matchingCats.map((c: Category) => {
+                                const fitsWeight = (!c.min_weight || weightNum >= c.min_weight) && (!c.max_weight || weightNum <= c.max_weight);
+                                return (
+                                  <SelectItem key={c.id} value={c.id.toString()} className="text-xs">
+                                    {c.name} ({c.min_weight || 0}-{c.max_weight || "∞"} кг) {fitsWeight ? "✓" : ""}
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="sport"
+                            size="sm"
+                            className="h-8 text-xs px-3"
+                            disabled={!targetCategoryId || isTransferring}
+                            onClick={handleTransfer}
+                          >
+                            {isTransferring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Перенести"}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setWeighInDialog(null)}>Скасувати</Button>
               <Button type="submit" variant="sport">Підтвердити</Button>
@@ -896,16 +1127,32 @@ export default function CategoryDetailPage() {
             <DialogTitle>Згенерувати сітку змагань</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Формат турнірної сітки</Label>
-              <Select value={chosenFormat} onValueChange={setChosenFormat}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="single_elimination">Олімпійська (на вибування)</SelectItem>
-                  <SelectItem value="round_robin">Кругова (кожен з кожним)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {category?.is_team ? (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 space-y-2 select-none">
+                <span className="text-xs font-bold text-amber-500 uppercase tracking-wider block">Автоматичний вибір системи (WKF)</span>
+                <p className="text-xs leading-relaxed text-zinc-300">
+                  Згідно з правилами WKF/УФК, формат сітки для командних категорій визначається автоматично за кількістю підтверджених команд:
+                </p>
+                <ul className="list-disc list-inside text-[11px] text-zinc-400 space-y-1">
+                  <li>Кругова система — від 2 до 5 команд (зараз: {confirmedPaidTeamsCount} команд)</li>
+                  <li>Олімпійська система — 6 і більше команд</li>
+                </ul>
+                <p className="text-xs font-semibold text-white mt-1">
+                  Обрано формат: <span className="text-amber-400 font-bold">{confirmedPaidTeamsCount >= 6 ? "Олімпійська сітка (на вибування)" : "Кругова система (кожен з кожним)"}</span>
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label>Формат турнірної сітки</Label>
+                <Select value={chosenFormat} onValueChange={setChosenFormat}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single_elimination">Олімпійська (на вибування)</SelectItem>
+                    <SelectItem value="round_robin">Кругова (кожен з кожним)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               Формат сітки визначить спосіб розподілу поєдинків та просування переможців. Переконайтеся, що всі спортсмени пройшли зважування перед генерацією.
             </p>
@@ -1082,8 +1329,8 @@ export default function CategoryDetailPage() {
             <DialogTitle className="text-destructive">Вилучити заявку</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Ви впевнені, що хочете видалити заявку атлета{" "}
-            <span className="font-bold text-foreground">{deleteRegDialog?.athlete.full_name}</span>?
+            Ви впевнені, що хочете видалити реєстрацію{" "}
+            <span className="font-bold text-foreground">{deleteRegDialog ? formatRegistrationName(deleteRegDialog) : "учасника"}</span>?
             Ця дія незворотна.
           </p>
           <DialogFooter>

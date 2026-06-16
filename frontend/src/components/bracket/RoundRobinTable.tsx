@@ -1,7 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { cn, formatAthleteName } from "@/lib/utils";
 import type { Match } from "@/types/api";
 
 interface RoundRobinTableProps {
@@ -173,13 +174,22 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
   // Збираємо унікальних учасників
   const participantsMap = new Map<number, string>();
   const placesMap = new Map<number, number | null>();
+
+  const formatParticipantName = (reg: any) => {
+    if (!reg) return "";
+    if (reg.team) {
+      return reg.team.name;
+    }
+    return reg.athlete ? formatAthleteName(reg.athlete) : `#${reg.id}`;
+  };
+
   matches.forEach((m) => {
     if (m.reg_first) {
-      participantsMap.set(m.reg_first.id, m.reg_first.athlete?.full_name ?? `#${m.reg_first.id}`);
+      participantsMap.set(m.reg_first.id, formatParticipantName(m.reg_first));
       placesMap.set(m.reg_first.id, m.reg_first.place ?? null);
     }
     if (m.reg_second) {
-      participantsMap.set(m.reg_second.id, m.reg_second.athlete?.full_name ?? `#${m.reg_second.id}`);
+      participantsMap.set(m.reg_second.id, formatParticipantName(m.reg_second));
       placesMap.set(m.reg_second.id, m.reg_second.place ?? null);
     }
   });
@@ -271,8 +281,8 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
                   </th>
                   {participants.map((p) => (
                     <th key={p.id} className="p-3 text-center font-bold border-r border-border/30 min-w-[80px] max-w-[80px] text-[10px]">
-                      <span className="block truncate max-w-[76px] text-foreground/80" title={p.name}>
-                        {p.name.split(" ")[0]}
+                      <span className="block whitespace-normal break-words text-foreground/80 leading-tight" title={p.name}>
+                        {p.name}
                       </span>
                     </th>
                   ))}
@@ -281,7 +291,7 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
               <tbody>
                 {participants.map((row) => (
                   <tr key={row.id} className="hover:bg-muted/20 border-b border-border/40 transition-colors">
-                    <td className="p-3 font-semibold text-foreground/90 border-r border-border/50 truncate max-w-[150px]" title={row.name}>
+                    <td className="p-3 font-semibold text-foreground/90 border-r border-border/50 whitespace-normal break-words max-w-[220px]" title={row.name}>
                       {row.name}
                     </td>
                     {participants.map((col) => {

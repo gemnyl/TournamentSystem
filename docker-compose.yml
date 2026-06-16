@@ -63,6 +63,7 @@ services:
       USE_REDIS_CHANNEL_LAYER: "True"
       CORS_ALLOWED_ORIGINS:  "http://localhost http://127.0.0.1"
     volumes:
+      - ./backend:/app
       - staticfiles:/app/staticfiles
     ports:
       - "8000:8000"

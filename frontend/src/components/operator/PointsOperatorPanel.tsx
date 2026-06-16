@@ -11,7 +11,7 @@ import {
 import { toast } from "@/hooks/use-toast";
 import api from "@/lib/api";
 import KumiteOperatorControls from "./KumiteOperatorControls";
-import { cn, getErrorMessage } from "@/lib/utils";
+import { cn, getErrorMessage, formatAthleteName, formatRegistrationName } from "@/lib/utils";
 import type { Match, ScoreAction } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
 
@@ -151,6 +151,24 @@ export default function PointsOperatorPanel({
   // Розрахунок рекомендованого переможця (suggestion) через хелпер
   const { suggestedWinner, suggestionReason } = getSuggestedWinner(match, isRoundRobin);
 
+  const getFirstFighterName = () => {
+    if (match.athlete_first) {
+      const name = formatAthleteName(match.athlete_first);
+      const team = match.reg_first?.team?.name;
+      return team ? `${name} (${team})` : name;
+    }
+    return formatRegistrationName(match.reg_first) || "AKA";
+  };
+
+  const getSecondFighterName = () => {
+    if (match.athlete_second) {
+      const name = formatAthleteName(match.athlete_second);
+      const team = match.reg_second?.team?.name;
+      return team ? `${name} (${team})` : name;
+    }
+    return formatRegistrationName(match.reg_second) || "AO";
+  };
+
   const handleSuggestedComplete = async () => {
     if (!suggestedWinner) return;
     if (onCompleteAndNext) {
@@ -198,9 +216,9 @@ export default function PointsOperatorPanel({
   let winnerDisplayName = <span className="text-amber-400">Нічия</span>;
   if (match.winner) {
     if (match.winner === match.reg_first?.id) {
-      winnerDisplayName = <span className="text-red-400">AKA ({match.reg_first?.athlete?.full_name ?? "AKA"})</span>;
+      winnerDisplayName = <span className="text-red-400">AKA ({getFirstFighterName()})</span>;
     } else {
-      winnerDisplayName = <span className="text-blue-400">AO ({match.reg_second?.athlete?.full_name ?? "AO"})</span>;
+      winnerDisplayName = <span className="text-blue-400">AO ({getSecondFighterName()})</span>;
     }
   }
 
@@ -371,9 +389,7 @@ export default function PointsOperatorPanel({
             <DialogTitle>
               Оголосити переможця:{" "}
               <span className={winnerDialog === "ao" ? "text-blue-400" : "text-red-400"}>
-                {winnerDialog === "ao"
-                  ? (match.reg_second?.athlete?.full_name ?? "AO")
-                  : (match.reg_first?.athlete?.full_name ?? "AKA")}
+                {winnerDialog === "ao" ? getSecondFighterName() : getFirstFighterName()}
               </span>
             </DialogTitle>
           </DialogHeader>

@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsJudgeOrOrganizer
 from apps.common.broadcast import broadcast_match_event
 from apps.matches.models import Match
-from apps.matches.serializers import BracketNodeSerializer, MatchSerializer
+from apps.matches.serializers import BracketNodeSerializer, MatchEventSerializer, MatchSerializer
 from apps.matches.services.match_service import MatchService
 
 
@@ -25,12 +25,26 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     Усі зміни відбуваються через custom actions.
     """
 
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            if obj.category.tournament.status == "completed":
+                from rest_framework.exceptions import PermissionDenied
+
+                raise PermissionDenied("Турнір завершено. Зміни в поєдинках заборонені.")
+
     def get_queryset(self):
         qs = Match.objects.select_related(
             "category",
             "reg_first__athlete__club",
             "reg_second__athlete__club",
             "winner__athlete",
+            "athlete_first__club",
+            "athlete_second__club",
+            "parent_team_match",
+        ).prefetch_related(
+            "team_bouts__athlete_first__club",
+            "team_bouts__athlete_second__club",
         )
         category_id = self.request.query_params.get("category")
         if category_id:
@@ -40,7 +54,14 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(category__tournament_id=tournament_id)
         tatami_number = self.request.query_params.get("tatami_number")
         if tatami_number:
-            qs = qs.filter(tatami__number=tatami_number)
+            from django.db.models import Q
+
+            qs = qs.filter(
+                Q(tatami__number=tatami_number) | Q(parent_team_match__tatami__number=tatami_number)
+            )
+        parent_team_match = self.request.query_params.get("parent_team_match")
+        if parent_team_match:
+            return qs.filter(parent_team_match_id=parent_team_match).order_by("bout_index")
         return qs.order_by("category__schedule_order", "round_index", "match_order")
 
     def get_serializer_class(self):
@@ -191,11 +212,15 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         matches = (
-            Match.objects.filter(category_id=category_id)
+            Match.objects.filter(category_id=category_id, parent_team_match__isnull=True)
             .select_related(
                 "reg_first__athlete__club",
                 "reg_second__athlete__club",
                 "winner__athlete",
+            )
+            .prefetch_related(
+                "team_bouts__athlete_first__club",
+                "team_bouts__athlete_second__club",
             )
             .order_by("round_index", "match_order")
         )
@@ -323,3 +348,103 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         return self._execute_service_action(
             match, MatchService(match).set_judges_count, int(judges_count), judge=request.user
         )
+
+    @action(detail=True, methods=["get"], url_path="events")
+    def events(self, request, pk=None):
+        """GET /api/matches/{id}/events/
+        Returns list of MatchEvent objects for this match
+        """
+        match = self.get_object()
+        events = match.events.all().order_by("sequence")
+        serializer = MatchEventSerializer(events, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="assign_bout_athletes")
+    def assign_bout_athletes(self, request, pk=None):
+        """POST /api/matches/{id}/assign_bout_athletes/
+        Тіло: {"athlete_first_id": int | null, "athlete_second_id": int | null}
+        """
+        match = self.get_object()
+        if not match.parent_team_match:
+            return Response(
+                {
+                    "detail": (
+                        "Призначити спортсменів можна лише для "
+                        "індивідуального бою командного матчу."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        athlete_first_id = request.data.get("athlete_first_id")
+        athlete_second_id = request.data.get("athlete_second_id")
+
+        from apps.athletes.models import Athlete
+
+        if athlete_first_id:
+            try:
+                match.athlete_first = Athlete.objects.get(id=athlete_first_id)
+            except Athlete.DoesNotExist:
+                return Response(
+                    {"detail": "Атлета Aka не знайдено."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            match.athlete_first = None
+
+        if athlete_second_id:
+            try:
+                match.athlete_second = Athlete.objects.get(id=athlete_second_id)
+            except Athlete.DoesNotExist:
+                return Response(
+                    {"detail": "Атлета Ao не знайдено."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            match.athlete_second = None
+
+        match.save()
+
+        from apps.common.broadcast import broadcast_match_update
+
+        broadcast_match_update(match)
+
+        # Оновимо також батьківський матч для синхронізації
+        broadcast_match_update(match.parent_team_match)
+
+        serializer = self.get_serializer(match)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="spawn_extra_bout")
+    def spawn_extra_bout(self, request, pk=None):
+        """POST /api/matches/{id}/spawn_extra_bout/"""
+        match = self.get_object()
+        if match.parent_team_match or not match.category.is_team:
+            return Response(
+                {
+                    "detail": (
+                        "Додатковий бій можна створити лише для батьківського командного матчу."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Рахуємо скільки боїв уже є
+        existing_bouts_count = match.team_bouts.count()
+
+        extra_bout = Match.objects.create(
+            category=match.category,
+            parent_team_match=match,
+            round_index=match.round_index,
+            match_order=match.match_order,
+            bout_index=existing_bouts_count + 1,
+            timer_duration_ms=match.timer_duration_ms,
+            status=Match.Status.SCHEDULED,
+        )
+
+        from apps.common.broadcast import broadcast_match_update
+
+        broadcast_match_update(match)
+
+        serializer = self.get_serializer(extra_bout)
+        return Response(serializer.data)

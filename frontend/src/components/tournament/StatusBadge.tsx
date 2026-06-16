@@ -1,9 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import type { TournamentStatus, CategoryStatus, MatchStatus, RegistrationStatus } from "@/types/api";
 
-const TOURNAMENT_LABELS: Record<TournamentStatus, string> = {
+const TOURNAMENT_LABELS: Record<TournamentStatus | "registration_closed", string> = {
   draft:        "Чернетка",
   registration: "Реєстрація",
+  registration_closed: "Реєстрацію закрито",
   active:       "Триває",
   completed:    "Завершено",
 };
@@ -27,11 +28,12 @@ const REGISTRATION_LABELS: Record<RegistrationStatus, string> = {
   withdrawn: "Знято",
 };
 
-type StatusBadgeVariant = TournamentStatus | CategoryStatus | MatchStatus | RegistrationStatus;
+type StatusBadgeVariant = TournamentStatus | CategoryStatus | MatchStatus | RegistrationStatus | "registration_closed";
 
 const VARIANT_MAP: Record<string, "draft" | "registration" | "ongoing" | "completed" | "cancelled" | "secondary" | "destructive" | "outline"> = {
   draft:        "draft",
   registration: "registration",
+  registration_closed: "secondary",
   active:       "ongoing",
   ongoing:      "ongoing",
   completed:    "completed",

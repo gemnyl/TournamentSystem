@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, prefer-const */
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { Match } from "@/types/api";
@@ -59,4 +60,79 @@ export function getOptimisticTimerUpdate(
     };
   }
   return { updatedMatch: null, reqBody: undefined };
+}
+
+export function formatAthleteName(ath: any): string {
+  if (!ath) return "";
+
+  let first = (ath.first_name || "").trim();
+  let last = (ath.last_name || "").trim();
+  let full = (ath.full_name || "").trim();
+
+  // Якщо немає імені та прізвища окремо, але є full_name, розбиваємо його
+  if (!first && !last && full) {
+    const parts = full.split(/\s+/);
+    if (parts.length >= 3) {
+      // Відкидаємо по-батькові (останнє слово), якщо є 3 або більше слів
+      return parts.slice(0, 2).join(" ");
+    }
+    return full;
+  }
+
+  // Якщо ім'я містить по-батькові (наприклад, "Євген Олександрович")
+  if (first) {
+    const firstParts = first.split(/\s+/);
+    if (firstParts.length > 1) {
+      const lastPart = firstParts[firstParts.length - 1].toLowerCase();
+      // Перевіряємо закінчення типових патронімів (по-батькові)
+      if (
+        lastPart.endsWith("ович") ||
+        lastPart.endsWith("евич") ||
+        lastPart.endsWith("євич") ||
+        lastPart.endsWith("івна") ||
+        lastPart.endsWith("евна") ||
+        lastPart.endsWith("євна") ||
+        lastPart.endsWith("ївна") ||
+        lastPart.endsWith("ич") ||
+        lastPart.endsWith("іч")
+      ) {
+        first = firstParts.slice(0, -1).join(" ");
+      }
+    }
+  }
+
+  if (last && first) {
+    return `${last} ${first}`;
+  }
+  return first || last || full;
+}
+
+export function formatRegistrationName(reg: any): string {
+  if (!reg) return "";
+  if (reg.athlete) {
+    return formatAthleteName(reg.athlete);
+  }
+  if (reg.team) {
+    const teamName = reg.team.name;
+    const athletesList = reg.team.athletes?.map((a: any) => formatAthleteName(a)).join(", ");
+    return athletesList ? `${teamName} (${athletesList})` : teamName;
+  }
+  return `Учасник #${reg.id}`;
+}
+
+export function formatRegistrationClub(reg: any): string {
+  if (!reg) return "";
+  return reg.athlete?.club?.name ?? reg.team?.club?.name ?? "";
+}
+
+// Calculate age as of reference date
+export function getAgeAsOf(birthDateStr: string, refDateStr: string): number {
+  const birthDate = new Date(birthDateStr);
+  const refDate = new Date(refDateStr);
+  let age = refDate.getFullYear() - birthDate.getFullYear();
+  const m = refDate.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && refDate.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
 }

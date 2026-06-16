@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
@@ -8,7 +9,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import api from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, formatRegistrationName, formatAthleteName } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -253,6 +254,7 @@ export default function TatamiAdminPage() {
   const [editingTatami, setEditingTatami] = useState<Tatami | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Tatami | null>(null);
   const [judges, setJudges] = useState<JudgeUser[]>([]);
+  const [judgeSearch, setJudgeSearch] = useState("");
   const [isReassigning, setIsReassigning] = useState<number | null>(null);
 
   // Helper for formatting finish time
@@ -522,6 +524,22 @@ export default function TatamiAdminPage() {
     }
   };
 
+  if (tournament?.status === "completed") {
+    return (
+      <div className="container py-12 flex flex-col items-center justify-center min-h-[50vh] text-center gap-4">
+        <h2 className="text-3xl font-extrabold text-destructive">Турнір завершено</h2>
+        <p className="text-muted-foreground text-sm max-w-md">
+          Цей турнір завершився. Керування татамі закрите, зміни заборонені.
+        </p>
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/tournaments/${tid}`} className="gap-1.5">
+            <ArrowLeft className="w-4 h-4" /> До деталей турніру
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="container py-8 space-y-6">
       {/* Назад */}
@@ -594,11 +612,24 @@ export default function TatamiAdminPage() {
               {tatamis.map((t) => {
                 const currentMatchObj = t.current_match as Match | number | null;
                 const hasMatch = currentMatchObj && typeof currentMatchObj === "object";
-                const matchText = hasMatch
-                  ? `R${currentMatchObj.round_index}.${currentMatchObj.match_order}: ${
-                      currentMatchObj.reg_second?.athlete?.full_name ?? "TBD"
-                    } vs ${currentMatchObj.reg_first?.athlete?.full_name ?? "TBD"}`
-                  : "—";
+                const formatMatchParticipant = (reg: any, ath: any) => {
+                  if (!reg) return "TBD";
+                  const teamName = reg.team?.name;
+                  const athleteName = formatAthleteName(ath) || formatAthleteName(reg?.athlete);
+                  if (teamName && athleteName) return `${teamName} (${athleteName})`;
+                  return formatRegistrationName(reg) || "TBD";
+                };
+
+                let nameFirst = "—";
+                let nameSecond = "—";
+                let matchText = "—";
+
+                if (hasMatch) {
+                  const m = currentMatchObj;
+                  nameFirst = formatMatchParticipant(m.reg_first, m.athlete_first);
+                  nameSecond = formatMatchParticipant(m.reg_second, m.athlete_second);
+                  matchText = `R${m.round_index}.${m.match_order}: ${nameFirst} vs ${nameSecond}`;
+                }
 
                 return (
                   <TableRow key={t.id}>
@@ -629,7 +660,7 @@ export default function TatamiAdminPage() {
                         )}
                       </button>
                     </TableCell>
-                    <TableCell className="text-sm truncate max-w-xs">
+                    <TableCell className="text-sm max-w-md whitespace-normal break-words leading-tight">
                       {hasMatch ? (
                         <Link
                           to={`/operator/tournament/${tid}/tatami/${t.number}`}
@@ -803,17 +834,30 @@ export default function TatamiAdminPage() {
 
             <div className="space-y-1.5">
               <Label htmlFor="assigned_judge">Призначений суддя</Label>
+              <Input
+                type="text"
+                placeholder="Шукати суддю за прізвищем/email..."
+                className="h-8 text-xs mb-1.5 border-slate-800 bg-slate-950 text-slate-300 placeholder-slate-600 focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                value={judgeSearch}
+                onChange={(e) => setJudgeSearch(e.target.value)}
+              />
               <select
                 id="assigned_judge"
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 {...register("assigned_judge")}
               >
                 <option value="">-- Не закріплено --</option>
-                {judges.map((j) => (
-                  <option key={j.id} value={String(j.id)}>
-                    {j.last_name} {j.first_name} ({j.email})
-                  </option>
-                ))}
+                {judges
+                  .filter((j) =>
+                    `${j.last_name} ${j.first_name} ${j.email}`
+                      .toLowerCase()
+                      .includes(judgeSearch.toLowerCase())
+                  )
+                  .map((j) => (
+                    <option key={j.id} value={String(j.id)}>
+                      {j.last_name} {j.first_name} ({j.email})
+                    </option>
+                  ))}
               </select>
             </div>
 

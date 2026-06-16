@@ -115,3 +115,16 @@ def broadcast_category_results_update(category_id: int) -> None:
             "match": None,
         },
     )
+
+
+def broadcast_registration_update(registration) -> None:
+    """Broadcast registration update to the tournament group."""
+    from apps.tournaments.serializers import RegistrationSerializer
+
+    channel_layer = get_channel_layer()
+    tournament_id = registration.category.tournament_id
+    payload = {
+        "type": "registration.update",
+        "registration": RegistrationSerializer(registration).data,
+    }
+    async_to_sync(channel_layer.group_send)(f"tournament_{tournament_id}", payload)

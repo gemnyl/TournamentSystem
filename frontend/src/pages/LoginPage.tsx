@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Trophy, ArrowRight, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,7 +30,14 @@ export default function LoginPage() {
     setIsSubmitting(true);
     try {
       await login(data);
-      navigate("/tournaments");
+      const user = useAuthStore.getState().user;
+      if (user?.role === "coach") {
+        navigate("/coach/dashboard");
+      } else if (user?.role === "staff") {
+        navigate("/staff");
+      } else {
+        navigate("/tournaments");
+      }
     } catch {
       // toast вже показаний через axios interceptor
     } finally {

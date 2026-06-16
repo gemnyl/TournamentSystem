@@ -37,7 +37,23 @@ if not DEBUG and SECRET_KEY.startswith("django-insecure-"):
         "значення за замовчуванням. Встановіть змінну оточення DJANGO_SECRET_KEY."
     )
 
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost 127.0.0.1").split()
+
+# Parse hosts from both DJANGO_ALLOWED_HOSTS (from docker-compose) and ALLOWED_HOSTS (from .env)
+def parse_env_list(var_name, default=""):
+    value = os.environ.get(var_name, default) or ""
+    return [item.strip() for item in value.replace(",", " ").split() if item.strip()]
+
+
+_docker_hosts = parse_env_list("DJANGO_ALLOWED_HOSTS")
+_env_hosts = parse_env_list("ALLOWED_HOSTS")
+
+ALLOWED_HOSTS = list(set(_docker_hosts + _env_hosts))
+
+# Always ensure basic fallback hosts are present to prevent docker health check
+# or local access failures
+for fallback in ["localhost", "127.0.0.1", "backend", "0.0.0.0"]:
+    if fallback not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(fallback)
 
 # ---------------------------------------------------------------------------
 # Додатки
@@ -192,14 +208,35 @@ REST_FRAMEWORK = {
 # CORS (фронтенд на порту 5173 — Vite dev server)
 # ---------------------------------------------------------------------------
 
-CORS_ALLOWED_ORIGINS = os.environ.get(
+_cors_raw = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:5173 http://127.0.0.1:5173",
-).split()
+)
+CORS_ALLOWED_ORIGINS = [
+    item.strip() for item in _cors_raw.replace(",", " ").split() if item.strip()
+]
 
 CORS_ALLOW_CREDENTIALS = True  # необхідно для сесійних cookie
 
 CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS[:]
+
+# Automatically derive CORS/CSRF origins from ALLOWED_HOSTS for convenience (e.g. for ngrok)
+for host in ALLOWED_HOSTS:
+    if host not in ["localhost", "127.0.0.1", "backend", "0.0.0.0"] and not host.startswith(
+        "192.168."
+    ):
+        clean_host = host.lstrip(".")
+        for proto in ["http", "https"]:
+            origin = f"{proto}://{clean_host}"
+            if origin not in CORS_ALLOWED_ORIGINS:
+                CORS_ALLOWED_ORIGINS.append(origin)
+
+            # For wildcard hosts (starting with a dot like .ngrok-free.app),
+            # add wildcard pattern to CSRF
+            if host.startswith("."):
+                wildcard_origin = f"{proto}://*.{clean_host}"
+                if wildcard_origin not in CSRF_TRUSTED_ORIGINS:
+                    CSRF_TRUSTED_ORIGINS.append(wildcard_origin)
 
 # ---------------------------------------------------------------------------
 # Сесії
@@ -225,5 +262,8 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

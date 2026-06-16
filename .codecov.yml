@@ -1,0 +1,13 @@
+# Codecov configuration
+comment: false
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 5%
+    patch:
+      default:
+        target: 90%
+        threshold: 2%

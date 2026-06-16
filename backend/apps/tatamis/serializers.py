@@ -53,9 +53,9 @@ class TatamiSerializer(serializers.ModelSerializer):
 
     def get_upcoming_matches(self, obj):
         # Отримуємо наступні 3 заплановані або активні поєдинки на цьому татамі
-        qs = obj.tatami_matches.filter(status__in=["scheduled", "ongoing"]).order_by(
-            "category__schedule_order", "round_index", "match_order"
-        )[:3]
+        qs = obj.tatami_matches.filter(
+            status__in=["scheduled", "ongoing"], parent_team_match__isnull=True
+        ).order_by("category__schedule_order", "round_index", "match_order")[:3]
         from apps.matches.serializers import MatchSerializer
 
         return MatchSerializer(qs, many=True).data

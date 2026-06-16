@@ -29,9 +29,11 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "patronymic",
             "full_name",
             "role",
             "club",
+            "photo",
             "date_joined",
         ]
         read_only_fields = ["date_joined"]
@@ -58,6 +60,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "patronymic",
             "role",
             "club_id",
             "password",

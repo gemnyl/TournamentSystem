@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { useParams } from "react-router-dom";
@@ -12,7 +13,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, formatRegistrationName, formatRegistrationClub, formatAthleteName } from "@/lib/utils";
 import api from "@/lib/api";
 import { useTatamiSocket } from "@/hooks/useTatamiSocket";
 import { useTimer } from "@/hooks/useTimer";
@@ -21,7 +22,7 @@ import KumiteWKFOperatorPanel from "@/components/operator/KumiteWKFOperatorPanel
 import KataOperatorPanel from "@/components/operator/KataOperatorPanel";
 import { BracketView } from "@/components/bracket/BracketView";
 import { RoundRobinTable } from "@/components/bracket/RoundRobinTable";
-import type { Match, RulesetInfo, Tatami, Tournament, BracketResponse, Category } from "@/types/api";
+import type { Match, RulesetInfo, Tatami, Tournament, BracketResponse, Category, Athlete } from "@/types/api";
 
 interface CategoryResult {
   place: number | null;
@@ -36,10 +37,14 @@ interface CategoryResult {
   registration: {
     id: number;
     place?: number | null;
-    athlete: {
+    athlete?: {
       full_name: string;
       club?: { name?: string } | null;
-    };
+    } | null;
+    team?: {
+      name: string;
+      club?: { name?: string } | null;
+    } | null;
   };
 }
 
@@ -64,6 +69,31 @@ function updateBracketRounds(rounds: Match[][], updatedMatch: Match): Match[][] 
   );
 }
 
+function getMedalLabel(placeVal: number | null | undefined): string {
+  if (placeVal === 1) return "🥇";
+  if (placeVal === 2) return "🥈";
+  if (placeVal === 3) return "🥉";
+  if (placeVal != null) return `${placeVal}`;
+  return "—";
+}
+
+function formatParticipant(reg: { team?: { name?: string } | null; athlete?: { first_name?: string; last_name?: string } | null } | null | undefined, ath: { first_name?: string; last_name?: string } | null | undefined): string {
+  if (!reg) return "TBD";
+  const teamName = (reg as { team?: { name?: string } | null }).team?.name;
+  const athleteName = formatAthleteName(ath as Parameters<typeof formatAthleteName>[0]) || formatAthleteName((reg as { athlete?: Parameters<typeof formatAthleteName>[0] | null }).athlete ?? null);
+  if (teamName && athleteName) return `${teamName} (${athleteName})`;
+  return formatRegistrationName(reg as Parameters<typeof formatRegistrationName>[0]) || "TBD";
+}
+
+function resolveRoundLabel(roundIdx: number, bracketFormat: string | undefined, totalRounds: number): string {
+  if (!bracketFormat || bracketFormat === "round_robin") return `Раунд ${roundIdx}`;
+  const fromEnd = totalRounds - roundIdx;
+  if (fromEnd === 0) return "Фінал";
+  if (fromEnd === 1) return "Півфінал";
+  if (fromEnd === 2) return "Чвертьфінал";
+  return `Раунд ${roundIdx}`;
+}
+
 interface OperatorResultRowProps {
   readonly res: CategoryResult;
   readonly resultsPersisted: boolean;
@@ -78,17 +108,7 @@ function OperatorResultRow({
   onOverrideChange,
 }: OperatorResultRowProps) {
   const placeVal = resultsPersisted ? res.registration?.place : placeOverride;
-
-  const medal =
-    placeVal === 1
-      ? "🥇"
-      : placeVal === 2
-      ? "🥈"
-      : placeVal === 3
-      ? "🥉"
-      : placeVal != null
-      ? `${placeVal}`
-      : "—";
+  const medal = getMedalLabel(placeVal);
 
   return (
     <div className="flex items-center justify-between p-3 text-xs hover:bg-muted/10 transition-colors">
@@ -117,8 +137,8 @@ function OperatorResultRow({
           </select>
         )}
         <div className="flex flex-col">
-          <span className="font-semibold text-foreground">{res.registration.athlete.full_name}</span>
-          <span className="text-[10px] text-muted-foreground">{res.registration.athlete.club?.name || "Без клубу"}</span>
+          <span className="font-semibold text-foreground">{formatRegistrationName(res.registration)}</span>
+          <span className="text-[10px] text-muted-foreground">{formatRegistrationClub(res.registration) || "Без клубу"}</span>
         </div>
       </div>
       <div className="flex flex-col items-end gap-0.5">
@@ -157,6 +177,12 @@ export default function OperatorPanelPage() {
   const [selectedCategoryBracket, setSelectedCategoryBracket] = useState<BracketResponse | null>(null);
   const [loadingBracket, setLoadingBracket] = useState(false);
 
+  // States for WKF Team Bouts
+  const [subBouts, setSubBouts] = useState<Match[]>([]);
+  const [loadingSubBouts, setLoadingSubBouts] = useState(false);
+  const [selectedBoutAthletes, setSelectedBoutAthletes] = useState<Record<number, { athlete_first_id: string; athlete_second_id: string }>>({});
+  const lastParentMatchIdRef = useRef<number | null>(null);
+
   // Reset states when tournament or tatami changes to prevent rendering stale data
   useEffect(() => {
     setConnected(false);
@@ -167,6 +193,9 @@ export default function OperatorPanelPage() {
     setSelectedCategoryId(null);
     setIsBracketModalOpen(false);
     setSelectedCategoryBracket(null);
+    setSubBouts([]);
+    setSelectedBoutAthletes({});
+    lastParentMatchIdRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tid, n]);
 
@@ -323,11 +352,152 @@ export default function OperatorPanelPage() {
     return () => clearInterval(interval);
   }, [fetchMatches]);
 
+  // Fetch WKF Team sub-bouts
+  const fetchSubBouts = useCallback(async (parentId: number) => {
+    setLoadingSubBouts(true);
+    try {
+      const { data } = await api.get<Match[]>(`/matches/?parent_team_match=${parentId}`);
+      const list = Array.isArray(data) ? data : (data as { results: Match[] }).results || [];
+      setSubBouts(list);
+    } catch {
+      setSubBouts([]);
+    } finally {
+      setLoadingSubBouts(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentMatch && currentMatch.category_is_team && !currentMatch.parent_team_match) {
+      if (lastParentMatchIdRef.current !== currentMatch.id) {
+        lastParentMatchIdRef.current = currentMatch.id;
+        setSubBouts([]);
+      }
+      fetchSubBouts(currentMatch.id);
+    }
+  }, [currentMatch, fetchSubBouts]);
+
+  useEffect(() => {
+    const initial: Record<number, { athlete_first_id: string; athlete_second_id: string }> = {};
+    subBouts.forEach((bout) => {
+      initial[bout.id] = {
+        athlete_first_id: bout.athlete_first?.id?.toString() ?? "",
+        athlete_second_id: bout.athlete_second?.id?.toString() ?? "",
+      };
+    });
+    setSelectedBoutAthletes(initial);
+  }, [subBouts]);
+
+  const getAvailableAkaAthletes = useCallback((_boutId?: number) => {
+    const allAthletes = currentMatch?.reg_first?.team?.athletes ?? [];
+    const assignedIds = new Set(
+      subBouts
+        .filter(b => b.athlete_first)
+        .map(b => b.athlete_first?.id)
+    );
+    return allAthletes.filter(a => !assignedIds.has(a.id));
+  }, [currentMatch, subBouts]);
+
+  const getAvailableAoAthletes = useCallback((_boutId?: number) => {
+    const allAthletes = currentMatch?.reg_second?.team?.athletes ?? [];
+    const assignedIds = new Set(
+      subBouts
+        .filter(b => b.athlete_second)
+        .map(b => b.athlete_second?.id)
+    );
+    return allAthletes.filter(a => !assignedIds.has(a.id));
+  }, [currentMatch, subBouts]);
+
+  const handleSaveLineup = async (boutId: number) => {
+    const selection = selectedBoutAthletes[boutId];
+    setBusy(true);
+    try {
+      await api.post(`/matches/${boutId}/assign_bout_athletes/`, {
+        athlete_first_id: selection?.athlete_first_id ? Number(selection.athlete_first_id) : null,
+        athlete_second_id: selection?.athlete_second_id ? Number(selection.athlete_second_id) : null,
+      });
+      toast({ title: "Склад бою оновлено!" });
+      if (currentMatch) {
+        fetchSubBouts(currentMatch.id);
+      }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка збереження складу";
+      toast({ title: msg, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStartBout = async (boutId: number, isExtraBout = false) => {
+    setBusy(true);
+    try {
+      if (isExtraBout) {
+        const selection = selectedBoutAthletes[boutId];
+        if (!selection?.athlete_first_id || !selection?.athlete_second_id) {
+          toast({ title: "Будь ласка, оберіть обох спортсменів для додаткового бою.", variant: "destructive" });
+          setBusy(false);
+          return;
+        }
+        // 1. Assign athletes
+        await api.post(`/matches/${boutId}/assign_bout_athletes/`, {
+          athlete_first_id: Number(selection.athlete_first_id),
+          athlete_second_id: Number(selection.athlete_second_id),
+        });
+      }
+      // 2. Assign to tatami
+      await handleAssignMatch(boutId, true);
+      toast({ title: "Бій успішно запущено!" });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка при запуску бою";
+      toast({ title: msg, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSpawnExtraBout = async () => {
+    if (!currentMatch) return;
+    setBusy(true);
+    try {
+      await api.post(`/matches/${currentMatch.id}/spawn_extra_bout/`);
+      toast({ title: "Додатковий бій успішно створено!" });
+      fetchSubBouts(currentMatch.id);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка створення додаткового бою";
+      toast({ title: msg, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const getAthleteName = (ath?: Athlete | null) => {
+    if (!ath) return "—";
+    return formatAthleteName(ath) || "—";
+  };
+
   const handleTatamiData = useCallback((data: { tatami: Tatami; current_match: Match | null }) => {
     setTatami(data.tatami);
     setCurrentMatch((prev) => {
       const isViewingPastMatch = prev !== null && prev.status === "completed";
       if (isViewingPastMatch) {
+        // If the new active match is another sub-bout of the same team match, transition to it
+        if (
+          prev.parent_team_match &&
+          data.current_match &&
+          data.current_match.parent_team_match === prev.parent_team_match
+        ) {
+          setTimerState(matchToTimerState(data.current_match));
+          return data.current_match;
+        }
+
+        // If the new active match is the parent match of this sub-bout, ignore it and stay on the completed sub-bout view
+        if (
+          prev.parent_team_match &&
+          data.current_match &&
+          data.current_match.id === prev.parent_team_match
+        ) {
+          return prev;
+        }
+
         const wasActiveMatchOnTatami = tatami && getTatamiMatchId(tatami.current_match) === prev.id;
         if (wasActiveMatchOnTatami) {
           if (data.current_match) {
@@ -344,7 +514,17 @@ export default function OperatorPanelPage() {
         }
         return prev;
       }
+
       if (data.current_match) {
+        // If the new active match is the parent match of this sub-bout, ignore it and stay on the ongoing sub-bout view
+        if (
+          prev &&
+          prev.parent_team_match &&
+          data.current_match.id === prev.parent_team_match
+        ) {
+          return prev;
+        }
+
         setTimerState(matchToTimerState(data.current_match));
         return data.current_match;
       } else {
@@ -377,6 +557,7 @@ export default function OperatorPanelPage() {
         return prev;
       });
       setMatches((prev) => prev.map((m) => m.id === match.id ? match : m));
+      setSubBouts((prev) => prev.map((b) => b.id === match.id ? match : b));
       setSelectedCategoryBracket((prev) => {
         if (!prev) return prev;
         return {
@@ -482,33 +663,30 @@ export default function OperatorPanelPage() {
 
   const assignNextAvailableMatch = async () => {
     if (!tatami || !currentMatch) return;
-    const nextMatch = tatamiMatches.find(
-      (m) => m.status === "scheduled" && m.id !== currentMatch.id && m.category === currentMatch.category
-    );
 
-    if (nextMatch) {
-      const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextMatch.id });
-      setTatami(data);
-      setCurrentMatch(nextMatch);
-      setTimerState(matchToTimerState(nextMatch));
-      toast({ title: `Перехід до наступного бою: ${nextMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextMatch.reg_second?.athlete?.full_name ?? "—"}` });
-    } else {
-      const nextAnyMatch = tatamiMatches.find(
-        (m) => m.status === "scheduled" && m.id !== currentMatch.id
-      );
-      if (nextAnyMatch) {
-        const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: nextAnyMatch.id });
-        setTatami(data);
-        setCurrentMatch(nextAnyMatch);
-        setTimerState(matchToTimerState(nextAnyMatch));
-        toast({ title: `Перехід до наступного бою: ${nextAnyMatch.reg_first?.athlete?.full_name ?? "—"} vs ${nextAnyMatch.reg_second?.athlete?.full_name ?? "—"}` });
-      } else {
-        toast({ title: "Всі бої на татамі завершено!" });
+    const nextInQueue = nextUpcomingMatches[0];
+    if (nextInQueue) {
+      const nameFirst = formatParticipant(nextInQueue.reg_first, nextInQueue.athlete_first);
+      const nameSecond = formatParticipant(nextInQueue.reg_second, nextInQueue.athlete_second);
+      toast({ title: `Перехід до наступного бою: ${nameFirst} vs ${nameSecond}` });
+      await handleAssignMatch(nextInQueue.id, true);
+      return;
+    }
+
+    if (currentMatch.parent_team_match) {
+      const parentMatch = matches.find((m) => m.id === currentMatch.parent_team_match);
+      if (parentMatch) {
+        if (parentMatch.status !== "completed") {
+          toast({ title: "Всі індивідуальні бої завершено. Повернення до командної зустрічі..." });
+        } else {
+          toast({ title: "Командну зустріч завершено!" });
+        }
+        await handleAssignMatch(parentMatch.id, true);
+        return;
       }
     }
-    fetchMatches();
-    fetchCategories();
-    fetchCategoryResults();
+
+    toast({ title: "Всі бої на татамі завершено!" });
   };
 
   const handleNextMatch = async () => {
@@ -537,7 +715,13 @@ export default function OperatorPanelPage() {
         });
       }
 
-      await assignNextAvailableMatch();
+      if (!currentMatch.parent_team_match) {
+        await assignNextAvailableMatch();
+      } else {
+        fetchMatches();
+        fetchCategories();
+        fetchCategoryResults();
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка фіксації результату";
       toast({ title: msg, variant: "destructive" });
@@ -548,7 +732,14 @@ export default function OperatorPanelPage() {
 
   const tatamiMatches = useMemo(() => {
     if (!tatami) return [];
-    return matches.filter((m) => m.tatami === tatami.id);
+    return matches.filter((m) => {
+      if (m.tatami === tatami.id) return true;
+      if (m.parent_team_match) {
+        const parent = matches.find(p => p.id === m.parent_team_match);
+        return parent ? parent.tatami === tatami.id : false;
+      }
+      return false;
+    });
   }, [matches, tatami]);
 
   // Categories present on this tatami
@@ -578,9 +769,11 @@ export default function OperatorPanelPage() {
         };
         cats.push(cat);
       }
-      cat.totalMatches++;
-      if (m.status === "completed") {
-        cat.completedMatches++;
+      if (!m.parent_team_match) {
+        cat.totalMatches++;
+        if (m.status === "completed") {
+          cat.completedMatches++;
+        }
       }
     });
 
@@ -650,7 +843,14 @@ export default function OperatorPanelPage() {
 
     // Sort matches in each round by match_order
     Object.keys(roundsMap).forEach((r) => {
-      roundsMap[Number(r)] = [...roundsMap[Number(r)]].sort((a, b) => a.match_order - b.match_order);
+      roundsMap[Number(r)] = [...roundsMap[Number(r)]].sort((a, b) => {
+        if (a.match_order !== b.match_order) return a.match_order - b.match_order;
+        const aIsParent = !a.parent_team_match;
+        const bIsParent = !b.parent_team_match;
+        if (aIsParent && !bIsParent) return -1;
+        if (!aIsParent && bIsParent) return 1;
+        return (a.bout_index ?? 0) - (b.bout_index ?? 0);
+      });
     });
 
     return roundsMap;
@@ -659,19 +859,39 @@ export default function OperatorPanelPage() {
   // Upcoming matches across the entire tatami
   const nextUpcomingMatches = useMemo(() => {
     const activeMatchId = getTatamiMatchId(tatami?.current_match ?? null);
+
+    // Фільтруємо заплановані бої (крім активного)
     const scheduled = tatamiMatches.filter((m) => m.status === "scheduled" && m.id !== activeMatchId);
-    return [...scheduled]
+
+    // Збираємо список боїв для відображення черги:
+    // - Якщо це одиночний поєдинок (!m.category_is_team), додаємо його.
+    // - Якщо це саб-баут (m.parent_team_match != null), додаємо його.
+    // - Якщо це головний командний поєдинок (m.category_is_team && !m.parent_team_match), ми додаємо його
+    //   тільки якщо у нього ще немає жодних запланованих саб-боїв.
+    const list = scheduled.filter((m) => {
+      if (!m.category_is_team) return true;
+      if (m.parent_team_match) return true;
+      const hasScheduledBouts = scheduled.some((x) => x.parent_team_match === m.id);
+      return !hasScheduledBouts;
+    });
+
+    return [...list]
       .sort((a, b) => {
         const orderA = a.category_order ?? 0;
         const orderB = b.category_order ?? 0;
         if (orderA !== orderB) return orderA - orderB;
+
+        if (a.parent_team_match && b.parent_team_match && a.parent_team_match === b.parent_team_match) {
+          return (a.bout_index ?? 0) - (b.bout_index ?? 0);
+        }
+
         return a.category === b.category
           ? a.round_index === b.round_index
             ? a.match_order - b.match_order
             : a.round_index - b.round_index
           : a.category - b.category;
       })
-      .slice(0, 3);
+      .slice(0, 5);
   }, [tatamiMatches, tatami]);
 
   const nextMatchId = nextUpcomingMatches[0]?.id ?? null;
@@ -679,9 +899,12 @@ export default function OperatorPanelPage() {
   const renderMatchCard = (m: Match, isCurrent: boolean) => {
     const isCompleted = m.status === "completed";
     const isNext = m.id === nextMatchId;
-    const aoName = m.reg_second?.athlete?.full_name ?? "TBD";
-    const akaName = m.reg_first?.athlete?.full_name ?? "TBD";
+
+    const aoName = formatParticipant(m.reg_second, m.athlete_second);
+    const akaName = formatParticipant(m.reg_first, m.athlete_first);
     const winnerReg = m.winner === m.reg_first?.id ? m.reg_first : m.reg_second;
+    const winnerAthlete = m.winner === m.reg_first?.id ? m.athlete_first : m.athlete_second;
+    const winnerName = winnerReg ? formatParticipant(winnerReg, winnerAthlete) : "";
 
     let matchItemClass: string;
     if (isCurrent) {
@@ -717,7 +940,10 @@ export default function OperatorPanelPage() {
         )}
       >
         <div className="flex items-center justify-between text-muted-foreground mb-0.5">
-          <span className="font-semibold text-[10px]">R{m.round_index}.{m.match_order}</span>
+          <span className="font-semibold text-[10px]">
+            R{m.round_index}.{m.match_order}
+            {m.parent_team_match ? ` · Бій #${m.bout_index}` : m.category_is_team ? " · Команда" : ""}
+          </span>
           {isNext && (
             <Badge className="text-[8px] px-1 py-0.5 uppercase tracking-wider bg-amber-500 text-black border-none font-bold">
               Наступний
@@ -729,22 +955,21 @@ export default function OperatorPanelPage() {
             </Badge>
           )}
         </div>
-        <p className="truncate text-[11px] font-medium leading-tight">
+        <p className="whitespace-normal break-words text-[11px] font-medium leading-tight">
           <span className="text-blue-400">{aoName}</span>
           <span className="text-muted-foreground text-[9px] font-normal px-0.5"> vs </span>
           <span className="text-red-400">{akaName}</span>
         </p>
-        {isCompleted && winnerReg && (
-          <p className="text-green-400 text-[10px] mt-1 truncate flex items-center gap-1 font-semibold">
-            ✓ {winnerReg.athlete?.full_name}
-          </p>
-        )}
+          {isCompleted && winnerReg && (
+            <p className="text-green-400 text-[10px] mt-1 whitespace-normal break-words flex items-center gap-1 font-semibold">
+              ✓ {winnerName}
+            </p>
+          )}
       </button>
     );
   };
 
   const isLocked = user?.role === "judge" && tatami && tatami.assigned_judge !== user.id;
-
 
   if (isLocked) {
     return (
@@ -764,6 +989,367 @@ export default function OperatorPanelPage() {
           <Button variant="sport" onClick={() => globalThis.window.location.reload()}>
             Оновити сторінку
           </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const renderTeamMatchDashboard = () => {
+    if (!currentMatch) return null;
+
+    const completedBouts = subBouts.filter(b => b.status === "completed");
+    const winsAka = completedBouts.filter(b => b.winner === currentMatch.reg_first?.id).length;
+    const winsAo = completedBouts.filter(b => b.winner === currentMatch.reg_second?.id).length;
+    const pointsAka = completedBouts.reduce((sum, b) => sum + (b.score_first || 0), 0);
+    const pointsAo = completedBouts.reduce((sum, b) => sum + (b.score_second || 0), 0);
+
+    const categoryInfo = categories.find(c => c.id === currentMatch.category);
+    const teamSize = categoryInfo?.team_size || 3;
+
+    const regularBouts = subBouts.filter(b => (b.bout_index || 0) <= teamSize);
+    const allRegularCompleted = regularBouts.length === teamSize && regularBouts.every(b => b.status === "completed");
+    const isTie = allRegularCompleted && winsAka === winsAo && pointsAka === pointsAo;
+
+    const firstTeamName = formatRegistrationName(currentMatch.reg_first) || "TBD Aka";
+    const firstTeamClub = formatRegistrationClub(currentMatch.reg_first) || "Без клубу";
+    const secondTeamName = formatRegistrationName(currentMatch.reg_second) || "TBD Ao";
+    const secondTeamClub = formatRegistrationClub(currentMatch.reg_second) || "Без клубу";
+
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto">
+        {/* Scoreboard Header */}
+        <div className="bg-gradient-to-b from-zinc-900 to-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+          <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:20px_20px] pointer-events-none" />
+
+          <div className="relative flex items-center justify-between">
+            {/* AKA Team Info */}
+            <div className="flex-1 text-center pr-4 border-r border-zinc-800/60">
+              <Badge className="bg-red-500 hover:bg-red-600 text-white font-bold uppercase tracking-wider text-[10px] mb-2 px-2.5 py-0.5 rounded-full border-none">
+                AKA (Червоні)
+              </Badge>
+              <h2 className="text-xl font-black text-white whitespace-normal break-words mx-auto">
+                {firstTeamName}
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5 whitespace-normal break-words mx-auto">
+                {firstTeamClub}
+              </p>
+            </div>
+
+            {/* Large Scores Display */}
+            <div className="flex items-center gap-6 px-8 select-none">
+              <div className="text-center">
+                <span className="block text-4xl font-extrabold text-red-500 font-mono">
+                  {winsAka}
+                </span>
+                <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-semibold">
+                  Перемог
+                </span>
+              </div>
+
+              <div className="flex flex-col items-center justify-center">
+                <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                  VS
+                </span>
+                <div className="h-8 w-px bg-zinc-800 my-1" />
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  {pointsAka} : {pointsAo} (бали)
+                </span>
+              </div>
+
+              <div className="text-center">
+                <span className="block text-4xl font-extrabold text-blue-500 font-mono">
+                  {winsAo}
+                </span>
+                <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-semibold">
+                  Перемог
+                </span>
+              </div>
+            </div>
+
+            {/* AO Team Info */}
+            <div className="flex-1 text-center pl-4 border-l border-zinc-800/60">
+              <Badge className="bg-blue-500 hover:bg-blue-600 text-white font-bold uppercase tracking-wider text-[10px] mb-2 px-2.5 py-0.5 rounded-full border-none">
+                AO (Сині)
+              </Badge>
+              <h2 className="text-xl font-black text-white whitespace-normal break-words mx-auto">
+                {secondTeamName}
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5 whitespace-normal break-words mx-auto">
+                {secondTeamClub}
+              </p>
+            </div>
+          </div>
+
+          {/* Global Controls inside Header */}
+          <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-800/60 relative z-10">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={handleRelease}
+                className="text-xs text-zinc-400 hover:text-white border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900"
+              >
+                Звільнити татамі
+              </Button>
+            </div>
+
+            {isTie && currentMatch.status !== "completed" && (
+              <Button
+                variant="sport"
+                onClick={handleSpawnExtraBout}
+                disabled={busy}
+                className="text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black shadow-lg shadow-amber-500/15"
+              >
+                Створити додатковий бій (Extra Bout)
+              </Button>
+            )}
+
+            {currentMatch.status === "completed" && (
+              <Badge className="bg-green-500/10 text-green-400 border border-green-500/25 py-1 px-3 rounded-lg text-xs font-semibold">
+                Зустріч завершена
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {/* Bouts List Directly on Page */}
+        <div className="space-y-4">
+          <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-zinc-300 select-none">
+            <Layers className="w-4 h-4 text-amber-500" />
+            Список боїв зустрічі ({subBouts.length})
+          </h3>
+
+          <div className="space-y-4">
+            {loadingSubBouts && subBouts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 border border-zinc-800 rounded-2xl bg-zinc-900/10 select-none">
+                <RefreshCw className="w-8 h-8 animate-spin text-amber-500 mb-2" />
+                <p className="text-xs text-zinc-500">Завантаження боїв...</p>
+              </div>
+            ) : subBouts.length > 0 ? (
+              <div className="grid grid-cols-1 gap-4">
+                {subBouts.map((bout) => {
+                  const isBoutCompleted = bout.status === "completed";
+                  const isBoutOngoing = bout.status === "ongoing";
+                  const isExtra = (bout.bout_index || 0) > teamSize;
+
+                  const selection = selectedBoutAthletes[bout.id] || { athlete_first_id: "", athlete_second_id: "" };
+
+                  const availableAka = getAvailableAkaAthletes(bout.id);
+                  const availableAo = getAvailableAoAthletes(bout.id);
+
+                  const assignedAka = bout.athlete_first;
+                  const assignedAo = bout.athlete_second;
+
+                  return (
+                    <div
+                      key={bout.id}
+                      className={cn(
+                        "border rounded-2xl p-5 transition-all relative overflow-hidden backdrop-blur-sm",
+                        isBoutOngoing
+                          ? "border-green-500/40 bg-green-500/5 shadow-md shadow-green-500/5"
+                          : isBoutCompleted
+                          ? "border-zinc-800/80 bg-zinc-900/10 opacity-85"
+                          : "border-zinc-800 bg-zinc-900/20"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-4 pb-2 border-b border-zinc-800/60 select-none">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-white">
+                            {isExtra ? "Додатковий бій (Tie-breaker)" : `Бій №${bout.bout_index}`}
+                          </span>
+                          {isBoutOngoing && (
+                            <Badge className="bg-green-500 text-black text-[9px] uppercase tracking-wider font-bold animate-pulse">
+                              В ефірі
+                            </Badge>
+                          )}
+                          {isBoutCompleted && (
+                            <Badge className="bg-zinc-800 text-zinc-400 text-[9px] uppercase tracking-wider font-semibold">
+                              Завершено
+                            </Badge>
+                          )}
+                        </div>
+
+                        {isBoutCompleted && bout.winner && (
+                          <div className="text-xs font-semibold text-green-400 flex items-center gap-1.5">
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            Переможець: {bout.winner === currentMatch.reg_first?.id ? "Aka" : "Ao"} ({bout.winner === currentMatch.reg_first?.id ? getAthleteName(assignedAka) : getAthleteName(assignedAo)})
+                          </div>
+                        )}
+                      </div>
+
+                      {isBoutCompleted ? (
+                        /* Completed Bout View */
+                        <div className="flex items-center justify-between text-xs py-1">
+                          <div className="flex-1 text-left min-w-0">
+                            <p className="font-bold text-red-400 text-sm truncate">{getAthleteName(assignedAka)}</p>
+                            <p className="text-[10px] text-zinc-500 truncate">{firstTeamName}</p>
+                          </div>
+
+                          <div className="px-6 py-2 rounded-xl bg-zinc-950/60 border border-zinc-800/60 text-center font-mono shrink-0 select-none">
+                            <span className="text-lg font-black text-white px-2">
+                              {bout.score_first}
+                            </span>
+                            <span className="text-zinc-600 font-normal">:</span>
+                            <span className="text-lg font-black text-white px-2">
+                              {bout.score_second}
+                            </span>
+                            {bout.win_method && (
+                              <span className="block text-[8px] text-zinc-500 uppercase mt-0.5 tracking-wider">
+                                {bout.win_method_display || bout.win_method}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex-1 text-right min-w-0">
+                            <p className="font-bold text-blue-400 text-sm truncate">{getAthleteName(assignedAo)}</p>
+                            <p className="text-[10px] text-zinc-500 truncate">{secondTeamName}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Scheduled / Ongoing Bout Form */
+                        <div className="space-y-4">
+                          {!isExtra ? (
+                            /* Regular Bout: Read-only pre-assigned athletes */
+                            <div className="flex items-center justify-between text-xs py-1">
+                              <div className="flex-1 text-left min-w-0">
+                                <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block mb-0.5 select-none">AKA (Червоний)</span>
+                                <p className="font-bold text-white text-sm truncate">{assignedAka ? getAthleteName(assignedAka) : "BYE / Очікується"}</p>
+                                <p className="text-[10px] text-zinc-500 truncate">{firstTeamName}</p>
+                              </div>
+
+                              <div className="px-4 py-2 font-mono text-zinc-500 text-xs shrink-0 select-none">
+                                VS
+                              </div>
+
+                              <div className="flex-1 text-right min-w-0">
+                                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block mb-0.5 select-none">AO (Синій)</span>
+                                <p className="font-bold text-white text-sm truncate">{assignedAo ? getAthleteName(assignedAo) : "BYE / Очікується"}</p>
+                                <p className="text-[10px] text-zinc-500 truncate">{secondTeamName}</p>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Extra Bout: Dropdowns to choose athletes */
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* AKA Athlete selection */}
+                              <div className="space-y-1.5 text-left">
+                                <label className="text-[10px] font-bold text-red-400 uppercase tracking-wider block select-none">
+                                  Боєць AKA (Червоний)
+                                </label>
+                                <Select
+                                  value={selection.athlete_first_id}
+                                  onValueChange={(val) => {
+                                    setSelectedBoutAthletes(prev => ({
+                                      ...prev,
+                                      [bout.id]: { ...prev[bout.id], athlete_first_id: val }
+                                    }));
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-white text-xs" disabled={availableAka.length === 0 && !assignedAka}>
+                                    <SelectValue placeholder={availableAka.length === 0 && !assignedAka ? "Немає доступних бійців" : "Оберіть бійця зі складу"} />
+                                  </SelectTrigger>
+                                  <SelectContent className="bg-zinc-950 border-zinc-800 text-white">
+                                    {assignedAka && (
+                                      <SelectItem key={assignedAka.id} value={assignedAka.id.toString()}>
+                                        {getAthleteName(assignedAka)} (обрано)
+                                      </SelectItem>
+                                    )}
+                                    {availableAka.map((ath) => (
+                                      <SelectItem key={ath.id} value={ath.id.toString()}>
+                                        {getAthleteName(ath)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* AO Athlete selection */}
+                              <div className="space-y-1.5 text-left">
+                                <label className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block select-none">
+                                  Боєць AO (Синій)
+                                </label>
+                                <Select
+                                  value={selection.athlete_second_id}
+                                  onValueChange={(val) => {
+                                    setSelectedBoutAthletes(prev => ({
+                                      ...prev,
+                                      [bout.id]: { ...prev[bout.id], athlete_second_id: val }
+                                    }));
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-white text-xs" disabled={availableAo.length === 0 && !assignedAo}>
+                                    <SelectValue placeholder={availableAo.length === 0 && !assignedAo ? "Немає доступних бійців" : "Оберіть бійця зі складу"} />
+                                  </SelectTrigger>
+                                  <SelectContent className="bg-zinc-950 border-zinc-800 text-white">
+                                    {assignedAo && (
+                                      <SelectItem key={assignedAo.id} value={assignedAo.id.toString()}>
+                                        {getAthleteName(assignedAo)} (обрано)
+                                      </SelectItem>
+                                    )}
+                                    {availableAo.map((ath) => (
+                                      <SelectItem key={ath.id} value={ath.id.toString()}>
+                                        {getAthleteName(ath)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Action buttons for this specific bout */}
+                          <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800/40 select-none">
+                            {isExtra && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={busy}
+                                onClick={() => handleSaveLineup(bout.id)}
+                                className="text-xs h-8 border-zinc-800 text-zinc-300 hover:bg-zinc-900"
+                              >
+                                Зберегти склад
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="sport"
+                              disabled={busy || (!isExtra && (!assignedAka || !assignedAo))}
+                              onClick={() => handleStartBout(bout.id, isExtra)}
+                              className="text-xs h-8 font-bold flex items-center gap-1 bg-amber-500 hover:bg-amber-600 text-black border-none disabled:opacity-50"
+                            >
+                              <Play className="w-3 h-3 fill-current" />
+                              Викликати на татамі
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-xs text-zinc-500 border border-dashed border-zinc-800 rounded-2xl bg-zinc-900/10 select-none">
+                Помилка: суб-бої для цієї зустрічі ще не згенеровані.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (tournament && tournament.status === "completed") {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground p-6 text-center">
+        <div className="max-w-md space-y-4">
+          <h2 className="text-3xl font-extrabold text-destructive">Турнір завершено</h2>
+          <p className="text-muted-foreground text-sm">
+            Цей турнір завершився. Доступ до суддівської панелі татамі закритий, зміни в поєдинках заборонені.
+          </p>
+          <a
+            href={`/tournaments/${tid}`}
+            className="inline-block mt-4 px-6 py-2.5 rounded-xl bg-accent text-accent-foreground hover:bg-accent/80 font-bold transition-all text-xs"
+          >
+            Повернутися до турніру
+          </a>
         </div>
       </div>
     );
@@ -904,8 +1490,8 @@ export default function OperatorPanelPage() {
               <div className="space-y-1.5">
                 {nextUpcomingMatches.map((nm, idx) => {
                   const isFirst = idx === 0;
-                  const ao = nm.reg_second?.athlete?.full_name ?? "TBD";
-                  const aka = nm.reg_first?.athlete?.full_name ?? "TBD";
+                  const ao = formatParticipant(nm.reg_second, nm.athlete_second);
+                  const aka = formatParticipant(nm.reg_first, nm.athlete_first);
 
                   return (
                     <div
@@ -916,14 +1502,18 @@ export default function OperatorPanelPage() {
                       )}
                     >
                       <div className="flex items-center justify-between text-[8px] text-muted-foreground">
-                        <span>R{nm.round_index}.{nm.match_order} · {nm.category_name}</span>
+                        <span>
+                          R{nm.round_index}.{nm.match_order}
+                          {nm.parent_team_match ? ` · Бій #${nm.bout_index}` : nm.category_is_team ? " · Команда" : ""}
+                          {` · ${nm.category_name}`}
+                        </span>
                         {isFirst && (
                           <Badge className="text-[7px] px-1 py-0 bg-amber-500 text-black border-none font-bold uppercase leading-none">
                             Next
                           </Badge>
                         )}
                       </div>
-                      <p className="truncate font-medium leading-normal text-[10px]">
+                      <p className="whitespace-normal break-words font-medium leading-normal text-[10px]">
                         <span className="text-blue-400">{ao}</span>
                         <span className="text-muted-foreground px-0.5"> vs </span>
                         <span className="text-red-400">{aka}</span>
@@ -1068,20 +1658,10 @@ export default function OperatorPanelPage() {
                       roundsKeys.map((roundIdx) => {
                         const roundMatches = matchesByRound[roundIdx];
 
-                        // Format round labels
-                        let roundLabel = `Раунд ${roundIdx}`;
-                        if (selectedCategoryBracket && selectedCategoryBracket.format !== "round_robin") {
-                          const total = selectedCategoryBracket.rounds.length;
-                          const fromEnd = total - roundIdx;
-                          if (fromEnd === 0) roundLabel = "Фінал";
-                          else if (fromEnd === 1) roundLabel = "Півфінал";
-                          else if (fromEnd === 2) roundLabel = "Чвертьфінал";
-                        }
-
                         return (
                           <div key={roundIdx} className="space-y-1.5">
                             <p className="text-[9px] font-bold text-muted-foreground/80 uppercase tracking-widest px-1">
-                              {roundLabel}
+                              {resolveRoundLabel(roundIdx, selectedCategoryBracket?.format, selectedCategoryBracket?.rounds.length ?? 0)}
                             </p>
                             <div className="space-y-1.5">
                               {roundMatches.map((m) => renderMatchCard(m, currentMatch?.id === m.id))}
@@ -1140,7 +1720,9 @@ export default function OperatorPanelPage() {
         {/* ── Column 3: Current Match / Scoring Controls (right) ── */}
         <div className="flex-1 overflow-y-auto p-6 bg-background/30">
           {currentMatch ? (
-            currentMatch.judging_mode === "points" ? (
+            currentMatch.category_is_team && !currentMatch.parent_team_match && currentMatch.is_team_bouts_supported ? (
+              renderTeamMatchDashboard()
+            ) : currentMatch.judging_mode === "points" ? (
               <KumiteWKFOperatorPanel
                 match={currentMatch}
                 timerState={timerState}
@@ -1233,8 +1815,8 @@ export default function OperatorPanelPage() {
                             .sort((a, b) => (a.place ?? 0) - (b.place ?? 0))
                             .map((res: CategoryResult) => {
                               const place = res.place;
-                              const name = res.registration?.athlete?.full_name ?? res.name ?? "—";
-                              const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
+                              const name = formatRegistrationName(res.registration) || res.name || "—";
+                              const club = formatRegistrationClub(res.registration) || res.club || "Без клубу";
 
                               let badgeClass = "bg-zinc-800 text-zinc-400";
                               if (place === 1) badgeClass = "bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-600 text-black font-black";
@@ -1352,19 +1934,19 @@ export default function OperatorPanelPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
                         {standings.map((res: CategoryResult) => {
                           const place = res.place;
-                          const name = res.registration?.athlete?.full_name ?? res.name;
-                          const club = res.registration?.athlete?.club?.name ?? res.club ?? "Без клубу";
-                          let badge = "🥇";
-                          if (place === 2) badge = "🥈";
+                          const name = formatRegistrationName(res.registration) || res.name;
+                          const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
+                        let badge = "🥇";
+                          if ((place ?? 0) > 3) badge = "🎖️";
                           else if (place === 3) badge = "🥉";
-                          else if ((place ?? 0) > 3) badge = "🎖️";
+                          else if (place === 2) badge = "🥈";
 
                           return (
                             <div key={res.registration?.id} className="flex items-center gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
                               <span className="text-base select-none shrink-0">{badge}</span>
                               <div className="flex flex-col min-w-0 text-left">
-                                <span className="font-bold text-[11px] text-white truncate leading-tight">{name}</span>
-                                <span className="text-[9px] text-zinc-400 truncate leading-normal">{club}</span>
+                                <span className="font-bold text-[11px] text-white whitespace-normal break-words leading-tight">{name}</span>
+                                <span className="text-[9px] text-zinc-400 whitespace-normal break-words leading-normal">{club}</span>
                               </div>
                             </div>
                           );
@@ -1409,8 +1991,8 @@ export default function OperatorPanelPage() {
               Оголосити переможця:{" "}
               <span className={winnerDialog === "ao" ? "text-blue-400" : "text-red-400"}>
                 {winnerDialog === "ao"
-                  ? (currentMatch?.reg_second?.athlete?.full_name ?? "AO")
-                  : (currentMatch?.reg_first?.athlete?.full_name ?? "AKA")}
+                  ? (formatRegistrationName(currentMatch?.reg_second) || "AO")
+                  : (formatRegistrationName(currentMatch?.reg_first) || "AKA")}
               </span>
             </DialogTitle>
           </DialogHeader>

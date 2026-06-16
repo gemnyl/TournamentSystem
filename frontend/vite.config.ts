@@ -26,6 +26,12 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // Проксі для медіа-файлів (фото)
+      "/media": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
 });

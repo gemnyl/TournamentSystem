@@ -16,6 +16,9 @@ import OperatorPanelPage from "@/pages/OperatorPanelPage";
 import ScoreboardPage from "@/pages/ScoreboardPage";
 import TatamiAdminPage from "@/pages/TatamiAdminPage";
 import DayDashboardPage from "@/pages/DayDashboardPage";
+import CoachDashboardPage from "@/pages/CoachDashboardPage";
+import StaffDashboardPage from "@/pages/StaffDashboardPage";
+import VerificationPage from "@/pages/VerificationPage";
 
 export default function App() {
   return (
@@ -24,6 +27,7 @@ export default function App() {
         {/* Публічні маршрути без лейауту */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/verify/:type/:token" element={<VerificationPage />} />
         <Route
           path="/scoreboard/tournament/:tid/tatami/:n"
           element={<ScoreboardPage />}
@@ -41,6 +45,14 @@ export default function App() {
           {/* Захищені маршрути — тільки для залогінених */}
           <Route element={<ProtectedRoute />}>
             <Route path="/athletes" element={<AthletesPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["coach"]} />}>
+            <Route path="/coach/dashboard" element={<CoachDashboardPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["staff", "organizer"]} />}>
+            <Route path="/staff" element={<StaffDashboardPage />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["organizer"]} />}>

@@ -4,7 +4,7 @@
 Покривають:
     1. TatamiViewSet — CRUD та custom actions (assign_match, release, state)
     2. TatamiService — assign_match, release, get_snapshot, get_current_match
-    3. MatchSerializer — поле tatami є, tatami_number відсутнє
+    3. MatchSerializer — поле tatami є, tatami_number наявне
     4. Timer endpoints — start, pause, resume, reset, set_duration, add_time
     5. TatamiConsumer — WebSocket snapshot при підключенні
 
@@ -107,6 +107,7 @@ class TatamiTestCase(TestCase):
                 seed_number=i,
                 recorded_weight=73,
                 status=Registration.Status.CONFIRMED,
+                payment_status="paid",
             )
 
         BracketGenerator(self.category).generate()
@@ -458,9 +459,9 @@ class TestMatchSerializerFields(TatamiTestCase):
         data = MatchSerializer(self.match).data
         self.assertIn("tatami", data)
 
-    def test_tatami_number_field_absent(self):
+    def test_tatami_number_field_present(self):
         data = MatchSerializer(self.match).data
-        self.assertNotIn("tatami_number", data)
+        self.assertIn("tatami_number", data)
 
     def test_timer_fields_present(self):
         data = MatchSerializer(self.match).data

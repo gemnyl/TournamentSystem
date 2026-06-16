@@ -106,3 +106,51 @@ class IsCoachOrOrganizer(BasePermission):
             and request.user.is_authenticated
             and request.user.role in ("coach", "organizer", "admin")
         )
+
+
+class IsTournamentStaffOrOrganizer(BasePermission):
+    """
+    Дозволяє доступ організатору турніру, призначеному персоналу
+    (staff_members) або адміністраторам.
+    """
+
+    message = "Доступ лише для організатора, персоналу турніру або адміністратора."
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if request.user.role == "admin":
+            return True
+
+        # Resolve tournament
+        from apps.matches.models import Match
+        from apps.tournaments.models import Category, Registration, Tournament
+
+        tournament = None
+        if isinstance(obj, Tournament):
+            tournament = obj
+        elif isinstance(obj, Category):
+            tournament = obj.tournament
+        elif isinstance(obj, Registration):
+            tournament = obj.category.tournament
+        elif isinstance(obj, Match):
+            tournament = obj.category.tournament
+        elif hasattr(obj, "tournament"):
+            tournament = obj.tournament
+
+        if tournament is None:
+            return False
+
+        # Is organizer?
+        if tournament.organizer == request.user:
+            return True
+
+        # Is in staff members?
+        if tournament.staff_members.filter(id=request.user.id).exists():
+            return True
+
+        return False
