@@ -174,6 +174,9 @@ class Match(models.Model):
     timer_elapsed_ms = models.PositiveIntegerField(default=0, verbose_name="Накопичено мс")
     timer_duration_ms = models.PositiveIntegerField(default=180000, verbose_name="Тривалість мс")
     show_timer = models.BooleanField(default=False, verbose_name="Показувати таймер")
+    is_bracket_reset = models.BooleanField(
+        default=False, verbose_name="Супер-фінал (Bracket Reset)"
+    )
 
     class Meta:
         db_table = "match"
@@ -281,9 +284,74 @@ class Match(models.Model):
         else:
             self.advance_participant()
 
+            # Обробка додаткових форматів після просування переможця/програвшого:
+            # 1. Репешаж:
+            if self.category.bracket_format == "single_repechage":
+                if self.next_match and self.next_match.next_match_id is None:
+                    final_match = self.next_match
+                    semis = Match.objects.filter(category=self.category, next_match=final_match)
+                    if all(semi.status == Match.Status.COMPLETED for semi in semis):
+                        from apps.brackets.services import RepechageService
+
+                        RepechageService.generate_for_category(self.category)
+
+            # 2. Гранд-Фінал Double Elimination (round_index == 200):
+            # Спрацьовує ТІЛЬКИ для основного Grand Final (r=200), НЕ для Bracket Reset (r=201).
+            if self.category.bracket_format == "double_elimination" and self.round_index == 200:
+                if self.category.double_elim_type == "full":
+                    # Визначаємо переможця WB: той, чий вихідний матч має loser_next_match
+                    # (тобто він прийшов з Winners Bracket, де є відправка програвших у LB).
+                    # LB-переможець приходить з матчу з round_index >= 100,
+                    # де loser_next_match = NULL.
+                    wb_finalist = None
+                    source_matches = Match.objects.filter(
+                        category=self.category,
+                        next_match=self,
+                    ).select_related("reg_first", "reg_second")
+                    for src in source_matches:
+                        if src.loser_next_match_id is not None:
+                            # Це матч Winners Bracket → його переможець є WB-фіналістом
+                            wb_finalist = src.winner
+                            break
+
+                    # Bracket Reset потрібен лише якщо LB-переможець виграв Grand Final
+                    lb_winner_won = (wb_finalist is not None) and (self.winner != wb_finalist)
+                    br_already_exists = Match.objects.filter(
+                        category=self.category, round_index=201
+                    ).exists()
+
+                    if lb_winner_won and not br_already_exists:
+                        super_final = Match.objects.create(
+                            category=self.category,
+                            reg_first=wb_finalist,
+                            reg_second=self.winner,
+                            round_index=201,
+                            match_order=1,
+                            is_bracket_reset=True,
+                            tatami=self.tatami,
+                            timer_duration_ms=self.timer_duration_ms,
+                            status=self.Status.SCHEDULED,
+                        )
+                        self.redirect_to_match_id = super_final.id
+                        if self.tatami:
+                            self.tatami.current_match = super_final
+                            self.tatami.save(update_fields=["current_match"])
+                            from apps.common.broadcast import broadcast_tatami_state
+
+                            transaction.on_commit(lambda: broadcast_tatami_state(self.tatami))
+                        from apps.common.broadcast import broadcast_match_update
+
+                        transaction.on_commit(lambda: broadcast_match_update(super_final))
+
+            # 3. Обробка BYE:
+            from apps.brackets.services import BracketGenerator
+
+            generator = BracketGenerator(self.category)
+            generator._process_byes_for_category(self.category)
+
         from apps.common.broadcast import broadcast_match_update
 
-        broadcast_match_update(self)
+        transaction.on_commit(lambda: broadcast_match_update(self))
 
     def _handle_parent_team_match_update(self):
         parent = self.parent_team_match
@@ -314,38 +382,133 @@ class Match(models.Model):
         except Exception as e:
             print(f"Error determining team winner: {e}")
 
-        # Повертаємо поточний матч татамі назад на командну зустріч
-        if self.tatami and self.tatami.current_match_id == self.id:
+        pass
+
+    def _handle_tatami_auto_advance(self):
+        """
+        Автоматичний перехід до наступного бою в черзі татамі.
+        Викликається, коли поточний активний бій на татамі завершується.
+
+        Шукає наступний готовий бій серед ВСІХ матчів категорій, які вже
+        асоційовані з цим татамі (не лише тих, де match.tatami = цей татамі).
+        Це запобігає пропуску матчів, у яких ще не встановлено FK tatami.
+        """
+        from apps.common.broadcast import broadcast_tatami_state
+        from apps.tatamis.models import Tatami
+
+        parent = self.parent_team_match
+        if parent:
             self.tatami.current_match = parent
             self.tatami.save(update_fields=["current_match"])
-            from apps.common.broadcast import broadcast_tatami_state
+        else:
+            from django.db.models import Case, IntegerField, Value, When
 
-            broadcast_tatami_state(self.tatami)
+            # Збираємо усі категорії, що вже мають хоча б один матч на цьому татамі
+            tatami_category_ids = list(
+                Match.objects.filter(tatami=self.tatami)
+                .values_list("category_id", flat=True)
+                .distinct()
+            )
 
-        from apps.common.broadcast import broadcast_match_update
+            # Шукаємо наступний готовий бій серед ВСІХ матчів цих категорій
+            next_match = (
+                Match.objects.filter(
+                    category_id__in=tatami_category_ids,
+                    status=self.Status.SCHEDULED,
+                    parent_team_match__isnull=True,
+                    reg_first__isnull=False,
+                    reg_second__isnull=False,
+                )
+                .exclude(id=self.id)
+                .annotate(
+                    repechage_priority=Case(
+                        When(next_match__isnull=True, round_index__lt=300, then=Value(2)),
+                        When(round_index__gte=300, then=Value(1)),
+                        default=Value(0),
+                        output_field=IntegerField(),
+                    )
+                )
+                .order_by(
+                    "round_index", "match_order", "category__schedule_order", "repechage_priority"
+                )
+                .first()
+            )
 
-        broadcast_match_update(self)
+            if next_match:
+                # Звільняємо цей наступний матч з інших татамі, якщо він там був призначений
+                other_tatamis = Tatami.objects.filter(current_match=next_match).exclude(
+                    id=self.tatami.id
+                )
+                for ot in other_tatamis:
+                    ot.current_match = None
+                    ot.save(update_fields=["current_match"])
+                    transaction.on_commit(
+                        lambda ot_instance=ot: broadcast_tatami_state(ot_instance)
+                    )
+
+                # Встановлюємо FK tatami на наступний матч та активуємо його
+                next_match.tatami = self.tatami
+                next_match.save(update_fields=["tatami"])
+
+                self.tatami.current_match = next_match
+                self.tatami.active_results_category = None
+                self.tatami.save(update_fields=["current_match", "active_results_category"])
+            else:
+                self.tatami.current_match = None
+                self.tatami.save(update_fields=["current_match"])
+
+        # Надсилаємо бродкаст стану татамі тільки після успішного комміту транзакції
+        transaction.on_commit(lambda: broadcast_tatami_state(self.tatami))
 
     def advance_participant(self):
         """Переносить переможця в наступний матч дерева."""
-        if not self.next_match or not self.winner:
-            return
+        if self.next_match and self.winner:
+            nxt = self.next_match
+            nxt.refresh_from_db()
+            if nxt.reg_first_id == self.winner_id or nxt.reg_second_id == self.winner_id:
+                if nxt.reg_first_id is not None and nxt.reg_second_id is not None:
+                    raise ValidationError(f"Наступний матч {nxt.id} вже заповнено обома учасниками")
+                pass
+            elif nxt.reg_first is None:
+                nxt.reg_first = self.winner
+                nxt.save(update_fields=["reg_first"])
+            elif nxt.reg_second is None:
+                nxt.reg_second = self.winner
+                nxt.save(update_fields=["reg_second"])
+            # Якщо обидва слоти зайняті — це означає помилку в структурі дерева
+            else:
+                raise ValidationError(f"Наступний матч {nxt.id} вже заповнено обома учасниками")
 
-        nxt = self.next_match
-        # У перший вільний слот (reg_first → reg_second)
-        if nxt.reg_first is None:
-            nxt.reg_first = self.winner
-            nxt.save(update_fields=["reg_first"])
-        elif nxt.reg_second is None:
-            nxt.reg_second = self.winner
-            nxt.save(update_fields=["reg_second"])
-        # Якщо обидва слоти зайняті — це означає помилку в структурі дерева
-        else:
-            raise ValidationError(f"Наступний матч {nxt.id} вже заповнено обома учасниками")
+            from apps.common.broadcast import broadcast_match_update
 
-        from apps.common.broadcast import broadcast_match_update
+            transaction.on_commit(lambda: broadcast_match_update(nxt))
 
-        broadcast_match_update(nxt)
+        # Логіка просування того, хто програв (для Double Elimination)
+        if self.loser_next_match:
+            loser = self.reg_second if self.winner == self.reg_first else self.reg_first
+            if loser:
+                nxt_loser = self.loser_next_match
+                nxt_loser.refresh_from_db()
+                if nxt_loser.reg_first_id == loser.id or nxt_loser.reg_second_id == loser.id:
+                    if nxt_loser.reg_first_id is not None and nxt_loser.reg_second_id is not None:
+                        raise ValidationError(
+                            f"Матч нижньої сітки {nxt_loser.id} вже повністю заповнений."
+                        )
+                    pass
+                elif nxt_loser.reg_first is None:
+                    nxt_loser.reg_first = loser
+                    nxt_loser.save(update_fields=["reg_first"])
+                elif nxt_loser.reg_second is None:
+                    nxt_loser.reg_second = loser
+                    nxt_loser.save(update_fields=["reg_second"])
+                else:
+                    raise ValidationError(
+                        f"Матч нижньої сітки {nxt_loser.id} вже повністю заповнений."
+                    )
+
+                from apps.common.broadcast import broadcast_match_update
+
+                transaction.on_commit(lambda: broadcast_match_update(nxt_loser))
 
 
 class MatchEvent(models.Model):

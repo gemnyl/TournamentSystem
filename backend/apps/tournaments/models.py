@@ -178,7 +178,13 @@ class Category(models.Model):
     class BracketFormat(models.TextChoices):
         SINGLE_ELIMINATION = "single_elimination", "Олімпійська (на вибування)"
         ROUND_ROBIN = "round_robin", "Кругова"
-        # DOUBLE_ELIMINATION — заплановано у розширенні, MVP не підтримує
+        SINGLE_ELIM_REPECHAGE = "single_repechage", "Олімпійська сітка з репешажем"
+        DOUBLE_ELIMINATION = "double_elimination", "Double Elimination"
+        SWISS = "swiss", "Швейцарська"
+
+    class DoubleElimType(models.TextChoices):
+        FULL = "full", "Класичний (з Bracket Reset)"
+        SHORT = "short", "Спрощений (один фінал)"
 
     tournament = models.ForeignKey(
         Tournament, on_delete=models.CASCADE, related_name="categories", verbose_name="Турнір"
@@ -223,6 +229,13 @@ class Category(models.Model):
         default=BracketFormat.SINGLE_ELIMINATION,
         verbose_name="Формат сітки",
     )
+    double_elim_type = models.CharField(
+        max_length=10,
+        choices=DoubleElimType.choices,
+        blank=True,
+        default="",
+        verbose_name="Тип Double Elimination",
+    )
     ruleset_key = models.CharField(
         max_length=50,
         default="karate_wkf",
@@ -266,6 +279,8 @@ class Category(models.Model):
         if self.min_weight is not None and self.max_weight is not None:
             if self.min_weight >= self.max_weight:
                 raise ValidationError("Мін. вага повинна бути меншою за макс.")
+        if self.bracket_format == self.BracketFormat.SINGLE_ELIM_REPECHAGE:
+            self.two_third_places = True
 
     def validate_athlete_eligibility(self, athlete, reference_date=None):
         """Перевіряє, чи підходить спортсмен під критерії категорії.
