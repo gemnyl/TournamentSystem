@@ -7,6 +7,7 @@ RegistrationViewSet— CRUD реєстрацій + confirm_weigh_in
 """
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -134,10 +135,65 @@ class TournamentViewSet(viewsets.ModelViewSet):
         tournament = self.get_object()
         categories = tournament.categories.all()
 
-        round_robin_min = int(request.data.get("round_robin_min", 2))
-        round_robin_max = int(request.data.get("round_robin_max", 5))
-        single_elimination_min = int(request.data.get("single_elimination_min", 6))
-        single_elimination_max = int(request.data.get("single_elimination_max", 32))
+        rules = request.data.get("rules")
+        if rules is None:
+            # Fallback for backward compatibility & default behavior
+            rules = [
+                {
+                    "format": Category.BracketFormat.ROUND_ROBIN,
+                    "min_participants": int(request.data.get("round_robin_min", 2)),
+                    "max_participants": int(request.data.get("round_robin_max", 5)),
+                },
+                {
+                    "format": Category.BracketFormat.SINGLE_ELIMINATION,
+                    "min_participants": int(request.data.get("single_elimination_min", 6)),
+                    "max_participants": int(request.data.get("single_elimination_max", 32)),
+                },
+            ]
+
+        parsed_rules = []
+        for r in rules:
+            fmt = r.get("format")
+            if fmt not in Category.BracketFormat.values:
+                return Response(
+                    {"detail": f"Некоректний формат сітки в правилах: {fmt}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            double_elim_type = r.get("double_elim_type")
+            if fmt == Category.BracketFormat.DOUBLE_ELIMINATION:
+                if not double_elim_type:
+                    double_elim_type = Category.DoubleElimType.FULL
+                elif double_elim_type not in Category.DoubleElimType.values:
+                    return Response(
+                        {"detail": f"Некоректний тип Double Elimination: {double_elim_type}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                double_elim_type = ""
+
+            try:
+                min_participants = int(r.get("min_participants", 2))
+                max_participants = int(r.get("max_participants", 100))
+            except (ValueError, TypeError):
+                return Response(
+                    {
+                        "detail": (
+                            "Параметри min_participants та max_participants "
+                            "мають бути цілими числами"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            parsed_rules.append(
+                {
+                    "format": fmt,
+                    "double_elim_type": double_elim_type,
+                    "min_participants": min_participants,
+                    "max_participants": max_participants,
+                }
+            )
 
         generated_count = 0
         errors = []
@@ -148,12 +204,18 @@ class TournamentViewSet(viewsets.ModelViewSet):
             if confirmed_count < 2:
                 continue
 
-            if round_robin_min <= confirmed_count <= round_robin_max:
-                cat.bracket_format = Category.BracketFormat.ROUND_ROBIN
-                cat.save(update_fields=["bracket_format"])
-            elif single_elimination_min <= confirmed_count <= single_elimination_max:
-                cat.bracket_format = Category.BracketFormat.SINGLE_ELIMINATION
-                cat.save(update_fields=["bracket_format"])
+            matched_rule = None
+            for rule in parsed_rules:
+                if rule["min_participants"] <= confirmed_count <= rule["max_participants"]:
+                    matched_rule = rule
+                    break
+
+            if not matched_rule:
+                continue
+
+            cat.bracket_format = matched_rule["format"]
+            cat.double_elim_type = matched_rule["double_elim_type"]
+            cat.save(update_fields=["bracket_format", "double_elim_type"])
 
             try:
                 BracketGenerator(cat).generate()
@@ -424,6 +486,17 @@ def parse_category_name(name_str: str, sport_type: str) -> dict:
     if "ippon" in sport_lower or "shobu" in sport_lower:
         ruleset_key = "shobu_ippon"
 
+    # 5. Parse bracket format from name
+    bracket_format = Category.BracketFormat.SINGLE_ELIMINATION
+    if any(w in lower_name for w in ["круг", "round robin", "rr"]):
+        bracket_format = Category.BracketFormat.ROUND_ROBIN
+    elif any(w in lower_name for w in ["швейц", "swiss", "швейцар"]):
+        bracket_format = Category.BracketFormat.SWISS
+    elif any(w in lower_name for w in ["репеш", "repechage", "rep"]):
+        bracket_format = Category.BracketFormat.SINGLE_ELIM_REPECHAGE
+    elif any(w in lower_name for w in ["double", "подвійн", "de"]):
+        bracket_format = Category.BracketFormat.DOUBLE_ELIMINATION
+
     return {
         "name": name_clean,
         "allowed_gender": allowed_gender,
@@ -432,7 +505,7 @@ def parse_category_name(name_str: str, sport_type: str) -> dict:
         "min_weight": min_weight,
         "max_weight": max_weight,
         "ruleset_key": ruleset_key,
-        "bracket_format": Category.BracketFormat.SINGLE_ELIMINATION,
+        "bracket_format": bracket_format,
     }
 
 
@@ -459,7 +532,12 @@ class CategoryViewSet(viewsets.ModelViewSet):
             "assign_tatami",
         ):
             return [IsOrganizer()]
-        if self.action in ("save_results", "unlock_results", "set_judges_count"):
+        if self.action in (
+            "save_results",
+            "unlock_results",
+            "set_judges_count",
+            "generate_next_swiss_round",
+        ):
             from apps.accounts.permissions import IsJudgeOrOrganizer
 
             return [IsJudgeOrOrganizer()]
@@ -502,7 +580,22 @@ class CategoryViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             category.bracket_format = bracket_format
-            category.save(update_fields=["bracket_format"])
+            update_fields = ["bracket_format"]
+
+            if bracket_format == Category.BracketFormat.DOUBLE_ELIMINATION:
+                double_elim_type = request.data.get("double_elim_type", "full")
+                if double_elim_type not in Category.DoubleElimType.values:
+                    return Response(
+                        {"detail": f"Некоректний тип Double Elimination: {double_elim_type}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                category.double_elim_type = double_elim_type
+                update_fields.append("double_elim_type")
+            else:
+                category.double_elim_type = ""
+                update_fields.append("double_elim_type")
+
+            category.save(update_fields=update_fields)
 
         try:
             matches = BracketGenerator(category).generate()
@@ -527,6 +620,30 @@ class CategoryViewSet(viewsets.ModelViewSet):
         matches.delete()
         return Response(
             {"detail": f"Успішно видалено {count} матчів сітки."}, status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=["post"], url_path="generate_next_swiss_round")
+    @transaction.atomic
+    def generate_next_swiss_round(self, request, pk=None):
+        """POST /api/categories/{id}/generate_next_swiss_round/
+        Генерує наступний раунд швейцарської системи.
+        """
+        category = self.get_object()
+        self._verify_judge_permission(category, request.user)
+
+        from apps.brackets.services import BracketGenerator
+
+        try:
+            created_matches = BracketGenerator(category).generate_next_swiss_round()
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            MatchSerializer(created_matches, many=True).data,
+            status=status.HTTP_201_CREATED,
         )
 
     @action(detail=True, methods=["post"], url_path="assign_tatami")
