@@ -412,6 +412,90 @@ class TestBracketGeneration(TournamentAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(self.category.matches.exists())
 
+    def test_generate_all_brackets_with_rules(self):
+        """Групова генерація сіток з новими правилами rules."""
+        self._login(self.organizer)
+
+        # Створимо додаткову категорію
+        cat_de = Category.objects.create(
+            tournament=self.tournament,
+            name="Cat DE",
+            allowed_gender="mixed",
+            min_age=18,
+            max_age=30,
+        )
+
+        # Додамо 3 бійців у першу категорію (для Round Robin)
+        for i in range(1, 4):
+            self._create_athlete(i, category=self.category)
+
+        # Додамо 6 бійців у категорію cat_de (для Double Elimination)
+        for i in range(10, 16):
+            self._create_athlete(i, category=cat_de)
+
+        payload = {
+            "rules": [
+                {
+                    "format": Category.BracketFormat.ROUND_ROBIN,
+                    "min_participants": 2,
+                    "max_participants": 5,
+                },
+                {
+                    "format": Category.BracketFormat.DOUBLE_ELIMINATION,
+                    "double_elim_type": Category.DoubleElimType.FULL,
+                    "min_participants": 6,
+                    "max_participants": 16,
+                },
+            ]
+        }
+
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/generate_all_brackets/", payload, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.category.refresh_from_db()
+        cat_de.refresh_from_db()
+
+        self.assertEqual(self.category.bracket_format, Category.BracketFormat.ROUND_ROBIN)
+        self.assertEqual(cat_de.bracket_format, Category.BracketFormat.DOUBLE_ELIMINATION)
+        self.assertEqual(cat_de.double_elim_type, Category.DoubleElimType.FULL)
+        self.assertTrue(self.category.matches.exists())
+        self.assertTrue(cat_de.matches.exists())
+
+    def test_generate_all_brackets_invalid_rules(self):
+        """Групова генерація з неправильними правилами повертає 400."""
+        self._login(self.organizer)
+
+        payload_bad_format = {
+            "rules": [
+                {"format": "invalid_format_name", "min_participants": 2, "max_participants": 5}
+            ]
+        }
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/generate_all_brackets/",
+            payload_bad_format,
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        payload_bad_type = {
+            "rules": [
+                {
+                    "format": Category.BracketFormat.DOUBLE_ELIMINATION,
+                    "double_elim_type": "invalid_type",
+                    "min_participants": 2,
+                    "max_participants": 5,
+                }
+            ]
+        }
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/generate_all_brackets/",
+            payload_bad_type,
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_registration_blocked_if_not_registration_status(self):
         """Реєстрація спортсменів блокується, якщо статус не 'registration'."""
         self.tournament.status = Tournament.Status.ACTIVE
@@ -568,6 +652,19 @@ class TestCategoryNLPImport(TournamentAPITestCase):
         self.assertIsNone(res["min_weight"])
         res = parse_category_name("18+ .plus", "Karate")
         self.assertIsNone(res["min_weight"])
+
+        # Test bracket format parsing
+        res = parse_category_name("18+ (Кругова сітка)", "Karate")
+        self.assertEqual(res["bracket_format"], Category.BracketFormat.ROUND_ROBIN)
+
+        res = parse_category_name("18+ (Швейцарська)", "Karate")
+        self.assertEqual(res["bracket_format"], Category.BracketFormat.SWISS)
+
+        res = parse_category_name("18+ (репешаж)", "Karate")
+        self.assertEqual(res["bracket_format"], Category.BracketFormat.SINGLE_ELIM_REPECHAGE)
+
+        res = parse_category_name("18+ (double)", "Karate")
+        self.assertEqual(res["bracket_format"], Category.BracketFormat.DOUBLE_ELIMINATION)
 
 
 class CategoryResultsTestCase(TournamentAPITestCase):
