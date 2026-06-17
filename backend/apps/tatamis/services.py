@@ -44,10 +44,33 @@ class TatamiService:
 
     @staticmethod
     def assign_match(tatami: Tatami, match_id: int) -> None:
-        from apps.common.broadcast import broadcast_tatami_state
+        from apps.common.broadcast import broadcast_tatami_state, broadcast_timer_state
         from apps.matches.models import Match
 
         match = Match.objects.select_related("category").get(pk=match_id)
+
+        # If there's a currently ongoing match on this tatami, pause its timer
+        # so ghost timer.state events stop reaching the scoreboard after the switch.
+        prev_match = tatami.current_match
+        if prev_match and prev_match.id != match.id:
+            if prev_match.timer_status == Match.TimerStatus.RUNNING:
+                from django.utils import timezone
+
+                elapsed = prev_match.timer_elapsed_ms
+                if prev_match.timer_started_at:
+                    delta_ms = int(
+                        (timezone.now() - prev_match.timer_started_at).total_seconds() * 1000
+                    )
+                    elapsed = min(
+                        prev_match.timer_elapsed_ms + delta_ms, prev_match.timer_duration_ms
+                    )
+                prev_match.timer_status = Match.TimerStatus.PAUSED
+                prev_match.timer_elapsed_ms = elapsed
+                prev_match.timer_started_at = None
+                prev_match.save(
+                    update_fields=["timer_status", "timer_elapsed_ms", "timer_started_at"]
+                )
+                broadcast_timer_state(prev_match)
 
         # Clear this match from any other tatami's current_match
         other_tatamis = Tatami.objects.filter(current_match=match).exclude(id=tatami.id)
@@ -80,20 +103,47 @@ class TatamiService:
                 if not category.matches.exclude(status="completed").exists():
                     # Check if results are not already finalized
                     if not category.registrations.filter(place__isnull=False).exists():
-                        try:
-                            calculate_category_standings(category, persist=True)
+                        # For Swiss system, we only auto-finalize after the last round
+                        is_swiss_final_round = True
+                        if category.bracket_format == "swiss":
+                            import math
 
-                            # Broadcast to category channel so spectators get new results
-                            from apps.common.broadcast import broadcast_category_results_update
+                            n = category.registrations.filter(status="confirmed").count()
+                            max_rounds = math.ceil(math.log2(n)) if n > 1 else 1
+                            matches = list(category.matches.filter(parent_team_match__isnull=True))
+                            current_round = max((m.round_index for m in matches), default=0)
+                            if current_round < max_rounds:
+                                is_swiss_final_round = False
 
-                            broadcast_category_results_update(category.id)
-                        except Exception:
-                            import logging
+                        if is_swiss_final_round:
+                            try:
+                                calculate_category_standings(category, persist=True)
 
-                            logger = logging.getLogger(__name__)
-                            logger.exception(
-                                f"Error auto-finalizing results for category {category.id}"
-                            )
+                                # Broadcast to category channel so spectators get new results
+                                from apps.common.broadcast import broadcast_category_results_update
+
+                                broadcast_category_results_update(category.id)
+                            except Exception:
+                                import logging
+
+                                logger = logging.getLogger(__name__)
+                                logger.exception(
+                                    f"Error auto-finalizing results for category {category.id}"
+                                )
+                        else:
+                            if category.bracket_format == "swiss":
+                                try:
+                                    from apps.brackets.services import BracketGenerator
+
+                                    BracketGenerator(category).generate_next_swiss_round()
+                                except Exception:
+                                    import logging
+
+                                    logger = logging.getLogger(__name__)
+                                    logger.exception(
+                                        "Error auto-generating next Swiss round for "
+                                        f"category {category.id}"
+                                    )
 
         tatami.current_match = None
         tatami.save(update_fields=["current_match"])
