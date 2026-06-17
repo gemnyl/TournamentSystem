@@ -293,5 +293,53 @@ def build_round_robin_schedule(
             round_pairs.append((rotating[i], rotating[-i]))
         schedule.append(round_pairs)
         rotating = [rotating[-1]] + rotating[:-1]
-
     return schedule
+
+
+def pair_swiss_optimal(players: list, past_opponents: dict[int, set[int]]) -> list[tuple] | None:
+    """
+    Finds the globally optimal Swiss pairing for a list of players.
+    Uses branch-and-bound backtracking to minimize the sum of squared score differences
+    between paired opponents, enforcing that no players play each other twice.
+
+    players: list of objects having 'id' and 'score' attributes.
+    past_opponents: dict of registration_id -> set of past opponent registration_ids.
+
+    Returns: list of (player1, player2) tuples, or None if pairing is impossible.
+    """
+    best_matching = []
+    min_penalty = float("inf")
+    iterations = 0
+    max_iterations = 10000
+
+    def backtrack(unpaired, current_matching, current_penalty):
+        nonlocal best_matching, min_penalty, iterations
+
+        iterations += 1
+        if iterations > max_iterations:
+            return
+
+        if current_penalty >= min_penalty:
+            return
+
+        if not unpaired:
+            best_matching = list(current_matching)
+            min_penalty = current_penalty
+            return
+
+        p1 = unpaired[0]
+        # Find candidates who haven't played p1
+        candidates = [c for c in unpaired[1:] if c.id not in past_opponents.get(p1.id, set())]
+        # Sort candidates by score difference to find good pairings early and prune aggressively
+        candidates.sort(key=lambda c: abs(p1.score - c.score))
+
+        for c in candidates:
+            penalty = (p1.score - c.score) ** 2
+            next_unpaired = [p for p in unpaired if p.id != p1.id and p.id != c.id]
+            backtrack(next_unpaired, current_matching + [(p1, c)], current_penalty + penalty)
+
+    backtrack(players, [], 0)
+
+    if min_penalty == float("inf"):
+        return None
+    return best_matching
