@@ -4,9 +4,11 @@ import {
 } from "@/components/ui/table";
 import { cn, formatAthleteName } from "@/lib/utils";
 import type { Match } from "@/types/api";
+import { useDragScroll } from "@/hooks/useDragScroll";
 
 interface RoundRobinTableProps {
   matches: Match[];
+  hideMatrix?: boolean;
 }
 
 interface ParticipantStats {
@@ -170,7 +172,8 @@ function getMedalOrRank(displayRank: number): string {
  * Таблиця round-robin — показує учасників, їх W/D/L та очки.
  * Також рендерить сітку результатів (матриця учасник × учасник).
  */
-export function RoundRobinTable({ matches }: RoundRobinTableProps) {
+export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTableProps) {
+  const dragScroll = useDragScroll();
   // Збираємо унікальних учасників
   const participantsMap = new Map<number, string>();
   const placesMap = new Map<number, number | null>();
@@ -269,10 +272,14 @@ export function RoundRobinTable({ matches }: RoundRobinTableProps) {
       </div>
 
       {/* Матриця результатів */}
-      {participants.length <= 12 && (
+      {!hideMatrix && participants.length <= 12 && (
         <div className="space-y-3">
           <h3 className="font-display text-sm font-bold uppercase tracking-wider text-muted-foreground">Результати матчів (Матриця)</h3>
-          <div className="rounded-2xl border border-border/80 bg-card/30 shadow-md overflow-x-auto">
+          <div
+            ref={dragScroll.ref}
+            {...dragScroll.props}
+            className="rounded-2xl border border-border/80 bg-card/30 shadow-md overflow-x-auto cursor-grab active:cursor-grabbing select-none"
+          >
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-border/70 bg-muted/40">

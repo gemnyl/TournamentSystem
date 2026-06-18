@@ -7,15 +7,25 @@ interface BracketRoundProps {
   totalRounds: number;
   matches: Match[];
   onMatchClick?: (match: Match) => void;
+  /** Для Losers Bracket: явно задані відступи (рівна висота колонок). */
+  customGap?: number;
+  customPaddingTop?: number;
+  /** Вимикає приховування BYE-матчів і SE-конектори (для LB). */
+  isLosers?: boolean;
+  /** Позначає швейцарську систему (без конекторів, рівномірні відступи). */
+  isSwiss?: boolean;
+  showPlaceholders?: boolean;
+  virtualRoundIndex?: number;
+  customRoundLabel?: string;
 }
 
 /**
- * Розраховує точні математичні відступи для вирівнювання сітки.
- * Використовує рекурентні співвідношення:
- * gap_r = 2 * gap_{r-1} + H
- * paddingTop_r = paddingTop_{r-1} + (gap_{r-1} + H) / 2
+ * Розраховує точні математичні відступи для Single-Elimination сітки.
+ * Рекурентні співвідношення:
+ *   gap_r = 2 * gap_{r-1} + H
+ *   paddingTop_r = paddingTop_{r-1} + (gap_{r-1} + H) / 2
  */
-function getRoundSpacing(roundIndex: number, cardHeight: number, baseGap: number) {
+function getSESpacing(roundIndex: number, cardHeight: number, baseGap: number) {
   let gap = baseGap;
   let paddingTop = 0;
   for (let r = 1; r <= roundIndex; r++) {
@@ -26,13 +36,32 @@ function getRoundSpacing(roundIndex: number, cardHeight: number, baseGap: number
 }
 
 /**
- * Колонка одного раунду в single-elimination сітці.
- * Вертикальний відступ між матчами збільшується в міру просування по раундах,
- * щоб переможці "зливались" до центру, з елегантними CSS-лініями конекторів.
+ * Колонка одного раунду в сітці.
+ *
+ * Режим SE (default): exponential spacing через getSESpacing — переможці «зливаються»
+ * до центру з CSS-конекторами.
+ *
+ * Режим LB (customGap/customPaddingTop): рівна висота всіх колонок — без конекторів,
+ * без приховування BYE. Мітки раундів: «Раунд N».
  */
-export function BracketRound({ roundIndex, totalRounds, matches, onMatchClick }: BracketRoundProps) {
-  // Назва раунду
+export function BracketRound({
+  roundIndex,
+  totalRounds,
+  matches,
+  onMatchClick,
+  customGap,
+  customPaddingTop,
+  isLosers = false,
+  isSwiss = false,
+  showPlaceholders = false,
+  virtualRoundIndex,
+  customRoundLabel,
+}: BracketRoundProps) {
+  // ─── Назва раунду ──────────────────────────────────────────────────────────
   const roundLabel = () => {
+    if (customRoundLabel) return customRoundLabel;
+    if (isSwiss) return `Тур ${roundIndex + 1}`;
+    if (isLosers) return `Раунд ${roundIndex + 1}`;
     const fromEnd = totalRounds - 1 - roundIndex;
     if (fromEnd === 0) return "Фінал";
     if (fromEnd === 1) return "Півфінал";
@@ -40,15 +69,38 @@ export function BracketRound({ roundIndex, totalRounds, matches, onMatchClick }:
     return `Раунд ${roundIndex + 1}`;
   };
 
-  // Висота картки H: 108px для індивідуальних, 140px або 180px для командних
-  const isTeam = matches.some(m => m.category_is_team);
+  // ─── Розміри картки ────────────────────────────────────────────────────────
+  const isTeam = matches.some((m) => m.category_is_team);
   const maxBouts = matches.reduce((max, m) => Math.max(max, m.team_bouts?.length ?? 0), 0);
   let cardHeight = 108;
   if (isTeam) {
     cardHeight = maxBouts > 3 ? 180 : 140;
   }
   const baseGap = 16;
-  const { gap: gapBetween, paddingTop } = getRoundSpacing(roundIndex, cardHeight, baseGap);
+
+  // ─── Spacing ───────────────────────────────────────────────────────────────
+  let gapBetween: number;
+  let paddingTop: number;
+
+  if (isSwiss) {
+    // Швейцарський режим: рівномірний відступ
+    gapBetween = baseGap;
+    paddingTop = 0;
+  } else if (virtualRoundIndex !== undefined) {
+    // LB-режим з віртуальним індексом раунду (для ялинки та утримання)
+    const spacing = getSESpacing(virtualRoundIndex, cardHeight, baseGap);
+    gapBetween = spacing.gap;
+    paddingTop = spacing.paddingTop;
+  } else if (customGap !== undefined) {
+    // LB-режим: рівна висота, задана ззовні
+    gapBetween = customGap;
+    paddingTop = customPaddingTop ?? 0;
+  } else {
+    // SE-режим: exponential spacing
+    const spacing = getSESpacing(roundIndex, cardHeight, baseGap);
+    gapBetween = spacing.gap;
+    paddingTop = spacing.paddingTop;
+  }
 
   return (
     <div className="flex flex-col items-center w-72 select-none">
@@ -66,14 +118,40 @@ export function BracketRound({ roundIndex, totalRounds, matches, onMatchClick }:
         {matches.map((match, idx) => {
           const isLastRound = roundIndex === totalRounds - 1;
           const isEven = idx % 2 === 0;
-          const isByeInRound1 = roundIndex === 0 && (!match.reg_first || !match.reg_second);
 
-          // Малюємо конектори для всіх раундів, окрім фінального
+          // BYE-приховування тільки в SE R1 (не в LB)
+          const isByeInRound1 =
+            !showPlaceholders && !isLosers && roundIndex === 0 && (!match.reg_first || !match.reg_second);
+
+          // Приховуємо лише завершені авто-проходи (BYE)
+          const isPureBye = match.status === "completed" && match.win_method === "walkover";
+          const shouldHideMatch = !showPlaceholders && isPureBye;
+
+          // Порожні матчі нижньої сітки R1, які ніколи не відбудуться
+          const isLosersGhostMatch =
+            isLosers && roundIndex === 0 && !match.reg_first && !match.reg_second && match.status !== "completed";
+
+          // Повністю порожні завершені матчі (ghost matches), які не мають учасників
+          const isGhostCompleted = match.status === "completed" && !match.reg_first && !match.reg_second;
+
+          // SE-конектори та конектори нижньої сітки (злиття 2-в-1 для непарних раундів лузерів)
           const nextMatchExists = idx + 1 < matches.length;
           const prevMatchExists = idx - 1 >= 0;
-          const shouldDrawConnector = !isLastRound && ((isEven && nextMatchExists) || (!isEven && prevMatchExists)) && !isByeInRound1;
+          const shouldDrawConnector =
+            !isSwiss &&
+            !isLastRound &&
+            ((isEven && nextMatchExists) || (!isEven && prevMatchExists)) &&
+            !isByeInRound1 &&
+            !shouldHideMatch &&
+            !isLosersGhostMatch &&
+            !isGhostCompleted &&
+            (!isLosers || (isLosers && roundIndex % 2 !== 0));
 
-          // Висота лінії = половина відступу між картками + половина висоти картки
+          // Прямий конектор 1-в-1 для парних раундів лузерів (R1, R3, R5 тощо)
+          const shouldDrawLosersStraightConnector =
+            isLosers && !isLastRound && (roundIndex % 2 === 0) && !isLosersGhostMatch && !isGhostCompleted;
+
+          // Висота конектора = половина відступу + половина висоти картки
           const connectorHeight = (gapBetween + cardHeight) / 2;
 
           return (
@@ -81,23 +159,37 @@ export function BracketRound({ roundIndex, totalRounds, matches, onMatchClick }:
               key={match.id}
               className={cn(
                 "relative flex items-center justify-center w-full",
-                isByeInRound1 && "invisible pointer-events-none"
+                (isByeInRound1 || shouldHideMatch || isLosersGhostMatch || isGhostCompleted) && "invisible pointer-events-none"
               )}
             >
               <MatchCard match={match} onClick={onMatchClick} />
 
-              {shouldDrawConnector && (
-                isEven ? (
-                  <div className="absolute left-full w-12 pointer-events-none" style={{ height: `${connectorHeight}px`, top: '50%' }}>
+              {shouldDrawConnector &&
+                (isEven ? (
+                  <div
+                    className="absolute left-full w-12 pointer-events-none"
+                    style={{ height: `${connectorHeight}px`, top: "50%" }}
+                  >
                     <div className="absolute left-0 top-0 w-6 h-full border-t-2 border-r-2 border-amber-500/35 rounded-tr-xl" />
                     <div className="absolute left-6 bottom-0 w-6 border-b-2 border-amber-500/35" />
                   </div>
                 ) : (
-                  <div className="absolute left-full w-12 pointer-events-none" style={{ height: `${connectorHeight}px`, bottom: '50%' }}>
+                  <div
+                    className="absolute left-full w-12 pointer-events-none"
+                    style={{ height: `${connectorHeight}px`, bottom: "50%" }}
+                  >
                     <div className="absolute left-0 bottom-0 w-6 h-full border-b-2 border-r-2 border-amber-500/35 rounded-br-xl" />
                     <div className="absolute left-6 top-0 w-6 border-t-2 border-amber-500/35" />
                   </div>
-                )
+                ))}
+
+              {shouldDrawLosersStraightConnector && (
+                <div
+                  className="absolute left-full w-12 pointer-events-none"
+                  style={{ height: "2px", top: "50%" }}
+                >
+                  <div className="absolute left-0 top-0 w-12 border-b-2 border-amber-500/35" />
+                </div>
               )}
             </div>
           );
