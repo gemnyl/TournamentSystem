@@ -199,7 +199,7 @@ const editCategorySchema = z.object({
     (val) => (val === "" || val === null || val === undefined) ? undefined : Number(val),
     z.number().min(1, "Мін. 1 кг").max(500, "Макс. 500 кг").optional()
   ),
-  bracket_format:         z.enum(["single_elimination", "round_robin"]),
+  bracket_format:         z.enum(["single_elimination", "round_robin", "single_repechage", "double_elimination", "swiss"]),
   ruleset_key:            z.string().min(1, "Оберіть правила"),
   match_duration_seconds: z.preprocess(
     (val) => (val === "" || val === null || val === undefined) ? undefined : Number(val),
@@ -219,6 +219,7 @@ export default function CategoryDetailPage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [generatingBracket, setGeneratingBracket] = useState(false);
+  const [generatingNextRound, setGeneratingNextRound] = useState(false);
   const [regDialogOpen, setRegDialogOpen] = useState(false);
   const [weighInDialog, setWeighInDialog] = useState<Registration | null>(null);
   const [selectedAthlete, setSelectedAthlete] = useState<string>("");
@@ -230,6 +231,7 @@ export default function CategoryDetailPage() {
   const [deleteBracketDialogOpen, setDeleteBracketDialogOpen] = useState(false);
   const [generateBracketDialogOpen, setGenerateBracketDialogOpen] = useState(false);
   const [chosenFormat, setChosenFormat] = useState<string>("single_elimination");
+  const [chosenDoubleElimType, setChosenDoubleElimType] = useState<string>("full");
   const [isEditingCat, setIsEditingCat] = useState(false);
   const [isDeletingCat, setIsDeletingCat] = useState(false);
   const [isDeletingBracket, setIsDeletingBracket] = useState(false);
@@ -247,6 +249,26 @@ export default function CategoryDetailPage() {
   const [rulesets, setRulesets] = useState<RulesetOption[]>([]);
 
   const categoryMatches = matches.filter((m: Match) => m.category === Number(id));
+
+  const swissCurrentRound = useMemo(() => {
+    if (category?.bracket_format !== "swiss" || categoryMatches.length === 0) return 0;
+    return Math.max(...categoryMatches.map((m) => m.round_index), 0);
+  }, [category, categoryMatches]);
+
+  const swissMaxRounds = useMemo(() => {
+    const activeRegs = registrations.filter(r => r.status === "confirmed").length;
+    return activeRegs > 1 ? Math.ceil(Math.log2(activeRegs)) : 1;
+  }, [registrations]);
+
+  const canGenerateNextSwissRound = useMemo(() => {
+    if (category?.bracket_format !== "swiss") return false;
+    if (categoryMatches.length === 0) return false;
+    if (swissCurrentRound >= swissMaxRounds) return false;
+
+    const currentRoundMatches = categoryMatches.filter((m) => m.round_index === swissCurrentRound);
+    return currentRoundMatches.length > 0 && currentRoundMatches.every((m) => m.status === "completed");
+  }, [category, categoryMatches, swissCurrentRound, swissMaxRounds]);
+
   const firstMatchWithTatami = categoryMatches?.find((m: Match) => m.tatami !== null);
   const categoryTatami = (firstMatchWithTatami && Array.isArray(tatamis))
     ? tatamis.find((t: Tatami) => t.id === firstMatchWithTatami.tatami)
@@ -349,7 +371,11 @@ export default function CategoryDetailPage() {
   const handleGenerateBracket = async () => {
     setGeneratingBracket(true);
     try {
-      await api.post(`/categories/${id}/generate_bracket/`, { bracket_format: chosenFormat });
+      const payload: Record<string, string> = { bracket_format: chosenFormat };
+      if (chosenFormat === "double_elimination") {
+        payload.double_elim_type = chosenDoubleElimType;
+      }
+      await api.post(`/categories/${id}/generate_bracket/`, payload);
       toast({ title: "Сітку згенеровано!" });
       setGenerateBracketDialogOpen(false);
       fetchAll();
@@ -366,6 +392,7 @@ export default function CategoryDetailPage() {
       setChosenFormat(suggested);
     } else {
       setChosenFormat(category?.bracket_format ?? "single_elimination");
+      setChosenDoubleElimType(category?.double_elim_type ?? "full");
     }
     setGenerateBracketDialogOpen(true);
   };
@@ -385,7 +412,7 @@ export default function CategoryDetailPage() {
       max_age: category.max_age,
       min_weight: category.min_weight ?? undefined,
       max_weight: category.max_weight ?? undefined,
-      bracket_format: category.bracket_format as "single_elimination" | "round_robin",
+      bracket_format: category.bracket_format as EditCategoryForm["bracket_format"],
       ruleset_key: category.ruleset_key,
       match_duration_seconds: category.match_duration_seconds ?? undefined,
       allowed_skill_level: category.allowed_skill_level ?? "",
@@ -440,6 +467,19 @@ export default function CategoryDetailPage() {
       toast({ title: "Помилка видалення сітки", variant: "destructive" });
     } finally {
       setIsDeletingBracket(false);
+    }
+  };
+
+  const handleGenerateNextRound = async () => {
+    setGeneratingNextRound(true);
+    try {
+      await api.post(`/categories/${id}/generate_next_swiss_round/`);
+      toast({ title: "Наступний тур успішно згенеровано!" });
+      fetchAll();
+    } catch {
+      // toast з interceptor
+    } finally {
+      setGeneratingNextRound(false);
     }
   };
 
@@ -697,6 +737,17 @@ export default function CategoryDetailPage() {
           {isOrganizer && category.has_bracket && !isCompleted && (
             <Button variant="destructive" size="sm" onClick={() => setDeleteBracketDialogOpen(true)}>
               Вилучити сітку
+            </Button>
+          )}
+          {canFinalizeOrUnlock && canGenerateNextSwissRound && (
+            <Button
+              variant="sport"
+              size="sm"
+              disabled={generatingNextRound}
+              onClick={handleGenerateNextRound}
+            >
+              {generatingNextRound ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
+              Згенерувати наступний тур ({swissCurrentRound + 1}/{swissMaxRounds})
             </Button>
           )}
           {category.has_bracket ? (
@@ -1142,15 +1193,44 @@ export default function CategoryDetailPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-1.5">
-                <Label>Формат турнірної сітки</Label>
-                <Select value={chosenFormat} onValueChange={setChosenFormat}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single_elimination">Олімпійська (на вибування)</SelectItem>
-                    <SelectItem value="round_robin">Кругова (кожен з кожним)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Формат турнірної сітки</Label>
+                  <Select value={chosenFormat} onValueChange={(v) => { setChosenFormat(v); if (v !== "double_elimination") setChosenDoubleElimType("full"); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single_elimination">Олімпійська (на вибування)</SelectItem>
+                      <SelectItem value="round_robin">Кругова (кожен з кожним)</SelectItem>
+                      <SelectItem value="single_repechage">Олімпійська з репешажем (з доріжками)</SelectItem>
+                      <SelectItem value="double_elimination">Double Elimination</SelectItem>
+                      <SelectItem value="swiss">Швейцарська система</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {chosenFormat === "double_elimination" && (
+                  <div className="space-y-1.5">
+                    <Label>Тип Double Elimination</Label>
+                    <Select value={chosenDoubleElimType} onValueChange={setChosenDoubleElimType}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="full">Класичний (з Bracket Reset)</SelectItem>
+                        <SelectItem value="short">Спрощений (один фінал)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      {chosenDoubleElimType === "full"
+                        ? "Переможець нижньої частини може перемогти у фіналі та ініціювати Bracket Reset — вирішальний матч-реванш."
+                        : "Єдиний Гранд Фінал між переможцями верхньої та нижньої частин — без можливості Bracket Reset."}
+                    </p>
+                  </div>
+                )}
+
+                {chosenFormat === "single_repechage" && (
+                  <div className="p-3 rounded-lg border border-blue-500/20 bg-blue-500/5 text-[11px] text-blue-300 leading-relaxed">
+                    ℹ️ <strong>Олімпійська з репешажем</strong>: після виявлення фіналістів для кожного з них автоматично генерується окрема доріжка змагань між учасниками, яких він переміг. Переможець доріжки отримує 3-є місце.
+                  </div>
+                )}
               </div>
             )}
             <p className="text-xs text-muted-foreground">
