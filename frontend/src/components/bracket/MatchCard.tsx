@@ -10,9 +10,10 @@ interface MatchCardProps {
 
 function participantName(reg: Registration | null, roundIndex: number): string {
   if (!reg) {
-    return roundIndex > 1 ? "Очікується переможець" : "BYE";
+    const isFirstRound = roundIndex === 0 || roundIndex === 1 || roundIndex === 100 || roundIndex === 101;
+    return isFirstRound ? "BYE" : "Очікується переможець";
   }
-  return formatRegistrationName(reg);
+  return formatRegistrationName(reg) || "TBD";
 }
 
 /** Назва клубу */
@@ -229,7 +230,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
       onClick={handleClick}
       className={cn(
         "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm text-left outline-none focus:ring-1 focus:ring-amber-500/50",
-        "min-h-[108px] py-1.5 h-auto flex flex-col justify-center",
+        "h-[108px] py-1.5 flex flex-col justify-center",
         !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
         isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 animate-pulse bg-amber-500/5",
         isBye && "opacity-30",
@@ -246,7 +247,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
 
       {/* Учасник 1 (AKA) */}
       <div className={cn(
-        "flex items-center justify-between gap-2 px-3 py-2 border-l-[4px] transition-all",
+        "flex items-center justify-between gap-2 px-3 py-1 border-l-[4px] transition-all",
         getBeltColorClass(match.reg_first?.athlete?.skill_level),
         firstWon && "bg-emerald-500/10",
         isDone && !firstWon && match.reg_first && "opacity-40 filter grayscale-[20%]",
@@ -257,20 +258,20 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
           </span>
           <div className="min-w-0 flex-1">
             <p className={cn(
-              "text-xs font-semibold leading-tight text-foreground/90 whitespace-normal break-words",
+              "text-xs font-semibold leading-normal text-foreground/90 truncate",
               !match.reg_first && "text-muted-foreground italic",
               firstWon && "text-emerald-400 font-bold",
             )}>
-              {firstWon && <span className="text-emerald-500 font-bold mr-1 inline-block">✓</span>}
+              {firstWon && <span className="text-emerald-500 font-bold mr-1">✓</span>}
               <span>{participantName(match.reg_first, match.round_index)}</span>
               {match.reg_first?.place && match.reg_first.place > 0 && (
-                <span className="text-[10px] font-bold ml-1 inline-block" title={`${match.reg_first.place} місце`}>
+                <span className="text-[10px] font-bold ml-1" title={`${match.reg_first.place} місце`}>
                   {getPlaceBadge(match.reg_first.place)}
                 </span>
               )}
             </p>
             {!compact && match.reg_first && (
-              <p className="text-[9px] text-muted-foreground whitespace-normal break-words">{participantClub(match.reg_first)}</p>
+              <p className="text-[9px] text-muted-foreground truncate leading-none">{participantClub(match.reg_first)}</p>
             )}
           </div>
         </div>
@@ -287,7 +288,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
 
       {/* Учасник 2 (AO) */}
       <div className={cn(
-        "flex items-center justify-between gap-2 px-3 py-2 border-l-[4px] transition-all",
+        "flex items-center justify-between gap-2 px-3 py-1 border-l-[4px] transition-all",
         getBeltColorClass(match.reg_second?.athlete?.skill_level),
         secondWon && "bg-emerald-500/10",
         isDone && !secondWon && match.reg_second && "opacity-40 filter grayscale-[20%]",
@@ -298,20 +299,20 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
           </span>
           <div className="min-w-0 flex-1">
             <p className={cn(
-              "text-xs font-semibold leading-tight text-foreground/90 whitespace-normal break-words",
+              "text-xs font-semibold leading-normal text-foreground/90 truncate",
               !match.reg_second && "text-muted-foreground italic",
               secondWon && "text-emerald-400 font-bold",
             )}>
-              {secondWon && <span className="text-emerald-500 font-bold mr-1 inline-block">✓</span>}
+              {secondWon && <span className="text-emerald-500 font-bold mr-1">✓</span>}
               <span>{participantName(match.reg_second, match.round_index)}</span>
               {match.reg_second?.place && match.reg_second.place > 0 && (
-                <span className="text-[10px] font-bold ml-1 inline-block" title={`${match.reg_second.place} місце`}>
+                <span className="text-[10px] font-bold ml-1" title={`${match.reg_second.place} місце`}>
                   {getPlaceBadge(match.reg_second.place)}
                 </span>
               )}
             </p>
             {!compact && match.reg_second && (
-              <p className="text-[9px] text-muted-foreground whitespace-normal break-words">{participantClub(match.reg_second)}</p>
+              <p className="text-[9px] text-muted-foreground truncate leading-none">{participantClub(match.reg_second)}</p>
             )}
           </div>
         </div>
@@ -325,7 +326,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
 
       {/* Метод перемоги */}
       {isDone && match.win_method && !compact && (
-        <div className="px-3 pb-2.5 pt-1 border-t border-border/30 bg-muted/10 w-full">
+        <div className="px-3 pb-1.5 pt-0.5 border-t border-border/30 bg-muted/10 w-full">
           <span className="text-[9px] text-amber-500/90 font-bold tracking-wider uppercase">
             Перемога: {match.win_method}
           </span>
