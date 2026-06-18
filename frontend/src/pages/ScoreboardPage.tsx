@@ -120,16 +120,28 @@ export default function ScoreboardPage() {
       fetchTatamiMatches(data.tatami);
     },
     onMatchEvent(_event, match) {
-      setCurrentMatch(match);
-      setTimerState(matchToTimerState(match));
+      setCurrentMatch((prev) => {
+        if (prev && prev.id !== match.id) {
+          return prev;
+        }
+        setTimerState(matchToTimerState(match));
+        return match;
+      });
       fetchTatamiMatches();
     },
-    onTimerState(state) {
-      setTimerState({
-        status: state.status,
-        started_at_ms: state.started_at_ms,
-        elapsed_ms: state.elapsed_ms,
-        duration_ms: state.duration_ms,
+    onTimerState(state, _serverTs, match_id) {
+      // Ignore timer events that don't belong to the currently displayed match
+      setCurrentMatch((prev) => {
+        if (match_id !== undefined && prev && prev.id !== match_id) {
+          return prev; // stale timer event — ignore
+        }
+        setTimerState({
+          status: state.status,
+          started_at_ms: state.started_at_ms,
+          elapsed_ms: state.elapsed_ms,
+          duration_ms: state.duration_ms,
+        });
+        return prev;
       });
     },
     onTatamiState(data) {

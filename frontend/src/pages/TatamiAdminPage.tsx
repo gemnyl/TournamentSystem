@@ -48,6 +48,15 @@ function compareTatamiMatches(
     if (orderA !== orderB) return orderA - orderB;
     return a.category - b.category;
   }
+  const getPrio = (m: Match) => {
+    if (m.round_index >= 300) return 1;
+    if (m.next_match === null && m.round_index < 300) return 2;
+    return 0;
+  };
+  const prioA = getPrio(a);
+  const prioB = getPrio(b);
+  if (prioA !== prioB) return prioA - prioB;
+
   return a.round_index === b.round_index
     ? a.match_order - b.match_order
     : a.round_index - b.round_index;

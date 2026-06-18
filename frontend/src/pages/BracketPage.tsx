@@ -1,15 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Loader2, RefreshCw, Wifi, WifiOff, Trophy, Check } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, Wifi, WifiOff, Trophy, Check, Plus } from "lucide-react";
 import api from "@/lib/api";
 import { cn, formatRegistrationName, formatRegistrationClub, formatAthleteName } from "@/lib/utils";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { BracketView } from "@/components/bracket/BracketView";
+import { MatchCard } from "@/components/bracket/MatchCard";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import type { BracketResponse, Category, Match } from "@/types/api";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "@/hooks/use-toast";
 
 interface CategoryStanding {
   place?: number | null;
@@ -38,15 +41,96 @@ function getMatchStatusLabel(isDone: boolean, isLive: boolean): string {
 
 export default function BracketPage() {
   const { id } = useParams<{ id: string }>();
+  const { user, isOrganizer, isJudge } = useAuth();
   const [bracket, setBracket]   = useState<BracketResponse | null>(null);
   const [category, setCategory] = useState<Category | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showPlaceholders, setShowPlaceholders] = useState(() => {
+    try {
+      return localStorage.getItem("showPlaceholders") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("showPlaceholders", String(showPlaceholders));
+    } catch {
+      // no-op
+    }
+  }, [showPlaceholders]);
+
+  const matchStats = useMemo(() => {
+    const all = bracket?.rounds.flat() ?? [];
+    const technical = all.filter(m => {
+      return m.status === "completed" && m.win_method === "walkover";
+    }).length;
+    const real = all.length - technical;
+    return { total: all.length, technical, real };
+  }, [bracket]);
+
   const [wsConnected, setWsConnected] = useState(false);
   const [standings, setStandings] = useState<CategoryStanding[]>([]);
 
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [matchBouts, setMatchBouts] = useState<Match[]>([]);
   const [loadingBouts, setLoadingBouts] = useState(false);
+
+  const [generatingNextRound, setGeneratingNextRound] = useState(false);
+  const [tatamis, setTatamis] = useState<any[]>([]);
+
+  const categoryMatches = useMemo(() => {
+    return bracket?.rounds.flat() ?? [];
+  }, [bracket]);
+
+  const swissCurrentRound = useMemo(() => {
+    if (category?.bracket_format !== "swiss" || categoryMatches.length === 0) return 0;
+    return Math.max(...categoryMatches.map((m) => m.round_index), 0);
+  }, [category, categoryMatches]);
+
+  const swissMaxRounds = useMemo(() => {
+    const activeRegs = category?.confirmed_registrations_count ?? 0;
+    return activeRegs > 1 ? Math.ceil(Math.log2(activeRegs)) : 1;
+  }, [category]);
+
+  const canGenerateNextSwissRound = useMemo(() => {
+    if (category?.bracket_format !== "swiss") return false;
+    if (categoryMatches.length === 0) return false;
+    if (swissCurrentRound >= swissMaxRounds) return false;
+
+    const currentRoundMatches = categoryMatches.filter((m) => m.round_index === swissCurrentRound);
+    return currentRoundMatches.length > 0 && currentRoundMatches.every((m) => m.status === "completed");
+  }, [category, categoryMatches, swissCurrentRound, swissMaxRounds]);
+
+  const isCompleted = category?.status === "completed";
+
+  const categoryTatami = useMemo(() => {
+    const firstMatchWithTatami = categoryMatches?.find((m) => m.tatami !== null);
+    return (firstMatchWithTatami && Array.isArray(tatamis))
+      ? tatamis.find((t) => t.id === firstMatchWithTatami.tatami)
+      : undefined;
+  }, [categoryMatches, tatamis]);
+
+  const canManageSwiss = useMemo(() => {
+    return !isCompleted && (
+      isOrganizer ||
+      (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id)
+    );
+  }, [isCompleted, isOrganizer, isJudge, categoryTatami, user]);
+
+  const handleGenerateNextRound = async () => {
+    setGeneratingNextRound(true);
+    try {
+      await api.post(`/categories/${id}/generate_next_swiss_round/`);
+      toast({ title: "Наступний тур успішно згенеровано!" });
+      fetchBracket();
+    } catch {
+      // toast з interceptor
+    } finally {
+      setGeneratingNextRound(false);
+    }
+  };
 
   const fetchBracket = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -66,10 +150,16 @@ export default function BracketPage() {
       setCategory(catRes.data);
 
       try {
-        const res = await api.get<CategoryStanding[]>(`/categories/${id}/results/`);
+        const [res, tatamiRes] = await Promise.all([
+          api.get<CategoryStanding[]>(`/categories/${id}/results/`),
+          api.get<any[] | { results: any[] }>(`/tatamis/?tournament=${catRes.data.tournament}`),
+        ]);
         setStandings(res.data.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)));
+        const tatamiData = tatamiRes.data;
+        setTatamis(Array.isArray(tatamiData) ? tatamiData : (tatamiData.results ?? []));
       } catch {
         setStandings([]);
+        setTatamis([]);
       }
     } finally {
       if (!silent) setIsLoading(false);
@@ -87,6 +177,16 @@ export default function BracketPage() {
     }
     setBracket((prev) => {
       if (!prev) return prev;
+
+      const matchExists = prev.rounds.some((round) =>
+        round.some((m) => m.id === updatedMatch.id)
+      );
+
+      if (!matchExists || updatedMatch.status === "completed" || updatedMatch.is_bracket_reset || (updatedMatch as any).redirect_to_match_id) {
+        setTimeout(() => fetchBracket(true), 0);
+        return prev;
+      }
+
       return {
         ...prev,
         rounds: prev.rounds.map((round) =>
@@ -227,6 +327,8 @@ export default function BracketPage() {
     single_elimination: "Single Elimination",
     double_elimination: "Double Elimination",
     round_robin:        "Round Robin",
+    single_repechage:   "Single Elimination with Repechage",
+    swiss:              "Швейцарська система",
   };
 
   return (
@@ -246,9 +348,13 @@ export default function BracketPage() {
             {category?.name ?? "Сітка"}
           </h1>
           {bracket && (
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground mt-1 select-none">
               {formatLabel[bracket.format] ?? bracket.format}
-              {" · "}{bracket.rounds.flat().length} матчів
+              {" · "}
+              {showPlaceholders
+                ? `${matchStats.real} боїв + ${matchStats.technical} технічних (всього ${matchStats.total})`
+                : `${matchStats.real} боїв (приховано ${matchStats.technical} технічних)`
+              }
             </p>
           )}
         </div>
@@ -264,6 +370,28 @@ export default function BracketPage() {
               ? <><Wifi className="w-3 h-3" /> Live</>
               : <><WifiOff className="w-3 h-3" /> Offline</>}
           </div>
+
+          {canManageSwiss && canGenerateNextSwissRound && (
+            <Button
+              variant="sport"
+              size="sm"
+              disabled={generatingNextRound}
+              onClick={handleGenerateNextRound}
+            >
+              {generatingNextRound ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
+              Згенерувати наступний тур ({swissCurrentRound + 1}/{swissMaxRounds})
+            </Button>
+          )}
+
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400 cursor-pointer select-none mr-2">
+            <input
+              type="checkbox"
+              checked={showPlaceholders}
+              onChange={(e) => setShowPlaceholders(e.target.checked)}
+              className="rounded border-zinc-800 bg-zinc-950 text-amber-500 focus:ring-amber-500 focus:ring-offset-zinc-950 w-3.5 h-3.5 cursor-pointer"
+            />
+            Показувати технічні бої (BYE/TBD)
+          </label>
 
           <Button variant="outline" size="sm" onClick={() => fetchBracket()}>
             <RefreshCw className="w-4 h-4" /> Оновити
@@ -304,7 +432,7 @@ export default function BracketPage() {
       {/* Сітка */}
       {bracket && bracket.rounds.length > 0 ? (
         <div className="rounded-xl border border-border bg-card/30 p-4">
-          <BracketView bracket={bracket} onMatchClick={handleMatchClick} />
+          <BracketView bracket={bracket} showPlaceholders={showPlaceholders} onMatchClick={handleMatchClick} />
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-center border border-dashed border-border rounded-xl">
@@ -312,6 +440,68 @@ export default function BracketPage() {
           <p className="text-xs text-muted-foreground/60">
             Поверніться до категорії та натисніть "Згенерувати сітку"
           </p>
+        </div>
+      )}
+
+      {/* Втішні поєдинки (Репешаж) */}
+      {category?.bracket_format === "single_repechage" && bracket && (
+        <div className="rounded-xl border border-border bg-card/30 p-6 space-y-4">
+          <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2 select-none">
+            <Trophy className="w-5 h-5 text-amber-500" /> Втішні поєдинки (Репешаж)
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Пул А */}
+            <div className="space-y-3">
+              <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-2 select-none">
+                Пул А (Верхня половина сітки)
+              </div>
+              <div className="flex flex-col items-center gap-4">
+                {bracket.rounds
+                  .flat()
+                  .filter((m) => m.round_index >= 300 && m.match_order === 1)
+                  .filter((m) => {
+                    if (showPlaceholders) return true;
+                    const isTechnical = m.status === "completed" && m.win_method === "walkover";
+                    return !isTechnical;
+                  })
+                  .sort((a, b) => a.round_index - b.round_index)
+                  .map((match) => (
+                    <div key={match.id} className="relative flex items-center justify-center w-full">
+                      <MatchCard match={match} onClick={handleMatchClick} />
+                    </div>
+                  ))}
+                {bracket.rounds.flat().filter((m) => m.round_index >= 300 && m.match_order === 1).length === 0 && (
+                  <div className="text-xs text-zinc-500 italic py-4 select-none">Очікує результатів півфіналів...</div>
+                )}
+              </div>
+            </div>
+
+            {/* Пул Б */}
+            <div className="space-y-3">
+              <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-2 select-none">
+                Пул Б (Нижня половина сітки)
+              </div>
+              <div className="flex flex-col items-center gap-4">
+                {bracket.rounds
+                  .flat()
+                  .filter((m) => m.round_index >= 300 && m.match_order === 2)
+                  .filter((m) => {
+                    if (showPlaceholders) return true;
+                    const isTechnical = m.status === "completed" && m.win_method === "walkover";
+                    return !isTechnical;
+                  })
+                  .sort((a, b) => a.round_index - b.round_index)
+                  .map((match) => (
+                    <div key={match.id} className="relative flex items-center justify-center w-full">
+                      <MatchCard match={match} onClick={handleMatchClick} />
+                    </div>
+                  ))}
+                {bracket.rounds.flat().filter((m) => m.round_index >= 300 && m.match_order === 2).length === 0 && (
+                  <div className="text-xs text-zinc-500 italic py-4 select-none">Очікує результатів півфіналів...</div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

@@ -115,8 +115,13 @@ function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted }: Tatami
       }
     },
     onMatchEvent(_event, match) {
-      setCurrentMatch(match);
-      setTimerState(mapMatchTimerState(match));
+      setCurrentMatch((prev) => {
+        if (prev && prev.id !== match.id) {
+          return prev;
+        }
+        setTimerState(mapMatchTimerState(match));
+        return match;
+      });
     },
     onTimerState(state) {
       setTimerState({
