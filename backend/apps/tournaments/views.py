@@ -335,6 +335,23 @@ class TournamentViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=["get"], url_path="statistics")
+    def statistics(self, request, pk=None):
+        """GET /api/tournaments/{id}/statistics/"""
+        tournament = self.get_object()
+        from apps.tournaments.statistics import get_tournament_statistics
+
+        stats = get_tournament_statistics(tournament.id)
+        return Response(stats, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="global-ratings")
+    def global_ratings(self, request):
+        """GET /api/tournaments/global-ratings/"""
+        from apps.tournaments.statistics import get_global_ratings
+
+        ratings = get_global_ratings()
+        return Response(ratings, status=status.HTTP_200_OK)
+
 
 def parse_category_name(name_str: str, sport_type: str) -> dict:
     import re

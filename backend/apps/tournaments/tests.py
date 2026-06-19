@@ -1853,3 +1853,108 @@ class CoachDashboardAndBillingIntegrationTest(TestCase):
         # Try to delete registration on completed tournament -> should fail
         response = self.client.delete(f"/api/registrations/{completed_reg.id}/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class TestTournamentStatisticsAndRatings(TournamentAPITestCase):
+    """Тести для розширеної статистики турніру та глобальних рейтингів."""
+
+    def test_statistics_endpoints(self):
+        # Оновлюємо регіони наших клубів до валідних кодів
+        self.club_a.region = "kyiv_city"
+        self.club_a.save()
+        self.club_b.region = "lviv"
+        self.club_b.save()
+
+        # Створюємо атлетів та реєстрації
+        ath1, reg1 = self._create_athlete(1, self.club_a)
+        ath2, reg2 = self._create_athlete(2, self.club_b)
+        ath3, reg3 = self._create_athlete(3, self.club_a)
+
+        # Призначаємо призові місця
+        reg1.place = 1  # Золото
+        reg1.save()
+        reg2.place = 2  # Срібло
+        reg2.save()
+        reg3.place = 3  # Бронза
+        reg3.save()
+
+        # Створюємо completed матч для перевірки статистики поєдинків
+        from apps.matches.models import Match
+
+        Match.objects.create(
+            category=self.category,
+            round_index=1,
+            match_order=1,
+            reg_first=reg1,
+            reg_second=reg2,
+            winner=reg1,
+            win_method="decision",
+            status=Match.Status.COMPLETED,
+            timer_elapsed_ms=120000,
+        )
+
+        # 1. Запит статистики конкретного турніру
+        response = self.client.get(f"/api/tournaments/{self.tournament.id}/statistics/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.data
+        self.assertIn("club_standings", data)
+        self.assertIn("region_standings", data)
+        self.assertIn("general_stats", data)
+        self.assertIn("match_stats", data)
+
+        # Перевірка заліку (Клуб А: 1 золото, 1 бронза = 10б; Клуб Б: 1 срібло = 5б)
+        club_standings = data["club_standings"]
+        self.assertEqual(len(club_standings), 2)
+        # Клуб А має бути першим (більше золота)
+        self.assertEqual(club_standings[0]["club_id"], self.club_a.id)
+        self.assertEqual(club_standings[0]["gold"], 1)
+        self.assertEqual(club_standings[0]["bronze"], 1)
+        self.assertEqual(club_standings[0]["points"], 10)
+        self.assertEqual(club_standings[0]["athletes_count"], 2)
+
+        # Клуб Б другим
+        self.assertEqual(club_standings[1]["club_id"], self.club_b.id)
+        self.assertEqual(club_standings[1]["silver"], 1)
+        self.assertEqual(club_standings[1]["points"], 5)
+        self.assertEqual(club_standings[1]["athletes_count"], 1)
+
+        # Перевірка заліку областей
+        region_standings = data["region_standings"]
+        self.assertEqual(len(region_standings), 27)
+        self.assertEqual(region_standings[0]["region_code"], "kyiv_city")
+        self.assertEqual(region_standings[0]["gold"], 1)
+        self.assertEqual(region_standings[1]["region_code"], "lviv")
+        self.assertEqual(region_standings[1]["silver"], 1)
+
+        # Перевірка загальної статистики
+        gen_stats = data["general_stats"]
+        self.assertEqual(gen_stats["total_athletes"], 3)
+        self.assertEqual(gen_stats["total_clubs"], 2)
+        self.assertEqual(gen_stats["total_regions"], 2)
+
+        # Перевірка статистики матчів
+        match_stats = data["match_stats"]
+        self.assertEqual(match_stats["completed_matches"], 1)
+        self.assertEqual(match_stats["average_duration_seconds"], 120)
+        self.assertEqual(len(match_stats["win_methods"]), 1)
+        self.assertEqual(match_stats["win_methods"][0]["method"], "decision")
+
+        # 2. Перевірка глобальних рейтингів
+        response = self.client.get("/api/tournaments/global-ratings/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        global_data = response.data
+        self.assertIn("club_ratings", global_data)
+        self.assertIn("region_ratings", global_data)
+
+        # Перевіряємо глобальні бали
+        club_ratings = global_data["club_ratings"]
+        self.assertEqual(club_ratings[0]["club_id"], self.club_a.id)
+        self.assertEqual(club_ratings[0]["points"], 10)
+        self.assertEqual(club_ratings[0]["tournaments_count"], 1)
+
+        region_ratings = global_data["region_ratings"]
+        self.assertEqual(len(region_ratings), 27)
+        self.assertEqual(region_ratings[0]["region_code"], "kyiv_city")
+        self.assertEqual(region_ratings[0]["points"], 10)
