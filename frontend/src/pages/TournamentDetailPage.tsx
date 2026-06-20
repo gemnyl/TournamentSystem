@@ -28,6 +28,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
 import { CategoryCard } from "@/components/tournament/CategoryCard";
+import TournamentStatistics from "@/components/tournament/TournamentStatistics";
 import type { Tournament, Category, PaginatedResponse, RulesetInfo, Tatami, Match } from "@/types/api";
 import { formatSportType, cn } from "@/lib/utils";
 import { estimateSchedule } from "@/lib/scheduler";
@@ -235,6 +236,12 @@ export default function TournamentDetailPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const detailTab = (searchParams.get("tab") as "categories" | "statistics") || "categories";
+  const setDetailTab = (tab: "categories" | "statistics") => {
+    updateSearchParams((params) => {
+      params.set("tab", tab);
+    });
+  };
   const [catDialogOpen, setCatDialogOpen] = useState(false);
   const [isCreatingCat, setIsCreatingCat] = useState(false);
   const [catGender, setCatGender] = useState<"male" | "female" | "mixed">("male");
@@ -1088,8 +1095,34 @@ export default function TournamentDetailPage() {
 
       <Separator />
 
-      {/* Категорії */}
-      <div className="space-y-4">
+      {/* Перемикач вкладок сторінки турніру */}
+      <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800/60 max-w-xs">
+        <button
+          onClick={() => setDetailTab("categories")}
+          className={`flex-1 py-1.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+            detailTab === "categories"
+              ? "bg-zinc-800 text-amber-500 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          Категорії
+        </button>
+        <button
+          onClick={() => setDetailTab("statistics")}
+          className={`flex-1 py-1.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+            detailTab === "statistics"
+              ? "bg-zinc-800 text-amber-500 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          Статистика
+        </button>
+      </div>
+
+      {detailTab === "statistics" ? (
+        <TournamentStatistics tournamentId={Number(id)} />
+      ) : (
+        <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-2xl font-semibold">
             Категорії
@@ -1194,6 +1227,7 @@ export default function TournamentDetailPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Діалог нової категорії */}
       <Dialog open={catDialogOpen} onOpenChange={setCatDialogOpen}>
