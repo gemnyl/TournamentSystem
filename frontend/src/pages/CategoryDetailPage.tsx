@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { useEffect, useState, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2, Clock, Trophy, Award, Unlock
 } from "lucide-react";
@@ -284,7 +284,16 @@ export default function CategoryDetailPage() {
   const [isTransferring, setIsTransferring] = useState(false);
 
   // Tab states and results engine states
-  const [activeTab, setActiveTab] = useState<"registrations" | "results">("registrations");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = (searchParams.get("tab") as "registrations" | "results") || "registrations";
+
+  const setActiveTab = (tab: "registrations" | "results") => {
+    setSearchParams((prev) => {
+      prev.set("tab", tab);
+      return prev;
+    }, { replace: true });
+  };
+
   const [results, setResults] = useState<CategoryResult[]>([]);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
   const [isSavingResults, setIsSavingResults] = useState(false);

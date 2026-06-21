@@ -116,6 +116,7 @@ export default function AppLayout() {
 
           <nav className="hidden md:flex items-center gap-6">
             <NavItem to="/tournaments">Турніри</NavItem>
+            <NavItem to="/ratings">Рейтинги</NavItem>
             {isAuthenticated && <NavItem to="/athletes">Атлети</NavItem>}
             {isAuthenticated && user?.role === "coach" && (
               <NavItem to="/coach/dashboard">Панель тренера</NavItem>
@@ -231,6 +232,9 @@ export default function AppLayout() {
           <div className="md:hidden border-t border-border/50 bg-background px-4 py-3 flex flex-col gap-3 animate-fade-in">
             <NavLink to="/tournaments" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
               Турніри
+            </NavLink>
+            <NavLink to="/ratings" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
+              Рейтинги
             </NavLink>
             {isAuthenticated && (
               <NavLink to="/athletes" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>

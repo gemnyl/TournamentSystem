@@ -11,6 +11,7 @@ import TournamentDetailPage from "@/pages/TournamentDetailPage";
 import CategoryDetailPage from "@/pages/CategoryDetailPage";
 import BracketPage from "@/pages/BracketPage";
 import AthletesPage from "@/pages/AthletesPage";
+import GlobalRatingsPage from "@/pages/GlobalRatingsPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import OperatorPanelPage from "@/pages/OperatorPanelPage";
 import ScoreboardPage from "@/pages/ScoreboardPage";
@@ -41,6 +42,8 @@ export default function App() {
           <Route path="/tournaments/:tid/day" element={<DayDashboardPage />} />
           <Route path="/categories/:id" element={<CategoryDetailPage />} />
           <Route path="/categories/:id/bracket" element={<BracketPage />} />
+          <Route path="/ratings" element={<GlobalRatingsPage />} />
+
 
           {/* Захищені маршрути — тільки для залогінених */}
           <Route element={<ProtectedRoute />}>
