@@ -39,7 +39,7 @@ const responseErrorInterceptor = (error: AxiosError<ErrorDetail>) => {
     error.message ||
     "Невідома помилка";
 
-  if (status !== 401 && status !== 403) {
+  if (status !== 401 && status !== 403 && detail !== "email_not_verified") {
     toast({
       variant: "destructive",
       title: `Помилка ${status ?? ""}`.trim(),

@@ -10,7 +10,12 @@ interface AuthState {
   // Дії
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
-  register: (data: RegisterData) => Promise<void>;
+  register: (data: RegisterData) => Promise<{ email: string }>;
+  confirmEmail: (email: string, code: string) => Promise<void>;
+  resendConfirmation: (email: string) => Promise<void>;
+  updateProfile: (formData: FormData) => Promise<void>;
+  changePassword: (data: any) => Promise<void>;
+  googleLogin: (token: string, email: string, firstName: string, lastName: string) => Promise<void>;
   fetchMe: () => Promise<void>;
 }
 
@@ -50,10 +55,71 @@ export const useAuthStore = create<AuthState>((set) => ({
   register: async (data) => {
     set({ isLoading: true });
     try {
-      await authApi.post("/register/", data);
-      // Після реєстрації логінимо
-      const { data: user } = await authApi.get<User>("/me/");
-      set({ user, isLoading: false });
+      const response = await authApi.post<{ detail: string; email: string }>("/register/", data);
+      set({ isLoading: false });
+      return { email: response.data.email };
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  confirmEmail: async (email, code) => {
+    set({ isLoading: true });
+    try {
+      const { data } = await authApi.post<User>("/confirm-email/", { email, code });
+      set({ user: data, isLoading: false });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  resendConfirmation: async (email) => {
+    set({ isLoading: true });
+    try {
+      await authApi.post("/resend-confirmation/", { email });
+      set({ isLoading: false });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  updateProfile: async (formData) => {
+    set({ isLoading: true });
+    try {
+      // Використовуємо multipart/form-data для завантаження файлів (фото)
+      const { data } = await authApi.patch<User>("/me/", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+      set({ user: data, isLoading: false });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  changePassword: async (data) => {
+    set({ isLoading: true });
+    try {
+      await authApi.post("/change-password/", data);
+      set({ isLoading: false });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  googleLogin: async (token, email, firstName, lastName) => {
+    set({ isLoading: true });
+    try {
+      await authApi.post("/google-login/", { token, email, first_name: firstName, last_name: lastName });
+      // Після логіну зчитуємо профіль
+      const { data } = await authApi.get<User>("/me/");
+      set({ user: data, isLoading: false });
     } catch (error) {
       set({ isLoading: false });
       throw error;

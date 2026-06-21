@@ -5,8 +5,20 @@ import { useAuthStore } from "@/store/authStore";
  * Надає user, helpers для перевірки ролей.
  */
 export function useAuth() {
-  const { user, isLoading, isInitialized, login, logout, register, fetchMe } =
-    useAuthStore();
+  const {
+    user,
+    isLoading,
+    isInitialized,
+    login,
+    logout,
+    register,
+    confirmEmail,
+    resendConfirmation,
+    updateProfile,
+    changePassword,
+    googleLogin,
+    fetchMe,
+  } = useAuthStore();
 
   return {
     user,
@@ -20,6 +32,11 @@ export function useAuth() {
     login,
     logout,
     register,
+    confirmEmail,
+    resendConfirmation,
+    updateProfile,
+    changePassword,
+    googleLogin,
     fetchMe,
   };
 }

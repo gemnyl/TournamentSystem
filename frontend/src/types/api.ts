@@ -11,6 +11,32 @@ export interface User {
   role: UserRole;
   club?: { id: number; name: string; region: string } | null;
   photo?: string | null;
+  phone?: string;
+  birth_date?: string;
+  gender?: "male" | "female";
+  skill_level?: string;
+  referee_category?: string;
+  email_verified?: boolean;
+  date_joined?: string;
+  name_locked?: boolean;
+}
+
+export interface RoleRequest {
+  id: number;
+  user: User;
+  requested_role: UserRole;
+  club_id?: number | null;
+  club_name?: string;
+  club?: Club | null;
+  referee_category?: string;
+  status: "pending" | "approved" | "rejected";
+  details?: string;
+  document?: string | null;
+  photo_with_id?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: User | null;
+  review_notes?: string;
 }
 
 // ─── Клуб ───────────────────────────────────────────────────────────────────
@@ -280,6 +306,12 @@ export interface RegisterData {
   patronymic?: string;
   role: UserRole;
   club_id?: number | null;
+  phone?: string;
+  birth_date?: string;
+  gender?: "male" | "female";
+  skill_level?: string;
+  referee_category?: string;
+  details?: string;
 }
 
 export interface CreateTournamentData {

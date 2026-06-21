@@ -177,6 +177,27 @@ class AccountsAPITestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["email"], "test_user@demo.local")
 
+        # 2.5. Try PATCH to update profile (attempt to change name and phone)
+        patch_payload = {
+            "first_name": "НовеІм'я",
+            "last_name": "НовеПрізвище",
+            "patronymic": "НовеПобатькові",
+            "phone": "+380501111111",
+        }
+        response = self.client.patch("/api/auth/me/", patch_payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Check that phone is updated, but first_name, last_name, and patronymic are UNCHANGED
+        self.assertEqual(response.data["phone"], "+380501111111")
+        self.assertEqual(response.data["first_name"], "Іван")
+        self.assertEqual(response.data["last_name"], "Іванов")
+        self.assertEqual(response.data["patronymic"], "")
+
+        # Verify changes persisted in DB
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.phone, "+380501111111")
+        self.assertEqual(self.user.first_name, "Іван")
+        self.assertEqual(self.user.last_name, "Іванов")
+
         # 3. Logout
         response = self.client.post("/api/auth/logout/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -193,11 +214,219 @@ class AccountsAPITestCase(TestCase):
             "first_name": "Сергій",
             "last_name": "Сергієнко",
             "role": "coach",
+            "club_id": self.club.id,
         }
         response = self.client.post("/api/auth/register/", payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["email"], "new_coach@demo.local")
-        self.assertTrue(User.objects.filter(email="new_coach@demo.local").exists())
+
+        # User should exist in DB but be inactive
+        user = User.objects.get(email="new_coach@demo.local")
+        self.assertFalse(user.is_active)
+        self.assertFalse(user.email_verified)
+        self.assertEqual(user.role, User.Role.SPECTATOR)  # Role is spectator until approved
+
+        # RoleRequest should be created
+        from apps.accounts.models import EmailConfirmationCode, RoleRequest
+
+        self.assertTrue(EmailConfirmationCode.objects.filter(user=user).exists())
+        self.assertTrue(
+            RoleRequest.objects.filter(user=user, requested_role="coach", club=self.club).exists()
+        )
+
+    def test_confirm_email(self):
+        # 1. Create inactive user and confirmation code
+        user = User.objects.create_user(
+            email="inactive@demo.local",
+            password="password123",  # NOSONAR
+            first_name="Неактивний",
+            last_name="Користувач",
+            role=User.Role.SPECTATOR,
+        )
+        user.is_active = False
+        user.email_verified = False
+        user.save()
+
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.models import EmailConfirmationCode
+
+        EmailConfirmationCode.objects.create(
+            user=user, code="123456", expires_at=timezone.now() + timedelta(minutes=15)
+        )
+
+        # 2. Confirm email with invalid code
+        payload = {"email": "inactive@demo.local", "code": "000000"}
+        response = self.client.post("/api/auth/confirm-email/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 3. Confirm email with valid code
+        payload = {"email": "inactive@demo.local", "code": "123456"}
+        response = self.client.post("/api/auth/confirm-email/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["email"], "inactive@demo.local")
+
+        # 4. Check user state
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.email_verified)
+        self.assertFalse(EmailConfirmationCode.objects.filter(user=user).exists())
+
+    def test_resend_confirmation_code(self):
+        user = User.objects.create_user(
+            email="inactive2@demo.local",
+            password="password123",  # NOSONAR
+            first_name="Неактивний2",
+            last_name="Користувач2",
+            role=User.Role.SPECTATOR,
+        )
+        user.is_active = False
+        user.email_verified = False
+        user.save()
+
+        # Resend code
+        payload = {"email": "inactive2@demo.local"}
+        response = self.client.post("/api/auth/resend-confirmation/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        from apps.accounts.models import EmailConfirmationCode
+
+        self.assertTrue(EmailConfirmationCode.objects.filter(user=user).exists())
+
+    def test_change_password(self):
+        self.client.force_authenticate(user=self.user)
+        payload = {
+            "old_password": self.user_password,
+            "new_password": "newpassword123",  # NOSONAR
+            "new_password_confirm": "newpassword123",  # NOSONAR
+        }
+        response = self.client.post("/api/auth/change-password/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Check password was updated
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("newpassword123"))
+
+    def test_role_request_flow(self):
+        # 1. Create a spectator user
+        spectator = User.objects.create_user(
+            email="spec@demo.local",
+            password="password123",  # NOSONAR
+            first_name="Глядач",
+            last_name="Тестовий",
+            role=User.Role.SPECTATOR,
+            phone="+380998887766",
+        )
+        self.client.force_authenticate(user=spectator)
+
+        # 2. Submit role request (Coach) without club -> 400
+        payload = {"requested_role": "coach"}
+        response = self.client.post("/api/auth/role-requests/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 3. Submit role request (Coach) with club and document -> success
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        doc_file = SimpleUploadedFile(
+            "cert.pdf", b"dummy certificate pdf content", content_type="application/pdf"
+        )
+
+        payload = {
+            "requested_role": "coach",
+            "club_id": self.club.id,
+            "details": "Маю чорний пояс",
+            "document": doc_file,
+        }
+        response = self.client.post("/api/auth/role-requests/", payload, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        request_id = response.data["id"]
+
+        # Check that user email and phone are present in serialized response
+        self.assertEqual(response.data["user"]["email"], "spec@demo.local")
+        self.assertEqual(response.data["user"]["phone"], "+380998887766")
+        self.assertIsNotNone(response.data["document"])
+
+        # 4. Review role request as another regular user -> 403
+        self.client.force_authenticate(user=self.user)
+        payload = {"status": "approved"}
+        response = self.client.post(
+            f"/api/auth/role-requests/{request_id}/review/", payload, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 5. Review role request as admin -> success
+        self.client.force_authenticate(user=self.admin)
+        payload = {"status": "approved", "review_notes": "Схвалено адміном"}
+        response = self.client.post(
+            f"/api/auth/role-requests/{request_id}/review/", payload, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "approved")
+
+        # 6. Check user role updated
+        spectator.refresh_from_db()
+        self.assertEqual(spectator.role, User.Role.COACH)
+        self.assertEqual(spectator.club, self.club)
+
+    def test_role_request_with_club_name_and_photo_with_id(self):
+        # 1. Create a spectator user
+        spectator = User.objects.create_user(
+            email="spec2@demo.local",
+            password="password123",
+            first_name="Другий",
+            last_name="Глядач",
+            role=User.Role.SPECTATOR,
+            phone="+380991112233",
+        )
+        self.client.force_authenticate(user=spectator)
+
+        # 2. Submit role request with a text club_name and photo_with_id
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        doc_file = SimpleUploadedFile(
+            "cert.pdf", b"dummy certificate", content_type="application/pdf"
+        )
+        photo_file = SimpleUploadedFile(
+            "id_photo.jpg", b"dummy photo content", content_type="image/jpeg"
+        )
+
+        payload = {
+            "requested_role": "coach",
+            "club_name": "СК Нова Сакура",
+            "details": "Головний тренер",
+            "document": doc_file,
+            "photo_with_id": photo_file,
+        }
+        response = self.client.post("/api/auth/role-requests/", payload, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        request_id = response.data["id"]
+
+        # Assert club was dynamically created
+        from apps.accounts.models import Club, RoleRequest
+
+        self.assertTrue(Club.objects.filter(name="СК Нова Сакура").exists())
+        club = Club.objects.get(name="СК Нова Сакура")
+
+        # Verify role request details
+        role_req = RoleRequest.objects.get(pk=request_id)
+        self.assertEqual(role_req.club, club)
+        self.assertTrue(bool(role_req.document))
+        self.assertTrue(bool(role_req.photo_with_id))
+
+        # Review role request as admin -> success and sets user's club
+        self.client.force_authenticate(user=self.admin)
+        review_payload = {"status": "approved", "review_notes": "Все окей"}
+        response = self.client.post(
+            f"/api/auth/role-requests/{request_id}/review/", review_payload, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Check spectator user upgraded
+        spectator.refresh_from_db()
+        self.assertEqual(spectator.role, User.Role.COACH)
+        self.assertEqual(spectator.club, club)
 
     def test_club_viewset_endpoints(self):
         # Anonymous can list clubs
@@ -247,3 +476,31 @@ class AccountsAPITestCase(TestCase):
         # Filter by ids
         response = self.client.get(f"/api/auth/users/?ids={self.user.id},{self.admin.id}")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_save_override_updates_role(self):
+        # 1. Create a spectator user
+        spectator = User.objects.create_user(
+            email="save_test@demo.local",
+            password="password123",  # NOSONAR
+            first_name="Тест",
+            last_name="Збереження",
+            role=User.Role.SPECTATOR,
+        )
+        # 2. Create a RoleRequest
+        from apps.accounts.models import RoleRequest
+
+        req = RoleRequest.objects.create(
+            user=spectator,
+            requested_role=User.Role.COACH,
+            club=self.club,
+            status=RoleRequest.Status.PENDING,
+        )
+
+        # 3. Change status directly to APPROVED and save
+        req.status = RoleRequest.Status.APPROVED
+        req.save()
+
+        # 4. Check user role is updated automatically
+        spectator.refresh_from_db()
+        self.assertEqual(spectator.role, User.Role.COACH)
+        self.assertEqual(spectator.club, self.club)
