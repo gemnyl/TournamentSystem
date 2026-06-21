@@ -516,6 +516,31 @@ try:
                 regs.append(reg)
             return regs
 
+        def _create_completed_match(
+            self, first_reg, second_reg, round_idx, order_idx, score_1, score_2, winner_reg
+        ):
+            return Match.objects.create(
+                category=self.category,
+                reg_first=first_reg,
+                reg_second=second_reg,
+                round_index=round_idx,
+                match_order=order_idx,
+                status=Match.Status.COMPLETED,
+                score_first=score_1,
+                score_second=score_2,
+                winner=winner_reg,
+                win_method=Match.WinMethod.DECISION,
+            )
+
+        def test_swiss_less_than_two_participants_raises_error(self):
+            # Only 1 participant
+            self._create_confirmed_registrations(1)
+            gen = BracketGenerator(self.category)
+            from django.core.exceptions import ValidationError
+
+            with self.assertRaises(ValidationError):
+                gen.generate()
+
         def test_swiss_round_1_even(self):
             # 6 confirmed players
             regs = self._create_confirmed_registrations(6)
@@ -688,83 +713,17 @@ try:
             # C and A played each other, C won. So C ranks above A (H2H override).
 
             # Match 1: B vs C (B wins 2-1)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[1],  # B
-                reg_second=regs[2],  # C
-                round_index=1,
-                match_order=1,
-                status=Match.Status.COMPLETED,
-                score_first=2,
-                score_second=1,
-                winner=regs[1],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[1], regs[2], 1, 1, 2, 1, regs[1])
             # Match 2: A vs D (A wins 5-1)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[0],  # A
-                reg_second=regs[3],  # D
-                round_index=1,
-                match_order=2,
-                status=Match.Status.COMPLETED,
-                score_first=5,
-                score_second=1,
-                winner=regs[0],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[0], regs[3], 1, 2, 5, 1, regs[0])
             # Match 3: E vs A (A wins 2-0)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[4],  # E
-                reg_second=regs[0],  # A
-                round_index=1,
-                match_order=3,
-                status=Match.Status.COMPLETED,
-                score_first=0,
-                score_second=2,
-                winner=regs[0],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[4], regs[0], 1, 3, 0, 2, regs[0])
             # Match 4: C vs A (C wins 3-1)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[2],  # C
-                reg_second=regs[0],  # A
-                round_index=2,
-                match_order=1,
-                status=Match.Status.COMPLETED,
-                score_first=3,
-                score_second=1,
-                winner=regs[2],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[2], regs[0], 2, 1, 3, 1, regs[2])
             # Match 5: D vs B (D wins 4-0)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[3],  # D
-                reg_second=regs[1],  # B
-                round_index=2,
-                match_order=2,
-                status=Match.Status.COMPLETED,
-                score_first=4,
-                score_second=0,
-                winner=regs[3],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[3], regs[1], 2, 2, 4, 0, regs[3])
             # Match 6: E vs B (E wins 1-0)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[4],  # E
-                reg_second=regs[1],  # B
-                round_index=2,
-                match_order=3,
-                status=Match.Status.COMPLETED,
-                score_first=1,
-                score_second=0,
-                winner=regs[4],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[4], regs[1], 2, 3, 1, 0, regs[4])
 
             # Now let's calculate standings
             from apps.tournaments.services import calculate_category_standings
@@ -837,83 +796,17 @@ try:
             regs = self._create_confirmed_registrations(6)
 
             # Match 1: B vs C (B wins 2-1)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[1],  # B
-                reg_second=regs[2],  # C
-                round_index=1,
-                match_order=1,
-                status=Match.Status.COMPLETED,
-                score_first=2,
-                score_second=1,
-                winner=regs[1],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[1], regs[2], 1, 1, 2, 1, regs[1])
             # Match 2: A vs D (A wins 5-1)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[0],  # A
-                reg_second=regs[3],  # D
-                round_index=1,
-                match_order=2,
-                status=Match.Status.COMPLETED,
-                score_first=5,
-                score_second=1,
-                winner=regs[0],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[0], regs[3], 1, 2, 5, 1, regs[0])
             # Match 3: E vs F (E wins 1-0)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[4],  # E
-                reg_second=regs[5],  # F
-                round_index=1,
-                match_order=3,
-                status=Match.Status.COMPLETED,
-                score_first=1,
-                score_second=0,
-                winner=regs[4],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[4], regs[5], 1, 3, 1, 0, regs[4])
             # Match 4: C vs A (C wins 3-1)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[2],  # C
-                reg_second=regs[0],  # A
-                round_index=2,
-                match_order=1,
-                status=Match.Status.COMPLETED,
-                score_first=3,
-                score_second=1,
-                winner=regs[2],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[2], regs[0], 2, 1, 3, 1, regs[2])
             # Match 5: D vs B (D wins 4-0)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[3],  # D
-                reg_second=regs[1],  # B
-                round_index=2,
-                match_order=2,
-                status=Match.Status.COMPLETED,
-                score_first=4,
-                score_second=0,
-                winner=regs[3],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[3], regs[1], 2, 2, 4, 0, regs[3])
             # Match 6: F vs E (F wins 2-1)
-            Match.objects.create(
-                category=self.category,
-                reg_first=regs[5],  # F
-                reg_second=regs[4],  # E
-                round_index=2,
-                match_order=3,
-                status=Match.Status.COMPLETED,
-                score_first=2,
-                score_second=1,
-                winner=regs[5],
-                win_method=Match.WinMethod.DECISION,
-            )
+            self._create_completed_match(regs[5], regs[4], 2, 3, 2, 1, regs[5])
 
             # Now let's calculate standings
             calculate_category_standings(self.category, persist=True)

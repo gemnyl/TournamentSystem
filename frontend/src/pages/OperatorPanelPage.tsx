@@ -86,15 +86,6 @@ function formatParticipant(reg: { team?: { name?: string } | null; athlete?: { f
   return formatRegistrationName(reg as Parameters<typeof formatRegistrationName>[0]) || "TBD";
 }
 
-function resolveRoundLabel(roundIdx: number, bracketFormat: string | undefined, totalRounds: number): string {
-  if (!bracketFormat || bracketFormat === "round_robin") return `Раунд ${roundIdx}`;
-  const fromEnd = totalRounds - roundIdx;
-  if (fromEnd === 0) return "Фінал";
-  if (fromEnd === 1) return "Півфінал";
-  if (fromEnd === 2) return "Чвертьфінал";
-  return `Раунд ${roundIdx}`;
-}
-
 interface OperatorResultRowProps {
   readonly res: CategoryResult;
   readonly resultsPersisted: boolean;

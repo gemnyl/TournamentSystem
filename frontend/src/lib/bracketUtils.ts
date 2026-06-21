@@ -1,6 +1,20 @@
 import type { Match } from "@/types/api";
 
 /**
+ * Допоміжна функція для отримання назви етапу відносно фіналу.
+ */
+function getStageName(
+  orderIndex: number,
+  total: number,
+  labels: { final: string; semifinal: string; quarterfinal: string; defaultPrefix: string }
+): string {
+  if (orderIndex === total - 1 && total > 0) return labels.final;
+  if (orderIndex === total - 2 && total > 1) return labels.semifinal;
+  if (orderIndex === total - 3 && total > 2) return labels.quarterfinal;
+  return `${labels.defaultPrefix} ${orderIndex + 1}`;
+}
+
+/**
  * Динамічно визначає зрозумілу назву раунду (етапу) для відображення в інтерфейсі.
  * Вираховує назви відносно фіналів на основі формату сітки.
  *
@@ -11,16 +25,11 @@ import type { Match } from "@/types/api";
 export function getRoundName(match: Match, allMatches: Match[], bracketFormat?: string): string {
   if (!match) return "";
 
-  const categoryId = match.category_id || (typeof match.category === "object" ? (match.category as unknown as Record<string, unknown>)?.id : match.category);
-
-  // Визначаємо формат сітки: пріоритет у переданого аргументу, потім шукаємо в об'єкті
-  const format = bracketFormat || match.category_bracket_format || (typeof match.category === "object" ? (match.category as unknown as Record<string, unknown>)?.bracket_format : undefined);
+  const categoryId = match.category;
+  const format = bracketFormat || "";
 
   // Фільтруємо всі матчі цієї категорії для аналізу структури раундів
-  const catMatches = allMatches.filter((m) => {
-    const mCatId = m.category_id || (typeof m.category === "object" ? (m.category as unknown as Record<string, unknown>)?.id : m.category);
-    return mCatId === categoryId;
-  });
+  const catMatches = allMatches.filter((m) => m.category === categoryId);
 
   // Збираємо унікальні раунди для Winners та Losers сіток
   const winnersRounds = Array.from(
@@ -44,24 +53,22 @@ export function getRoundName(match: Match, allMatches: Match[], bracketFormat?: 
     // Нижня сітка (Losers)
     if (roundIdx >= 100 && roundIdx < 200) {
       const losersOrderIndex = losersRounds.indexOf(roundIdx);
-      const totalLosers = losersRounds.length;
-
-      if (losersOrderIndex === totalLosers - 1 && totalLosers > 0) return "Фінал нижньої сітки";
-      if (losersOrderIndex === totalLosers - 2 && totalLosers > 1) return "Півфінал нижньої сітки";
-      if (losersOrderIndex === totalLosers - 3 && totalLosers > 2) return "Чвертьфінал нижньої сітки";
-
-      return `Нижня сітка — Раунд ${losersOrderIndex + 1}`;
+      return getStageName(losersOrderIndex, losersRounds.length, {
+        final: "Фінал нижньої сітки",
+        semifinal: "Півфінал нижньої сітки",
+        quarterfinal: "Чвертьфінал нижньої сітки",
+        defaultPrefix: "Нижня сітка — Раунд",
+      });
     }
 
     // Верхня сітка (Winners)
     const winnersOrderIndex = winnersRounds.indexOf(roundIdx);
-    const totalWinners = winnersRounds.length;
-
-    if (winnersOrderIndex === totalWinners - 1 && totalWinners > 0) return "Фінал верхньої сітки";
-    if (winnersOrderIndex === totalWinners - 2 && totalWinners > 1) return "Півфінал";
-    if (winnersOrderIndex === totalWinners - 3 && totalWinners > 2) return "Чвертьфінал";
-
-    return `Раунд ${winnersOrderIndex + 1}`;
+    return getStageName(winnersOrderIndex, winnersRounds.length, {
+      final: "Фінал верхньої сітки",
+      semifinal: "Півфінал",
+      quarterfinal: "Чвертьфінал",
+      defaultPrefix: "Раунд",
+    });
   }
 
   // 2. Швейцарська система (Swiss)
@@ -76,11 +83,10 @@ export function getRoundName(match: Match, allMatches: Match[], bracketFormat?: 
 
   // 4. Олімпійська сітка (Single Elimination / Single Repechage)
   const winnersOrderIndex = winnersRounds.indexOf(roundIdx);
-  const totalWinners = winnersRounds.length;
-
-  if (winnersOrderIndex === totalWinners - 1 && totalWinners > 0) return "Фінал";
-  if (winnersOrderIndex === totalWinners - 2 && totalWinners > 1) return "Півфінал";
-  if (winnersOrderIndex === totalWinners - 3 && totalWinners > 2) return "Чвертьфінал";
-
-  return `Раунд ${winnersOrderIndex + 1}`;
+  return getStageName(winnersOrderIndex, winnersRounds.length, {
+    final: "Фінал",
+    semifinal: "Півфінал",
+    quarterfinal: "Чвертьфінал",
+    defaultPrefix: "Раунд",
+  });
 }

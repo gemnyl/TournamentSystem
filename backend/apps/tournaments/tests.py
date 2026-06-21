@@ -496,6 +496,26 @@ class TestBracketGeneration(TournamentAPITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_generate_all_brackets_invalid_participants_type(self):
+        """Групова генерація з неправильним типом учасників повертає 400."""
+        self._login(self.organizer)
+
+        payload = {
+            "rules": [
+                {
+                    "format": Category.BracketFormat.ROUND_ROBIN,
+                    "min_participants": "not_an_int",
+                    "max_participants": 5,
+                }
+            ]
+        }
+        response = self.client.post(
+            f"/api/tournaments/{self.tournament.pk}/generate_all_brackets/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_registration_blocked_if_not_registration_status(self):
         """Реєстрація спортсменів блокується, якщо статус не 'registration'."""
         self.tournament.status = Tournament.Status.ACTIVE

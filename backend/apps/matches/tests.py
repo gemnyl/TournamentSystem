@@ -587,6 +587,35 @@ class TestMatchService(MatchAPITestCase):
         nxt.refresh_from_db()
         self.assertIsNone(nxt.reg_first)
 
+    def test_reset_match_cascade_errors(self):
+        from django.core.exceptions import ValidationError
+
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # Complete match to advance participant
+        svc.apply_score("aka", "yuko")
+        svc.set_winner("aka", Match.WinMethod.POINTS)
+        match.refresh_from_db()
+
+        # 1. Error: next match has scores
+        nxt = match.next_match
+        nxt.score_first = 2
+        nxt.save()
+        with self.assertRaises(ValidationError):
+            svc.reset_match()
+
+        # Reset scores of next match
+        nxt.score_first = 0
+        nxt.save()
+
+        # 2. Error: next match is completed (not walkover)
+        nxt.status = Match.Status.COMPLETED
+        nxt.win_method = Match.WinMethod.DECISION
+        nxt.save()
+        with self.assertRaises(ValidationError):
+            svc.reset_match()
+
 
 class TestSetSenshuEndpoint(MatchAPITestCase):
     """Тест ендпоінту set_senshu через HTTP."""
