@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Trophy, Users, LogOut, ChevronDown, Menu, X, LogIn, Loader2 } from "lucide-react";
+import { Trophy, Users, LogOut, ChevronDown, Menu, X, LogIn, Loader2, User } from "lucide-react";
 import { useState, useEffect } from "react";
+import CookieConsentBanner from "./CookieConsentBanner";
 import { useAuth } from "@/hooks/useAuth";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -121,7 +122,7 @@ export default function AppLayout() {
             {isAuthenticated && user?.role === "coach" && (
               <NavItem to="/coach/dashboard">Панель тренера</NavItem>
             )}
-            {isAuthenticated && (user?.role === "staff" || user?.role === "organizer") && (
+            {isAuthenticated && (user?.role === "admin" || user?.role === "staff" || user?.role === "organizer") && (
               <NavItem to="/staff">Панель секретаря</NavItem>
             )}
             {judgeTatamis.length === 1 && (
@@ -161,10 +162,21 @@ export default function AppLayout() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="sm" className="gap-2">
-                    <div className="w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
-                      <span className="text-amber-500 font-display font-bold text-xs">
-                        {user?.first_name?.[0]?.toUpperCase() ?? "?"}
-                      </span>
+                    <div className="w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center overflow-hidden relative shrink-0">
+                      {user?.photo ? (
+                        <img
+                          src={user.photo}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <span className="text-amber-500 font-display font-bold text-xs">
+                          {user?.first_name?.[0]?.toUpperCase() ?? "?"}
+                        </span>
+                      )}
                     </div>
                     <span className="hidden sm:block text-sm">
                       {user?.first_name} {user?.last_name}
@@ -191,11 +203,14 @@ export default function AppLayout() {
                       <Link to="/coach/dashboard"><Users className="w-4 h-4" />Панель тренера</Link>
                     </DropdownMenuItem>
                   )}
-                  {(user?.role === "staff" || user?.role === "organizer") && (
+                  {(user?.role === "admin" || user?.role === "staff" || user?.role === "organizer") && (
                     <DropdownMenuItem asChild>
                       <Link to="/staff"><Users className="w-4 h-4" />Панель секретаря</Link>
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem asChild>
+                    <Link to="/profile"><User className="w-4 h-4" />Мій профіль</Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to="/athletes"><Users className="w-4 h-4" />Атлети</Link>
                   </DropdownMenuItem>
@@ -237,6 +252,11 @@ export default function AppLayout() {
               Рейтинги
             </NavLink>
             {isAuthenticated && (
+              <NavLink to="/profile" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
+                Мій профіль
+              </NavLink>
+            )}
+            {isAuthenticated && (
               <NavLink to="/athletes" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
                 Атлети
               </NavLink>
@@ -246,7 +266,7 @@ export default function AppLayout() {
                 Панель тренера
               </NavLink>
             )}
-            {isAuthenticated && (user?.role === "staff" || user?.role === "organizer") && (
+            {isAuthenticated && (user?.role === "admin" || user?.role === "staff" || user?.role === "organizer") && (
               <NavLink to="/staff" className="text-sm font-medium py-1" onClick={() => setMobileOpen(false)}>
                 Панель секретаря
               </NavLink>
@@ -290,11 +310,20 @@ export default function AppLayout() {
       </main>
 
       {/* ── Футер ── */}
-      <footer className="border-t border-border/30 py-4">
-        <div className="container text-center text-xs text-muted-foreground/50">
-          TournamentApp — система проведення турнірних змагань з єдиноборств
+      <footer className="border-t border-border/30 py-6 bg-slate-950/20">
+        <div className="container flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-muted-foreground/50">
+          <span>TournamentApp — система проведення турнірних змагань з єдиноборств</span>
+          <Link
+            to="/privacy-policy"
+            className="hover:text-amber-500 transition-colors font-medium underline underline-offset-4"
+          >
+            Політика конфіденційності
+          </Link>
         </div>
       </footer>
+
+      {/* Cookie Consent Banner */}
+      <CookieConsentBanner />
     </div>
   );
 }
