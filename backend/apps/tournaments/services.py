@@ -152,6 +152,114 @@ def _calculate_single_elimination_standings(
     return placed + unplaced
 
 
+def _calculate_single_repechage_standings(
+    category: Category, matches: list[Match], stats: dict[int, dict]
+) -> list[dict]:
+    final_match = next(
+        (m for m in matches if m.next_match_id is None and m.round_index < 300), None
+    )
+    if final_match and final_match.status == Match.Status.COMPLETED:
+        winner_id = final_match.winner_id
+        loser_id = (
+            final_match.reg_second_id
+            if winner_id == final_match.reg_first_id
+            else final_match.reg_first_id
+        )
+        if winner_id in stats:
+            stats[winner_id]["place"] = 1
+        if loser_id in stats:
+            stats[loser_id]["place"] = 2
+
+        # 3rd places:
+        for finalist_id, pool_index in [
+            (final_match.reg_first_id, 1),
+            (final_match.reg_second_id, 2),
+        ]:
+            if not finalist_id:
+                continue
+            matches_won = [
+                m for m in matches if m.winner_id == finalist_id and m.next_match_id is not None
+            ]
+            matches_won.sort(key=lambda x: x.round_index)
+            defeated_ids = []
+            for m in matches_won:
+                if m.id == final_match.id:
+                    continue
+                opp_id = m.reg_second_id if finalist_id == m.reg_first_id else m.reg_first_id
+                if opp_id:
+                    defeated_ids.append(opp_id)
+
+            p = len(defeated_ids)
+            if p == 1:
+                opp_id = defeated_ids[0]
+                if opp_id in stats:
+                    stats[opp_id]["place"] = 3
+            elif p >= 2:
+                pool_rep_matches = [
+                    m for m in matches if m.round_index >= 300 and m.match_order == pool_index
+                ]
+                if pool_rep_matches:
+                    final_rep = max(pool_rep_matches, key=lambda x: x.round_index)
+                    if final_rep.status == Match.Status.COMPLETED and final_rep.winner_id:
+                        w_id = final_rep.winner_id
+                        if w_id in stats:
+                            stats[w_id]["place"] = 3
+
+    placed = []
+    unplaced = []
+    for s in stats.values():
+        if s["place"] is not None:
+            placed.append(s)
+        else:
+            unplaced.append(s)
+
+    placed.sort(key=lambda x: x["place"])
+    unplaced.sort(key=lambda x: (x["points"], x["wins"]), reverse=True)
+    return placed + unplaced
+
+
+def _calculate_double_elimination_standings(
+    category: Category, matches: list[Match], stats: dict[int, dict]
+) -> list[dict]:
+    gf = next((m for m in matches if m.round_index == 200), None)
+    sf = next((m for m in matches if m.round_index == 201), None)
+
+    first_id = None
+    second_id = None
+    third_id = None
+
+    if sf and sf.status == Match.Status.COMPLETED:
+        first_id = sf.winner_id
+        second_id = sf.reg_second_id if first_id == sf.reg_first_id else sf.reg_first_id
+    elif gf and gf.status == Match.Status.COMPLETED:
+        first_id = gf.winner_id
+        second_id = gf.reg_second_id if first_id == gf.reg_first_id else gf.reg_first_id
+
+    if gf:
+        lf = next((m for m in matches if m.round_index >= 100 and m.next_match_id == gf.id), None)
+        if lf and lf.status == Match.Status.COMPLETED:
+            third_id = lf.reg_second_id if lf.winner_id == lf.reg_first_id else lf.reg_first_id
+
+    if first_id in stats:
+        stats[first_id]["place"] = 1
+    if second_id in stats:
+        stats[second_id]["place"] = 2
+    if third_id in stats:
+        stats[third_id]["place"] = 3
+
+    placed = []
+    unplaced = []
+    for s in stats.values():
+        if s["place"] is not None:
+            placed.append(s)
+        else:
+            unplaced.append(s)
+
+    placed.sort(key=lambda x: x["place"])
+    unplaced.sort(key=lambda x: (x["points"], x["wins"]), reverse=True)
+    return placed + unplaced
+
+
 def _find_h2h_match(id1: int, id2: int, completed_matches: list[Match]) -> Match | None:
     for m in completed_matches:
         if (m.reg_first_id == id1 and m.reg_second_id == id2) or (
@@ -202,6 +310,66 @@ def _calculate_round_robin_standings(matches: list[Match], stats: dict[int, dict
     return [stats[r_id] for r_id in sorted_ids]
 
 
+def _calculate_swiss_standings(matches: list[Match], stats: dict[int, dict]) -> list[dict]:
+    import secrets
+
+    completed_matches = [m for m in matches if m.status == Match.Status.COMPLETED]
+
+    # Assign stable random seeds for the random draw fallback
+    for r_id in stats:
+        stats[r_id]["random_seed"] = secrets.SystemRandom().random()
+
+    # Calculate Buchholz score for each player in two passes
+    for r_id in stats:
+        opponents = []
+        for m in completed_matches:
+            if m.reg_first_id == r_id and m.reg_second_id:
+                opponents.append(m.reg_second_id)
+            elif m.reg_second_id == r_id and m.reg_first_id:
+                opponents.append(m.reg_first_id)
+
+        buchholz_score = sum(stats[opp_id]["points"] for opp_id in opponents if opp_id in stats)
+        stats[r_id]["buchholz"] = buchholz_score
+
+    # Step 1: Initial stable sort by static criteria
+    def static_sort_key(r_id):
+        s = stats[r_id]
+        return (
+            s["points"],
+            s["buchholz"],
+            s["scores_scored"] - s["scores_conceded"],
+            s["scores_scored"],
+            s["random_seed"],
+        )
+
+    sorted_ids = sorted(stats.keys(), key=static_sort_key, reverse=True)
+
+    # Step 2: Separate pass to check adjacent participants with the same points
+    # for head-to-head results. We do bubble-sort-like passes until no swaps occur,
+    # swapping only if adjacent players have the same points and the lower-ranked
+    # player beat the higher-ranked player.
+    n = len(sorted_ids)
+    for _ in range(n):
+        swapped = False
+        for i in range(n - 1):
+            id1 = sorted_ids[i]
+            id2 = sorted_ids[i + 1]
+            if stats[id1]["points"] == stats[id2]["points"]:
+                h2h = _find_h2h_match(id1, id2, completed_matches)
+                if h2h and h2h.winner_id == id2:
+                    sorted_ids[i], sorted_ids[i + 1] = sorted_ids[i + 1], sorted_ids[i]
+                    swapped = True
+        if not swapped:
+            break
+
+    # Assign places based on final sorted order
+    for idx, r_id in enumerate(sorted_ids):
+        place = idx + 1
+        stats[r_id]["place"] = place if place <= 3 else None
+
+    return [stats[r_id] for r_id in sorted_ids]
+
+
 def calculate_category_standings(category: Category, persist: bool = False):
     """
     Розраховує результати для категорії відповідно до формату сітки.
@@ -222,6 +390,12 @@ def calculate_category_standings(category: Category, persist: bool = False):
         sorted_results = _calculate_single_elimination_standings(category, matches, stats)
     elif category.bracket_format == Category.BracketFormat.ROUND_ROBIN:
         sorted_results = _calculate_round_robin_standings(matches, stats)
+    elif category.bracket_format == Category.BracketFormat.SINGLE_ELIM_REPECHAGE:
+        sorted_results = _calculate_single_repechage_standings(category, matches, stats)
+    elif category.bracket_format == Category.BracketFormat.DOUBLE_ELIMINATION:
+        sorted_results = _calculate_double_elimination_standings(category, matches, stats)
+    elif category.bracket_format == Category.BracketFormat.SWISS:
+        sorted_results = _calculate_swiss_standings(matches, stats)
     else:
         sorted_results = list(stats.values())
 

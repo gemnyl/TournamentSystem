@@ -16,6 +16,7 @@ import {
 import { cn, formatRegistrationName, formatRegistrationClub, formatAthleteName } from "@/lib/utils";
 import api from "@/lib/api";
 import { useTatamiSocket } from "@/hooks/useTatamiSocket";
+import { getRoundName } from "@/lib/bracketUtils";
 import { useTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
 import KumiteWKFOperatorPanel from "@/components/operator/KumiteWKFOperatorPanel";
@@ -83,15 +84,6 @@ function formatParticipant(reg: { team?: { name?: string } | null; athlete?: { f
   const athleteName = formatAthleteName(ath as Parameters<typeof formatAthleteName>[0]) || formatAthleteName((reg as { athlete?: Parameters<typeof formatAthleteName>[0] | null }).athlete ?? null);
   if (teamName && athleteName) return `${teamName} (${athleteName})`;
   return formatRegistrationName(reg as Parameters<typeof formatRegistrationName>[0]) || "TBD";
-}
-
-function resolveRoundLabel(roundIdx: number, bracketFormat: string | undefined, totalRounds: number): string {
-  if (!bracketFormat || bracketFormat === "round_robin") return `Раунд ${roundIdx}`;
-  const fromEnd = totalRounds - roundIdx;
-  if (fromEnd === 0) return "Фінал";
-  if (fromEnd === 1) return "Півфінал";
-  if (fromEnd === 2) return "Чвертьфінал";
-  return `Раунд ${roundIdx}`;
 }
 
 interface OperatorResultRowProps {
@@ -209,8 +201,125 @@ export default function OperatorPanelPage() {
 
   const [middleTab, setMiddleTab] = useState<"matches" | "results">("matches");
   const [categoryResults, setCategoryResults] = useState<CategoryResult[]>([]);
+  const [showPlaceholders, setShowPlaceholders] = useState(() => {
+    try {
+      return localStorage.getItem("showPlaceholders") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("showPlaceholders", String(showPlaceholders));
+    } catch {
+      // no-op
+    }
+  }, [showPlaceholders]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [placeOverrides, setPlaceOverrides] = useState<Record<number, number | null>>({});
+
+  const tatamiMatches = useMemo(() => {
+    if (!tatami) return [];
+    return matches.filter((m) => {
+      if (m.tatami === tatami.id) return true;
+      if (m.parent_team_match) {
+        const parent = matches.find(p => p.id === m.parent_team_match);
+        return parent ? parent.tatami === tatami.id : false;
+      }
+      return false;
+    });
+  }, [matches, tatami]);
+
+  // Categories present on this tatami
+  const tatamiCategories = useMemo(() => {
+    const cats: {
+      id: number;
+      name: string;
+      schedule_order: number;
+      totalMatches: number;
+      completedMatches: number;
+      status: "completed" | "ongoing" | "scheduled";
+      results_finalized: boolean;
+    }[] = [];
+
+    tatamiMatches.forEach((m) => {
+      if (!m.category) return;
+      let cat = cats.find((c) => c.id === m.category);
+      if (!cat) {
+        cat = {
+          id: m.category,
+          name: m.category_name ?? `Категорія ${m.category}`,
+          schedule_order: m.category_order ?? 0,
+          totalMatches: 0,
+          completedMatches: 0,
+          status: "scheduled",
+          results_finalized: false,
+        };
+        cats.push(cat);
+      }
+      if (!m.parent_team_match) {
+        cat.totalMatches++;
+        if (m.status === "completed") {
+          cat.completedMatches++;
+        }
+      }
+    });
+
+    cats.forEach((cat) => {
+      const catMatches = tatamiMatches.filter((m) => m.category === cat.id);
+      const hasOngoing = catMatches.some((m) => m.status === "ongoing");
+      const hasScheduled = catMatches.some((m) => m.status === "scheduled");
+
+      if (hasOngoing) {
+        cat.status = "ongoing";
+      } else if (hasScheduled) {
+        cat.status = "scheduled";
+      } else {
+        cat.status = "completed";
+      }
+
+      const dbCat = categories.find((c) => c.id === cat.id);
+      cat.results_finalized = dbCat?.results_finalized ?? false;
+    });
+
+    return [...cats].sort((a, b) => a.schedule_order - b.schedule_order || a.id - b.id);
+  }, [tatamiMatches, categories]);
+
+  // Upcoming matches across the entire tatami
+  const nextUpcomingMatches = useMemo(() => {
+    const activeMatchId = getTatamiMatchId(tatami?.current_match ?? null);
+
+    // Фільтруємо заплановані бої (крім активного)
+    const scheduled = tatamiMatches.filter((m) => m.status === "scheduled" && m.id !== activeMatchId);
+
+    // Збираємо список боїв для відображення черги:
+    const list = scheduled.filter((m) => {
+      if (!showPlaceholders && !m.reg_first && !m.reg_second) return false;
+      if (!m.category_is_team) return true;
+      if (m.parent_team_match) return true;
+      const hasScheduledBouts = scheduled.some((x) => x.parent_team_match === m.id);
+      return !hasScheduledBouts;
+    });
+
+    return [...list]
+      .sort((a, b) => {
+        const orderA = a.category_order ?? 0;
+        const orderB = b.category_order ?? 0;
+        if (orderA !== orderB) return orderA - orderB;
+
+        if (a.parent_team_match && b.parent_team_match && a.parent_team_match === b.parent_team_match) {
+          return (a.bout_index ?? 0) - (b.bout_index ?? 0);
+        }
+
+        return a.category === b.category
+          ? a.round_index === b.round_index
+            ? a.match_order - b.match_order
+            : a.round_index - b.round_index
+          : a.category - b.category;
+      })
+      .slice(0, 5);
+  }, [tatamiMatches, tatami, showPlaceholders]);
 
   const fetchCategories = useCallback(async () => {
     if (!tid) return;
@@ -302,12 +411,15 @@ export default function OperatorPanelPage() {
 
   // fetch match queue for this specific tatami
   const fetchMatches = useCallback(async () => {
-    if (!tid || !n) return;
+    if (!tid || !n) return [];
     try {
       const { data } = await api.get<Match[]>(`/matches/?tournament=${tid}&tatami_number=${n}`);
       const list = Array.isArray(data) ? data : (data as { results: Match[] }).results;
       setMatches(list);
-    } catch {/* handled by api interceptor */}
+      return list;
+    } catch {
+      return [];
+    }
   }, [tid, n]);
 
   // initial data
@@ -515,6 +627,8 @@ export default function OperatorPanelPage() {
         return prev;
       }
 
+
+
       if (data.current_match) {
         // If the new active match is the parent match of this sub-bout, ignore it and stay on the ongoing sub-bout view
         if (
@@ -545,19 +659,25 @@ export default function OperatorPanelPage() {
     },
     onMatchEvent(_event, match) {
       setCurrentMatch((prev) => {
-        if (prev && prev.id === match.id) {
-          setTimerState(matchToTimerState(match));
-          return match;
+        if (prev && prev.id !== match.id) {
+          return prev;
         }
-        const isViewingPastMatch = prev !== null && prev.status === "completed";
-        if (!isViewingPastMatch) {
-          setTimerState(matchToTimerState(match));
-          return match;
-        }
-        return prev;
+        setTimerState(matchToTimerState(match));
+        return match;
       });
-      setMatches((prev) => prev.map((m) => m.id === match.id ? match : m));
+
+      let shouldFetch = false;
+      setMatches((prev) => {
+        const exists = prev.some((m) => m.id === match.id);
+        if (!exists) {
+          shouldFetch = true;
+          return [...prev, match];
+        }
+        return prev.map((m) => m.id === match.id ? match : m);
+      });
+
       setSubBouts((prev) => prev.map((b) => b.id === match.id ? match : b));
+
       setSelectedCategoryBracket((prev) => {
         if (!prev) return prev;
         return {
@@ -565,17 +685,33 @@ export default function OperatorPanelPage() {
           rounds: updateBracketRounds(prev.rounds, match),
         };
       });
+
+      if (shouldFetch || match.status === "completed" || match.is_bracket_reset) {
+        setTimeout(() => {
+          fetchMatches();
+          fetchSelectedCategoryBracket();
+        }, 0);
+      }
+
       fetchCategories();
       fetchCategoryResults();
     },
-    onTimerState(state) {
-      setTimerState({
-        status: state.status,
-        started_at_ms: state.started_at_ms,
-        elapsed_ms: state.elapsed_ms,
-        duration_ms: state.duration_ms,
+    onTimerState(state, _serverTs, match_id) {
+      // Ignore timer events that don't belong to the currently displayed match
+      setCurrentMatch((prev) => {
+        if (match_id !== undefined && prev && prev.id !== match_id) {
+          return prev; // stale timer event — ignore
+        }
+        setTimerState({
+          status: state.status,
+          started_at_ms: state.started_at_ms,
+          elapsed_ms: state.elapsed_ms,
+          duration_ms: state.duration_ms,
+        });
+        return prev;
       });
     },
+
     onTatamiState(data) {
       handleTatamiData(data);
     },
@@ -595,13 +731,17 @@ export default function OperatorPanelPage() {
 
 
   // derived
-  const ruleset = rulesets.find((r) => r.key === currentMatch?.ruleset_key);
-  const rulesetActions = ruleset?.score_actions ?? [];
-  const winMethods = ruleset?.win_methods ?? [{ key: "points", label: "За очками" }];
+  const { rulesetActions, winMethods } = useMemo(() => {
+    const ruleset = rulesets.find((r) => r.key === currentMatch?.ruleset_key);
+    return {
+      rulesetActions: ruleset?.score_actions ?? [],
+      winMethods: ruleset?.win_methods ?? [{ key: "points", label: "За очками" }]
+    };
+  }, [rulesets, currentMatch?.ruleset_key]);
 
   const [assignConfirmDialog, setAssignConfirmDialog] = useState<number | null>(null);
 
-  const handleAssignMatch = async (matchId: number, force = false) => {
+  const handleAssignMatch = useCallback(async (matchId: number, force = false) => {
     if (!tatami) return;
     if (currentMatch && currentMatch.status === "ongoing" && !force) {
       setAssignConfirmDialog(matchId);
@@ -609,13 +749,16 @@ export default function OperatorPanelPage() {
     }
     setAssignConfirmDialog(null);
     try {
-      const { data } = await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: matchId });
-      const targetMatch = matches.find((m) => m.id === matchId);
-      setTatami(data);
-      if (targetMatch) {
-        setCurrentMatch(targetMatch);
-        setTimerState(matchToTimerState(targetMatch));
-      }
+      await api.post<Tatami>(`/tatamis/${tatami.id}/assign_match/`, { match_id: matchId });
+      // Завантажуємо повні дані матчу безпосередньо з API, щоб
+      // гарантовано отримати всіх учасників (reg_first, reg_second, атлетів)
+      const { data: freshMatch } = await api.get<Match>(`/matches/${matchId}/`);
+      setCurrentMatch(freshMatch);
+      setTimerState(matchToTimerState(freshMatch));
+      // Оновлюємо татамі зі snapshot, щоб мати актуальний стан
+      api.get<Tatami>(`/tatamis/${tatami.id}/`).then(({ data: freshTatami }) => {
+        setTatami(freshTatami);
+      }).catch(() => {});
       fetchMatches();
       fetchCategories();
       fetchCategoryResults();
@@ -623,9 +766,9 @@ export default function OperatorPanelPage() {
       const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка при призначенні поєдинку";
       toast({ title: msg, variant: "destructive" });
     }
-  };
+  }, [tatami, currentMatch, fetchMatches, fetchCategories, fetchCategoryResults, setTimerState]);
 
-  const handleRelease = async () => {
+  const handleRelease = useCallback(async () => {
     if (!tatami) return;
     setBusy(true);
     try {
@@ -643,9 +786,9 @@ export default function OperatorPanelPage() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [tatami, fetchMatches, fetchCategories, fetchCategoryResults, setTimerState]);
 
-  const handleDeclareWinner = async () => {
+  const handleDeclareWinner = useCallback(async () => {
     if (!currentMatch || !winnerDialog) return;
     setBusy(true);
     try {
@@ -659,9 +802,9 @@ export default function OperatorPanelPage() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [currentMatch, winnerDialog, winMethod]);
 
-  const assignNextAvailableMatch = async () => {
+  const assignNextAvailableMatch = useCallback(async () => {
     if (!tatami || !currentMatch) return;
 
     const nextInQueue = nextUpcomingMatches[0];
@@ -687,9 +830,9 @@ export default function OperatorPanelPage() {
     }
 
     toast({ title: "Всі бої на татамі завершено!" });
-  };
+  }, [tatami, currentMatch, nextUpcomingMatches, matches, handleAssignMatch]);
 
-  const handleNextMatch = async () => {
+  const handleNextMatch = useCallback(async () => {
     if (!tatami || !currentMatch) return;
     setBusy(true);
     try {
@@ -700,9 +843,9 @@ export default function OperatorPanelPage() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [tatami, currentMatch, assignNextAvailableMatch]);
 
-  const handleCompleteAndNext = async (winnerCorner: "aka" | "ao" | "draw", winMethodStr: string) => {
+  const handleCompleteAndNext = useCallback(async (winnerCorner: "aka" | "ao" | "draw", winMethodStr: string) => {
     if (!currentMatch || !tatami) return;
     setBusy(true);
     try {
@@ -715,12 +858,30 @@ export default function OperatorPanelPage() {
         });
       }
 
-      if (!currentMatch.parent_team_match) {
-        await assignNextAvailableMatch();
+      // Оновлюємо поєдинки і отримуємо свіжий список
+      const updatedMatches = await fetchMatches();
+      fetchCategories();
+      fetchCategoryResults();
+
+      // Оскільки цей матч тільки-но завершено, ми хочемо одразу перейти до наступного запланованого
+      const tatamiMatches = updatedMatches.filter((m) => m.tatami === tatami.id || (m.category && tatamiCategories.some(c => c.id === m.category)));
+      const upcoming = tatamiMatches.filter((m) => m.status === "scheduled" && !m.parent_team_match && m.reg_first && m.reg_second);
+
+      // Сортуємо так само, як у `_handle_tatami_auto_advance` на бекенді
+      const sortedUpcoming = [...upcoming].sort((a, b) => {
+        if (a.round_index !== b.round_index) return a.round_index - b.round_index;
+        return a.match_order - b.match_order;
+      });
+
+      const nextInQueue = sortedUpcoming[0];
+      if (nextInQueue) {
+        const nameFirst = formatParticipant(nextInQueue.reg_first, nextInQueue.athlete_first);
+        const nameSecond = formatParticipant(nextInQueue.reg_second, nextInQueue.athlete_second);
+        toast({ title: `Перехід до наступного бою: ${nameFirst} vs ${nameSecond}` });
+        await handleAssignMatch(nextInQueue.id, true);
       } else {
-        fetchMatches();
-        fetchCategories();
-        fetchCategoryResults();
+        // Якщо більше немає боїв у черзі — звільняємо татамі
+        await handleRelease();
       }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Помилка фіксації результату";
@@ -728,74 +889,9 @@ export default function OperatorPanelPage() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [currentMatch, tatami, tatamiCategories, fetchMatches, fetchCategories, fetchCategoryResults, handleAssignMatch, handleRelease]);
 
-  const tatamiMatches = useMemo(() => {
-    if (!tatami) return [];
-    return matches.filter((m) => {
-      if (m.tatami === tatami.id) return true;
-      if (m.parent_team_match) {
-        const parent = matches.find(p => p.id === m.parent_team_match);
-        return parent ? parent.tatami === tatami.id : false;
-      }
-      return false;
-    });
-  }, [matches, tatami]);
-
-  // Categories present on this tatami
-  const tatamiCategories = useMemo(() => {
-    const cats: {
-      id: number;
-      name: string;
-      schedule_order: number;
-      totalMatches: number;
-      completedMatches: number;
-      status: "completed" | "ongoing" | "scheduled";
-      results_finalized: boolean;
-    }[] = [];
-
-    tatamiMatches.forEach((m) => {
-      if (!m.category) return;
-      let cat = cats.find((c) => c.id === m.category);
-      if (!cat) {
-        cat = {
-          id: m.category,
-          name: m.category_name ?? `Категорія ${m.category}`,
-          schedule_order: m.category_order ?? 0,
-          totalMatches: 0,
-          completedMatches: 0,
-          status: "scheduled",
-          results_finalized: false,
-        };
-        cats.push(cat);
-      }
-      if (!m.parent_team_match) {
-        cat.totalMatches++;
-        if (m.status === "completed") {
-          cat.completedMatches++;
-        }
-      }
-    });
-
-    cats.forEach((cat) => {
-      const catMatches = tatamiMatches.filter((m) => m.category === cat.id);
-      const hasOngoing = catMatches.some((m) => m.status === "ongoing");
-      const hasScheduled = catMatches.some((m) => m.status === "scheduled");
-
-      if (hasOngoing) {
-        cat.status = "ongoing";
-      } else if (hasScheduled) {
-        cat.status = "scheduled";
-      } else {
-        cat.status = "completed";
-      }
-
-      const dbCat = categories.find((c) => c.id === cat.id);
-      cat.results_finalized = dbCat?.results_finalized ?? false;
-    });
-
-    return [...cats].sort((a, b) => a.schedule_order - b.schedule_order || a.id - b.id);
-  }, [tatamiMatches, categories]);
+  // tatamiMatches and tatamiCategories moved to top
 
   // Ref to track last active match ID, so we only auto-focus category when the match changes
   const lastActiveMatchIdRef = useRef<number | null>(null);
@@ -834,7 +930,13 @@ export default function OperatorPanelPage() {
   // Group matches of selected category by round
   const matchesByRound = useMemo(() => {
     const roundsMap: { [round: number]: Match[] } = {};
-    selectedCategoryMatches.forEach((m) => {
+    const filtered = selectedCategoryMatches.filter((m) => {
+      if (showPlaceholders) return true;
+      const isTechnical = m.status === "completed" && m.win_method === "walkover";
+      return !isTechnical;
+    });
+
+    filtered.forEach((m) => {
       if (!roundsMap[m.round_index]) {
         roundsMap[m.round_index] = [];
       }
@@ -854,45 +956,18 @@ export default function OperatorPanelPage() {
     });
 
     return roundsMap;
+  }, [selectedCategoryMatches, showPlaceholders]);
+
+  const categoryMatchStats = useMemo(() => {
+    const all = selectedCategoryMatches;
+    const technical = all.filter(m => {
+      return m.status === "completed" && m.win_method === "walkover";
+    }).length;
+    const real = all.length - technical;
+    return { total: all.length, technical, real };
   }, [selectedCategoryMatches]);
 
-  // Upcoming matches across the entire tatami
-  const nextUpcomingMatches = useMemo(() => {
-    const activeMatchId = getTatamiMatchId(tatami?.current_match ?? null);
-
-    // Фільтруємо заплановані бої (крім активного)
-    const scheduled = tatamiMatches.filter((m) => m.status === "scheduled" && m.id !== activeMatchId);
-
-    // Збираємо список боїв для відображення черги:
-    // - Якщо це одиночний поєдинок (!m.category_is_team), додаємо його.
-    // - Якщо це саб-баут (m.parent_team_match != null), додаємо його.
-    // - Якщо це головний командний поєдинок (m.category_is_team && !m.parent_team_match), ми додаємо його
-    //   тільки якщо у нього ще немає жодних запланованих саб-боїв.
-    const list = scheduled.filter((m) => {
-      if (!m.category_is_team) return true;
-      if (m.parent_team_match) return true;
-      const hasScheduledBouts = scheduled.some((x) => x.parent_team_match === m.id);
-      return !hasScheduledBouts;
-    });
-
-    return [...list]
-      .sort((a, b) => {
-        const orderA = a.category_order ?? 0;
-        const orderB = b.category_order ?? 0;
-        if (orderA !== orderB) return orderA - orderB;
-
-        if (a.parent_team_match && b.parent_team_match && a.parent_team_match === b.parent_team_match) {
-          return (a.bout_index ?? 0) - (b.bout_index ?? 0);
-        }
-
-        return a.category === b.category
-          ? a.round_index === b.round_index
-            ? a.match_order - b.match_order
-            : a.round_index - b.round_index
-          : a.category - b.category;
-      })
-      .slice(0, 5);
-  }, [tatamiMatches, tatami]);
+  // nextUpcomingMatches moved to top
 
   const nextMatchId = nextUpcomingMatches[0]?.id ?? null;
 
@@ -941,7 +1016,7 @@ export default function OperatorPanelPage() {
       >
         <div className="flex items-center justify-between text-muted-foreground mb-0.5">
           <span className="font-semibold text-[10px]">
-            R{m.round_index}.{m.match_order}
+            {getRoundName(m, matches, categories.find((c) => c.id === m.category)?.bracket_format)} · Бій {m.match_order}
             {m.parent_team_match ? ` · Бій #${m.bout_index}` : m.category_is_team ? " · Команда" : ""}
           </span>
           {isNext && (
@@ -1503,7 +1578,7 @@ export default function OperatorPanelPage() {
                     >
                       <div className="flex items-center justify-between text-[8px] text-muted-foreground">
                         <span>
-                          R{nm.round_index}.{nm.match_order}
+                          {getRoundName(nm, matches, categories.find((c) => c.id === nm.category)?.bracket_format)} · Бій {nm.match_order}
                           {nm.parent_team_match ? ` · Бій #${nm.bout_index}` : nm.category_is_team ? " · Команда" : ""}
                           {` · ${nm.category_name}`}
                         </span>
@@ -1554,6 +1629,25 @@ export default function OperatorPanelPage() {
                       <h3 className="font-bold text-xs truncate mt-1 text-foreground" title={cat?.name}>
                         {cat?.name}
                       </h3>
+                      <div className="flex items-center gap-1.5 mt-2">
+                        <label className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-400 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={showPlaceholders}
+                            onChange={(e) => setShowPlaceholders(e.target.checked)}
+                            className="rounded border-zinc-800 bg-zinc-950 text-amber-500 focus:ring-amber-500 focus:ring-offset-zinc-950 w-3 h-3 cursor-pointer"
+                          />
+                          Показувати технічні бої (BYE/TBD)
+                        </label>
+                      </div>
+                      {selectedCategoryMatches.length > 0 && (
+                        <p className="text-[9px] text-muted-foreground mt-1 select-none font-medium">
+                          {showPlaceholders
+                            ? `${categoryMatchStats.real} боїв + ${categoryMatchStats.technical} технічних (всього ${categoryMatchStats.total})`
+                            : `${categoryMatchStats.real} боїв (приховано ${categoryMatchStats.technical} технічних)`
+                          }
+                        </p>
+                      )}
                     </div>
                     {cat?.status && (
                       <span className={cn(
@@ -1661,7 +1755,7 @@ export default function OperatorPanelPage() {
                         return (
                           <div key={roundIdx} className="space-y-1.5">
                             <p className="text-[9px] font-bold text-muted-foreground/80 uppercase tracking-widest px-1">
-                              {resolveRoundLabel(roundIdx, selectedCategoryBracket?.format, selectedCategoryBracket?.rounds.length ?? 0)}
+                              {roundMatches[0] ? getRoundName(roundMatches[0], selectedCategoryMatches, selectedCategoryBracket?.format) : `Раунд ${roundIdx}`}
                             </p>
                             <div className="space-y-1.5">
                               {roundMatches.map((m) => renderMatchCard(m, currentMatch?.id === m.id))}
@@ -1725,6 +1819,8 @@ export default function OperatorPanelPage() {
             ) : currentMatch.judging_mode === "points" ? (
               <KumiteWKFOperatorPanel
                 match={currentMatch}
+                allMatches={matches}
+                bracketFormat={categories.find((c) => c.id === currentMatch.category)?.bracket_format}
                 timerState={timerState}
                 remainingMs={remainingMs}
                 rulesetActions={rulesetActions}
@@ -1903,142 +1999,149 @@ export default function OperatorPanelPage() {
 
       {/* ── Live Category Bracket Modal ── */}
       <Dialog open={isBracketModalOpen} onOpenChange={setIsBracketModalOpen}>
-        <DialogContent className="max-w-6xl w-[94vw] h-[85vh] flex flex-col bg-card border-border shadow-2xl rounded-2xl overflow-hidden p-0 gap-0">
-          <DialogHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between gap-4 bg-muted/20">
-            <div>
-              <DialogTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-                Інтерактивна сітка змагань
-              </DialogTitle>
-              <h2 className="text-base font-bold text-foreground mt-1">
-                {tatamiCategories.find(c => c.id === selectedCategoryId)?.name}
-              </h2>
-            </div>
-            {loadingBracket && (
-              <RefreshCw className="w-4 h-4 animate-spin text-amber-500 mr-8" />
-            )}
-          </DialogHeader>
+        {isBracketModalOpen && (
+          <DialogContent className="max-w-6xl w-[94vw] h-[85vh] flex flex-col bg-card border-border shadow-2xl rounded-2xl overflow-hidden p-0 gap-0">
+            <DialogHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between gap-4 bg-muted/20">
+              <div>
+                <DialogTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                  Інтерактивна сітка змагань
+                </DialogTitle>
+                <h2 className="text-base font-bold text-foreground mt-1">
+                  {tatamiCategories.find(c => c.id === selectedCategoryId)?.name}
+                </h2>
+              </div>
+              {loadingBracket && (
+                <RefreshCw className="w-4 h-4 animate-spin text-amber-500 mr-8" />
+              )}
+            </DialogHeader>
 
-          <div className="flex-1 overflow-auto p-6 bg-background/25">
-            {(() => {
-              const dbCat = categories.find(c => c.id === selectedCategoryId);
-              const resultsPersisted = dbCat?.results_finalized ?? false;
-              const standings = categoryResults.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0));
+            <div className="flex-1 overflow-auto p-6 bg-background/25">
+              {(() => {
+                const dbCat = categories.find(c => c.id === selectedCategoryId);
+                const resultsPersisted = dbCat?.results_finalized ?? false;
+                const standings = categoryResults.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0));
 
-              return (
-                <>
-                  {resultsPersisted && standings.length > 0 && (
-                    <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-xl p-3 space-y-2 max-w-4xl mx-auto mb-4 select-none">
-                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <Trophy className="w-3.5 h-3.5 text-yellow-500" /> Переможці та призери
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                        {standings.map((res: CategoryResult) => {
-                          const place = res.place;
-                          const name = formatRegistrationName(res.registration) || res.name;
-                          const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
-                        let badge = "🥇";
-                          if ((place ?? 0) > 3) badge = "🎖️";
-                          else if (place === 3) badge = "🥉";
-                          else if (place === 2) badge = "🥈";
+                return (
+                  <>
+                    {resultsPersisted && standings.length > 0 && (
+                      <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-xl p-3 space-y-2 max-w-4xl mx-auto mb-4 select-none">
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                          <Trophy className="w-3.5 h-3.5 text-yellow-500" /> Переможці та призери
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                          {standings.map((res: CategoryResult) => {
+                            const place = res.place;
+                            const name = formatRegistrationName(res.registration) || res.name;
+                            const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
+                          let badge = "🥇";
+                            if ((place ?? 0) > 3) badge = "🎖️";
+                            else if (place === 3) badge = "🥉";
+                            else if (place === 2) badge = "🥈";
 
-                          return (
-                            <div key={res.registration?.id} className="flex items-center gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
-                              <span className="text-base select-none shrink-0">{badge}</span>
-                              <div className="flex flex-col min-w-0 text-left">
-                                <span className="font-bold text-[11px] text-white whitespace-normal break-words leading-tight">{name}</span>
-                                <span className="text-[9px] text-zinc-400 whitespace-normal break-words leading-normal">{club}</span>
+                            return (
+                              <div key={res.registration?.id} className="flex items-center gap-2 p-1.5 bg-zinc-950/60 border border-zinc-800/50 rounded-lg">
+                                <span className="text-base select-none shrink-0">{badge}</span>
+                                <div className="flex flex-col min-w-0 text-left">
+                                  <span className="font-bold text-[11px] text-white whitespace-normal break-words leading-tight">{name}</span>
+                                  <span className="text-[9px] text-zinc-400 whitespace-normal break-words leading-normal">{club}</span>
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {selectedCategoryBracket ? (
-                    selectedCategoryBracket.rounds.length > 0 ? (
-                      <BracketView
-                        bracket={selectedCategoryBracket}
-                        onMatchClick={(m) => {
-                          if (m.status === "scheduled") {
-                            handleAssignMatch(m.id);
-                            setIsBracketModalOpen(false);
-                          }
-                        }}
-                      />
+                    {selectedCategoryBracket ? (
+                      selectedCategoryBracket.rounds.length > 0 ? (
+                        <BracketView
+                          bracket={selectedCategoryBracket}
+                          showPlaceholders={showPlaceholders}
+                          onMatchClick={(m) => {
+                            if (m.status === "scheduled") {
+                              handleAssignMatch(m.id);
+                              setIsBracketModalOpen(false);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-xs text-muted-foreground italic">
+                          Матчі сітки ще не сформовані
+                        </div>
+                      )
                     ) : (
                       <div className="h-full flex items-center justify-center text-xs text-muted-foreground italic">
-                        Матчі сітки ще не сформовані
+                        {loadingBracket ? "Завантаження сітки..." : "Помилка завантаження сітки"}
                       </div>
-                    )
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-xs text-muted-foreground italic">
-                      {loadingBracket ? "Завантаження сітки..." : "Помилка завантаження сітки"}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        </DialogContent>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </DialogContent>
+        )}
       </Dialog>
 
       {/* ── Winner dialog for legacy rulesets ── */}
       <Dialog open={!!winnerDialog} onOpenChange={(o) => !o && setWinnerDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              Оголосити переможця:{" "}
-              <span className={winnerDialog === "ao" ? "text-blue-400" : "text-red-400"}>
-                {winnerDialog === "ao"
-                  ? (formatRegistrationName(currentMatch?.reg_second) || "AO")
-                  : (formatRegistrationName(currentMatch?.reg_first) || "AKA")}
-              </span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Метод перемоги</p>
-            <Select value={winMethod} onValueChange={setWinMethod}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {winMethods.map((w) => (
-                  <SelectItem key={w.key} value={w.key}>{w.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setWinnerDialog(null)}>Скасувати</Button>
-            <Button disabled={busy} onClick={handleDeclareWinner}>
-              <Trophy className="w-4 h-4 mr-1" /> Підтвердити
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        {!!winnerDialog && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                Оголосити переможця:{" "}
+                <span className={winnerDialog === "ao" ? "text-blue-400" : "text-red-400"}>
+                  {winnerDialog === "ao"
+                    ? (formatRegistrationName(currentMatch?.reg_second) || "AO")
+                    : (formatRegistrationName(currentMatch?.reg_first) || "AKA")}
+                </span>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Метод перемоги</p>
+              <Select value={winMethod} onValueChange={setWinMethod}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {winMethods.map((w) => (
+                    <SelectItem key={w.key} value={w.key}>{w.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setWinnerDialog(null)}>Скасувати</Button>
+              <Button disabled={busy} onClick={handleDeclareWinner}>
+                <Trophy className="w-4 h-4 mr-1" /> Підтвердити
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
       </Dialog>
 
       {/* ── Assign confirmation dialog if a match is already ongoing ── */}
       <Dialog open={assignConfirmDialog !== null} onOpenChange={(o) => !o && setAssignConfirmDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <ShieldAlert className="w-5 h-5" /> Увага! Бій уже триває
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
-            <p>
-              На татамі наразі встановлено інший активний бій, який перебуває в статусі **"Триває"**.
-            </p>
-            <p>
-              Призначення нового поєдинку призупинить поточний бій і зніме його з татамі. Ви впевнені, що хочете продовжити?
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAssignConfirmDialog(null)}>Скасувати</Button>
-            <Button variant="destructive" onClick={() => assignConfirmDialog && handleAssignMatch(assignConfirmDialog, true)}>
-              Так, призначити новий бій
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        {assignConfirmDialog !== null && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <ShieldAlert className="w-5 h-5" /> Увага! Бій уже триває
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
+              <p>
+                На татамі наразі встановлено інший активний бій, який перебуває в статусі **"Триває"**.
+              </p>
+              <p>
+                Призначення нового поєдинку призупинить поточний бій і зніме його з татамі. Ви впевнені, що хочете продовжити?
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAssignConfirmDialog(null)}>Скасувати</Button>
+              <Button variant="destructive" onClick={() => assignConfirmDialog && handleAssignMatch(assignConfirmDialog, true)}>
+                Так, призначити новий бій
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
       </Dialog>
     </div>
   );

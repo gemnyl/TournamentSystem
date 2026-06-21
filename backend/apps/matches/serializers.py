@@ -66,6 +66,10 @@ class MatchSerializer(serializers.ModelSerializer):
     tatami_number = serializers.SerializerMethodField()
     judging_mode = serializers.SerializerMethodField()
     team_bouts = serializers.SerializerMethodField()
+    redirect_to_match_id = serializers.SerializerMethodField()
+
+    def get_redirect_to_match_id(self, obj):
+        return getattr(obj, "redirect_to_match_id", None)
 
     def get_tatami_number(self, obj):
         if obj.tatami:
@@ -144,6 +148,8 @@ class MatchSerializer(serializers.ModelSerializer):
             "tournament_id",
             "tournament_title",
             "tatami_number",
+            "is_bracket_reset",
+            "redirect_to_match_id",
         ]
         read_only_fields = fields
 

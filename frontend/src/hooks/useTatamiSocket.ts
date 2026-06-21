@@ -11,7 +11,7 @@ export interface TimerStatePayload {
 interface UseTatamiSocketOptions {
   onSnapshot: (data: TatamiSnapshot) => void;
   onMatchEvent: (event: { sequence: number; event_type: string; payload: unknown }, match: Match) => void;
-  onTimerState: (state: TimerStatePayload, server_ts_ms: number) => void;
+  onTimerState: (state: TimerStatePayload, server_ts_ms: number, match_id?: number) => void;
   onTatamiState: (data: { tatami: TatamiSnapshot["tatami"]; current_match: Match | null }) => void;
   onClockOffsetUpdate?: (offset: number) => void;
 }
@@ -159,7 +159,8 @@ export function useTatamiSocket(
       }
     };
 
-    const handleTimerState = (payload: { server_ts_ms?: unknown; state?: unknown }) => {
+    const handleTimerState = (payload: { match_id?: unknown; server_ts_ms?: unknown; state?: unknown }) => {
+      const matchId = payload.match_id as number | undefined;
       const serverTs = payload.server_ts_ms as number;
       if (clockOffsetRef.current === 0) {
         clockOffsetRef.current = serverTs - Date.now();
@@ -169,7 +170,7 @@ export function useTatamiSocket(
       }
 
       const correctedServerTs = Date.now() + clockOffsetRef.current;
-      optsRef.current.onTimerState(payload.state as TimerStatePayload, correctedServerTs);
+      optsRef.current.onTimerState(payload.state as TimerStatePayload, correctedServerTs, matchId);
     };
 
     const handleTatamiState = (payload: { server_ts_ms?: unknown }) => {

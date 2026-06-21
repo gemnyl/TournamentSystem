@@ -587,6 +587,35 @@ class TestMatchService(MatchAPITestCase):
         nxt.refresh_from_db()
         self.assertIsNone(nxt.reg_first)
 
+    def test_reset_match_cascade_errors(self):
+        from django.core.exceptions import ValidationError
+
+        match = self.first_round_match
+        svc = MatchService(match)
+
+        # Complete match to advance participant
+        svc.apply_score("aka", "yuko")
+        svc.set_winner("aka", Match.WinMethod.POINTS)
+        match.refresh_from_db()
+
+        # 1. Error: next match has scores
+        nxt = match.next_match
+        nxt.score_first = 2
+        nxt.save()
+        with self.assertRaises(ValidationError):
+            svc.reset_match()
+
+        # Reset scores of next match
+        nxt.score_first = 0
+        nxt.save()
+
+        # 2. Error: next match is completed (not walkover)
+        nxt.status = Match.Status.COMPLETED
+        nxt.win_method = Match.WinMethod.DECISION
+        nxt.save()
+        with self.assertRaises(ValidationError):
+            svc.reset_match()
+
 
 class TestSetSenshuEndpoint(MatchAPITestCase):
     """Тест ендпоінту set_senshu через HTTP."""
@@ -1270,3 +1299,162 @@ class TestMatchesExtraActions(MatchAPITestCase):
         payload_invalid = {"athlete_first_id": 999999, "athlete_second_id": 888888}
         response = self.client.post(url, payload_invalid, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class TestMatchSequencingAndRollback(MatchAPITestCase):
+    """Тести для перевірки черговості вибору наступного матчу та логіки відкоту (rollback)."""
+
+    def setUp(self):
+        super().setUp()
+        from apps.tatamis.models import Tatami
+
+        self.tatami = Tatami.objects.create(tournament=self.tournament, number=2)
+
+    def test_auto_advance_respects_round_order(self):
+        """Перевіряє, що ручний/явний перехід вибирає поєдинок з молодшого раунду.
+
+        Молодший раунд повинен гратися першим, навіть якщо поєдинок
+        зі старшого раунду вже повністю укомплектований.
+        """
+        # Очищуємо всі раніше створені матчі
+        Match.objects.filter(category=self.category).delete()
+
+        # Створюємо чисті матчі
+        # m1 (поточний поєдинок на татамі, завершується)
+        m1 = Match.objects.create(
+            category=self.category,
+            round_index=1,
+            match_order=1,
+            reg_first=self.category.registrations.all()[0],
+            reg_second=self.category.registrations.all()[1],
+            status=Match.Status.ONGOING,
+            tatami=self.tatami,
+        )
+        self.tatami.current_match = m1
+        self.tatami.save()
+
+        # R1.2 (готовий поєдинок з молодшого раунду)
+        m_r1_2 = Match.objects.create(
+            category=self.category,
+            round_index=1,
+            match_order=2,
+            reg_first=self.category.registrations.all()[2],
+            reg_second=self.category.registrations.all()[3],
+            status=Match.Status.SCHEDULED,
+            tatami=self.tatami,
+        )
+
+        # R2.1 (готовий поєдинок зі старшого раунду)
+        Match.objects.create(
+            category=self.category,
+            round_index=2,
+            match_order=1,
+            reg_first=self.category.registrations.all()[4],
+            reg_second=self.category.registrations.all()[5],
+            status=Match.Status.SCHEDULED,
+            tatami=self.tatami,
+        )
+
+        # Завершуємо m1 через сервіс (це не повинно автоматично перемикати татамі)
+        svc = MatchService(m1)
+        svc.set_winner("aka", Match.WinMethod.POINTS)
+
+        self.tatami.refresh_from_db()
+        self.assertEqual(self.tatami.current_match_id, m1.id)
+
+        # Викликаємо перехід до наступного поєдинку в черзі татамі явним чином
+        m1._handle_tatami_auto_advance()
+
+        self.tatami.refresh_from_db()
+        # Очікуємо, що татамі перейде на m_r1_2 (молодший раунд 1), а не на m_r2_1 (раунд 2)
+        self.assertEqual(self.tatami.current_match_id, m_r1_2.id)
+
+    def test_reset_match_syncs_tatami_and_clears_loser_next_match(self):
+        """Перевіряє, що відкіт матчу очищає loser_next_match та повертає Tatami.current_match."""
+        # Очищуємо всі раніше створені матчі
+        Match.objects.filter(category=self.category).delete()
+
+        # Створюємо фейкові наступні матчі
+        nxt_win = Match.objects.create(
+            category=self.category,
+            round_index=2,
+            match_order=1,
+            status=Match.Status.SCHEDULED,
+        )
+        nxt_los = Match.objects.create(
+            category=self.category,
+            round_index=2,
+            match_order=2,
+            status=Match.Status.SCHEDULED,
+        )
+
+        # Створюємо чистий матч m
+        m = Match.objects.create(
+            category=self.category,
+            round_index=1,
+            match_order=1,
+            reg_first=self.category.registrations.all()[0],
+            reg_second=self.category.registrations.all()[1],
+            status=Match.Status.ONGOING,
+            tatami=self.tatami,
+            next_match=nxt_win,
+            loser_next_match=nxt_los,
+        )
+
+        # Створюємо додаткові незіграні матчі першого раунду з обома учасниками,
+        # щоб запобігти автоматичній технічній перемозі (WALKOVER) у наступних матчах
+        Match.objects.create(
+            category=self.category,
+            round_index=1,
+            match_order=2,
+            reg_first=self.category.registrations.all()[2],
+            reg_second=self.category.registrations.all()[3],
+            status=Match.Status.SCHEDULED,
+            next_match=nxt_win,
+        )
+        Match.objects.create(
+            category=self.category,
+            round_index=1,
+            match_order=3,
+            reg_first=self.category.registrations.all()[4],
+            reg_second=self.category.registrations.all()[5],
+            status=Match.Status.SCHEDULED,
+            loser_next_match=nxt_los,
+        )
+
+        # Ставимо m як поточний на татамі
+        self.tatami.current_match = m
+        self.tatami.save()
+
+        # Завершуємо m
+        svc = MatchService(m)
+        svc.set_winner("aka", Match.WinMethod.POINTS)
+
+        # Переможець має бути в nxt_win, а той, хто програв — в nxt_los
+        nxt_win.refresh_from_db()
+        nxt_los.refresh_from_db()
+        self.assertIsNotNone(nxt_win.reg_first or nxt_win.reg_second)
+        self.assertIsNotNone(nxt_los.reg_first or nxt_los.reg_second)
+
+        # Імітуємо, що татамі перейшло на nxt_win помилково
+        self.tatami.current_match = nxt_win
+        self.tatami.save()
+
+        # Робимо відкіт матчу m
+        self._login(self.judge)
+        response = self.client.post(f"/api/matches/{m.pk}/reset_match/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.content.decode("utf-8"))
+
+        # Перевіряємо, що учасників очищено з наступних поєдинків та їх статус SCHEDULED
+        nxt_win.refresh_from_db()
+        nxt_los.refresh_from_db()
+        self.assertIsNone(nxt_win.reg_first)
+        self.assertIsNone(nxt_win.reg_second)
+        self.assertIsNone(nxt_los.reg_first)
+        self.assertIsNone(nxt_los.reg_second)
+        self.assertEqual(nxt_win.status, Match.Status.SCHEDULED)
+        self.assertEqual(nxt_los.status, Match.Status.SCHEDULED)
+
+        # Перевіряємо, що татамі знову показує відкочений матч m
+        self.tatami.refresh_from_db()
+        self.assertEqual(self.tatami.current_match_id, m.id)

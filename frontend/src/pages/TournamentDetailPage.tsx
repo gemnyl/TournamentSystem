@@ -323,12 +323,119 @@ export default function TournamentDetailPage() {
   const [generatingAllBrackets, setGeneratingAllBrackets] = useState(false);
   const [distributingTatamis, setDistributingTatamis] = useState(false);
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [rrMin, setRrMin] = useState(2);
-  const [rrMax, setRrMax] = useState(5);
-  const [seMin, setSeMin] = useState(6);
-  const [seMax, setSeMax] = useState(32);
   const [bulkGenMode, setBulkGenMode] = useState<"threshold" | "custom">("threshold");
   const [thresholdVal, setThresholdVal] = useState(5);
+  const [thresholdFormat, setThresholdFormat] = useState<string>("single_elimination");
+
+  interface BulkRule {
+    format: string;
+    doubleElimType?: "full" | "short";
+    enabled: boolean;
+    min: number;
+    max: number;
+  }
+  const [bulkRules, setBulkRules] = useState<BulkRule[]>([
+    { format: "round_robin", enabled: true, min: 2, max: 5 },
+    { format: "single_elimination", enabled: true, min: 6, max: 32 },
+    { format: "single_repechage", enabled: false, min: 6, max: 32 },
+    { format: "double_elimination", doubleElimType: "full", enabled: false, min: 6, max: 32 },
+    { format: "swiss", enabled: false, min: 6, max: 32 },
+  ]);
+
+  const presets: { name: string; rules: BulkRule[] }[] = [
+    {
+      name: "Стандартний (Кругова + Олімпійська)",
+      rules: [
+        { format: "round_robin", enabled: true, min: 2, max: 5 },
+        { format: "single_elimination", enabled: true, min: 6, max: 64 },
+        { format: "single_repechage", enabled: false, min: 6, max: 32 },
+        { format: "double_elimination", doubleElimType: "full", enabled: false, min: 6, max: 32 },
+        { format: "swiss", enabled: false, min: 6, max: 32 },
+      ]
+    },
+    {
+      name: "Спортивний репешаж WKF (Кругова + WKF Репешаж)",
+      rules: [
+        { format: "round_robin", enabled: true, min: 2, max: 5 },
+        { format: "single_elimination", enabled: false, min: 6, max: 32 },
+        { format: "single_repechage", enabled: true, min: 6, max: 64 },
+        { format: "double_elimination", doubleElimType: "full", enabled: false, min: 6, max: 32 },
+        { format: "swiss", enabled: false, min: 6, max: 32 },
+      ]
+    },
+    {
+      name: "Подвійне вибування (Кругова + Double Elim)",
+      rules: [
+        { format: "round_robin", enabled: true, min: 2, max: 5 },
+        { format: "single_elimination", enabled: false, min: 6, max: 32 },
+        { format: "single_repechage", enabled: false, min: 6, max: 32 },
+        { format: "double_elimination", doubleElimType: "full", enabled: true, min: 6, max: 64 },
+        { format: "swiss", enabled: false, min: 6, max: 32 },
+      ]
+    },
+    {
+      name: "Швейцарська система (Кругова + Швейцарська)",
+      rules: [
+        { format: "round_robin", enabled: true, min: 2, max: 5 },
+        { format: "single_elimination", enabled: false, min: 6, max: 32 },
+        { format: "single_repechage", enabled: false, min: 6, max: 32 },
+        { format: "double_elimination", doubleElimType: "full", enabled: false, min: 6, max: 32 },
+        { format: "swiss", enabled: true, min: 6, max: 64 },
+      ]
+    },
+    {
+      name: "Гнучкий змішаний (RR -> DE -> WKF -> SE)",
+      rules: [
+        { format: "round_robin", enabled: true, min: 2, max: 4 },
+        { format: "double_elimination", doubleElimType: "full", enabled: true, min: 5, max: 12 },
+        { format: "single_repechage", enabled: true, min: 13, max: 32 },
+        { format: "single_elimination", enabled: true, min: 33, max: 128 },
+        { format: "swiss", enabled: false, min: 6, max: 32 },
+      ]
+    }
+  ];
+
+  // Load settings from localStorage when dialog opens
+  useEffect(() => {
+    if (bulkDialogOpen) {
+      const mode = localStorage.getItem("bulkGenMode");
+      if (mode) setBulkGenMode(mode as "threshold" | "custom");
+
+      const thresholdValStr = localStorage.getItem("bulkThresholdVal");
+      if (thresholdValStr) setThresholdVal(Number(thresholdValStr));
+
+      const thresholdFmt = localStorage.getItem("bulkThresholdFormat");
+      if (thresholdFmt) setThresholdFormat(thresholdFmt);
+
+      const rulesStr = localStorage.getItem("bulkRules");
+      if (rulesStr) {
+        try {
+          const parsed = JSON.parse(rulesStr) as BulkRule[];
+          const defaults: BulkRule[] = [
+            { format: "round_robin", enabled: true, min: 2, max: 5 },
+            { format: "single_elimination", enabled: true, min: 6, max: 32 },
+            { format: "single_repechage", enabled: false, min: 6, max: 32 },
+            { format: "double_elimination", doubleElimType: "full", enabled: false, min: 6, max: 32 },
+            { format: "swiss", enabled: false, min: 6, max: 32 },
+          ];
+          const missing = defaults.filter((d) => !parsed.some((p) => p.format === d.format));
+          setBulkRules([...parsed, ...missing]);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, [bulkDialogOpen]);
+
+  // Save settings to localStorage on state change
+  useEffect(() => {
+    if (bulkDialogOpen) {
+      localStorage.setItem("bulkGenMode", bulkGenMode);
+      localStorage.setItem("bulkThresholdVal", String(thresholdVal));
+      localStorage.setItem("bulkThresholdFormat", thresholdFormat);
+      localStorage.setItem("bulkRules", JSON.stringify(bulkRules));
+    }
+  }, [bulkGenMode, thresholdVal, thresholdFormat, bulkRules, bulkDialogOpen]);
 
   // Bulk import categories states
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -469,23 +576,97 @@ export default function TournamentDetailPage() {
     }
   };
 
+  const previewData = useMemo(() => {
+    const eligibleCategories = categories.filter((c) => !c.has_bracket && c.confirmed_registrations_count >= 2);
+    const alreadyGenerated = categories.filter((c) => c.has_bracket);
+    const tooFewParticipants = categories.filter((c) => !c.has_bracket && c.confirmed_registrations_count < 2);
+
+    const counts: Record<string, { count: number; examples: string[] }> = {
+      round_robin: { count: 0, examples: [] },
+      single_elimination: { count: 0, examples: [] },
+      single_repechage: { count: 0, examples: [] },
+      double_elimination_full: { count: 0, examples: [] },
+      double_elimination_short: { count: 0, examples: [] },
+      swiss: { count: 0, examples: [] },
+      none: { count: 0, examples: [] },
+    };
+
+    eligibleCategories.forEach((cat) => {
+      const count = cat.confirmed_registrations_count;
+      let matchedFormat = "none";
+
+      if (bulkGenMode === "threshold") {
+        if (count >= 2 && count <= thresholdVal) {
+          matchedFormat = "round_robin";
+        } else if (count > thresholdVal) {
+          matchedFormat = thresholdFormat;
+        }
+      } else {
+        const matchedRule = bulkRules
+          .filter((r) => r.enabled)
+          .find((r) => count >= r.min && count <= r.max);
+
+        if (matchedRule) {
+          if (matchedRule.format === "double_elimination") {
+            matchedFormat = matchedRule.doubleElimType === "short" ? "double_elimination_short" : "double_elimination_full";
+          } else {
+            matchedFormat = matchedRule.format;
+          }
+        }
+      }
+
+      if (counts[matchedFormat]) {
+        counts[matchedFormat].count++;
+        if (counts[matchedFormat].examples.length < 3) {
+          counts[matchedFormat].examples.push(`${cat.name} (${count} уч.)`);
+        }
+      }
+    });
+
+    return {
+      counts,
+      totalEligible: eligibleCategories.length,
+      alreadyGenerated: alreadyGenerated.length,
+      tooFewParticipants: tooFewParticipants.length,
+    };
+  }, [categories, bulkGenMode, thresholdVal, thresholdFormat, bulkRules]);
+
   const handleGenerateAllBracketsWithThresholds = async () => {
     setGeneratingAllBrackets(true);
-    const payload = bulkGenMode === "threshold"
-      ? {
-          round_robin_min: 2,
-          round_robin_max: thresholdVal,
-          single_elimination_min: thresholdVal + 1,
-          single_elimination_max: 64,
-        }
-      : {
-          round_robin_min: rrMin,
-          round_robin_max: rrMax,
-          single_elimination_min: seMin,
-          single_elimination_max: seMax,
-        };
+
+    let rulesPayload;
+    if (bulkGenMode === "threshold") {
+      const isDE = thresholdFormat.startsWith("double_elimination");
+      rulesPayload = [
+        {
+          format: "round_robin",
+          min_participants: 2,
+          max_participants: thresholdVal,
+        },
+        {
+          format: isDE ? "double_elimination" : thresholdFormat,
+          double_elim_type: isDE
+            ? (thresholdFormat === "double_elimination_short" ? "short" : "full")
+            : undefined,
+          min_participants: thresholdVal + 1,
+          max_participants: 100,
+        },
+      ];
+    } else {
+      rulesPayload = bulkRules
+        .filter((r) => r.enabled)
+        .map((r) => ({
+          format: r.format,
+          double_elim_type: r.format === "double_elimination" ? (r.doubleElimType || "full") : undefined,
+          min_participants: r.min,
+          max_participants: r.max,
+        }));
+    }
+
     try {
-      const res = await api.post<{ detail: string }>(`/tournaments/${id}/generate_all_brackets/`, payload);
+      const res = await api.post<{ detail: string }>(`/tournaments/${id}/generate_all_brackets/`, {
+        rules: rulesPayload,
+      });
       toast({ title: "Генерація завершена!", description: res.data.detail });
       setBulkDialogOpen(false);
       fetchAll();
@@ -1494,7 +1675,7 @@ export default function TournamentDetailPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-xs text-muted-foreground">
-              Виберіть спосіб автоматичного вибору формату сітки (Кругова або Олімпійська) для нестворених категорій.
+              Виберіть спосіб автоматичного вибору формату сітки для категорій без матчів.
             </p>
 
             {/* Вкладки вибору режиму */}
@@ -1527,65 +1708,201 @@ export default function TournamentDetailPage() {
 
             {bulkGenMode === "threshold" ? (
               <div className="space-y-3 pt-1">
-                <div className="border border-border rounded-lg p-4 bg-muted/20 space-y-3">
-                  <Label className="text-xs font-bold text-foreground">
-                    Гранична кількість учасників для Кругової сітки
-                  </Label>
-                  <div className="flex items-center gap-3">
-                    <Input
-                      type="number"
-                      min={2}
-                      max={20}
-                      value={thresholdVal}
-                      onChange={(e) => setThresholdVal(Math.max(2, Number(e.target.value)))}
-                      className="w-24 font-mono font-bold text-base"
-                    />
-                    <span className="text-xs text-muted-foreground">учасників</span>
+                <div className="border border-border rounded-lg p-4 bg-muted/20 space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-foreground">
+                      До порогу (Кругова сітка)
+                    </Label>
+                    <div className="flex items-center gap-3">
+                      <Input
+                        type="number"
+                        min={2}
+                        max={20}
+                        value={thresholdVal}
+                        onChange={(e) => setThresholdVal(Math.max(2, Number(e.target.value)))}
+                        className="w-24 font-mono font-bold text-base"
+                      />
+                      <span className="text-xs text-muted-foreground">учасників (включно)</span>
+                    </div>
                   </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-foreground">
+                      Вище порогу (більше {thresholdVal} учасників)
+                    </Label>
+                    <Select value={thresholdFormat} onValueChange={setThresholdFormat}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Оберіть формат сітки" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="single_elimination">Олімпійська (на вибування)</SelectItem>
+                        <SelectItem value="single_repechage">Олімпійська з репешажем</SelectItem>
+                        <SelectItem value="double_elimination_full">Double Elimination (Класичний)</SelectItem>
+                        <SelectItem value="double_elimination_short">Double Elimination (Спрощений)</SelectItem>
+                        <SelectItem value="swiss">Швейцарська система</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <p className="text-[11px] text-muted-foreground leading-relaxed pt-3 border-t border-border/40">
                     ℹ️ Категорії з <strong className="text-amber-500">2–{thresholdVal}</strong> підтвердженими учасниками отримають <strong>Кругову сітку</strong>.<br />
-                    Категорії з <strong className="text-blue-500">{thresholdVal + 1} або більше</strong> учасниками отримають <strong>Олімпійську сітку (на вибування)</strong>.
+                    Категорії з <strong className="text-blue-500">{thresholdVal + 1} або більше</strong> учасниками отримають <strong>{
+                      thresholdFormat === "single_elimination" ? "Олімпійську сітку (на вибування)" :
+                      thresholdFormat === "single_repechage" ? "Олімпійську сітку з репешажем" :
+                      thresholdFormat === "double_elimination_full" ? "Double Elimination (Класичний)" :
+                      thresholdFormat === "double_elimination_short" ? "Double Elimination (Спрощений)" :
+                      "Швейцарську систему"
+                    }</strong>.
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
-                  <span className="text-xs font-bold text-amber-500 uppercase tracking-widest block">Кругова сітка (Round Robin)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Мінімум людей</Label>
-                      <Input type="number" value={rrMin} onChange={(e) => setRrMin(Number(e.target.value))} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Максимум людей</Label>
-                      <Input type="number" value={rrMax} onChange={(e) => setRrMax(Number(e.target.value))} />
-                    </div>
-                  </div>
+              <div className="space-y-3">
+                {/* Селектор шаблонів/пресетів */}
+                <div className="space-y-1 pb-1">
+                  <Label className="text-[11px] font-bold text-muted-foreground block uppercase tracking-wider">Завантажити готовий шаблон</Label>
+                  <Select
+                    onValueChange={(presetIndex) => {
+                      const idx = Number(presetIndex);
+                      if (!isNaN(idx) && presets[idx]) {
+                        setBulkRules(presets[idx].rules);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-full h-8 text-xs font-semibold">
+                      <SelectValue placeholder="Оберіть готовий шаблон правил..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {presets.map((preset, idx) => (
+                        <SelectItem key={preset.name} value={String(idx)} className="text-xs">
+                          {preset.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
-                  <span className="text-xs font-bold text-blue-500 uppercase tracking-widest block">Олімпійська сітка (Single Elimination)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Мінімум людей</Label>
-                      <Input type="number" value={seMin} onChange={(e) => setSeMin(Number(e.target.value))} />
+                {bulkRules.map((rule, idx) => {
+                  const updateRule = (updated: Partial<BulkRule>) => {
+                    const next = [...bulkRules];
+                    next[idx] = { ...next[idx], ...updated };
+                    setBulkRules(next);
+                  };
+
+                  return (
+                    <div
+                      key={rule.format}
+                      className={cn(
+                        "border border-border rounded-lg p-3 bg-muted/20 space-y-3 transition-all",
+                        rule.enabled ? "border-amber-500/30 bg-amber-500/[0.02]" : "opacity-60"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={rule.enabled}
+                            onChange={(e) => updateRule({ enabled: e.target.checked })}
+                            className="h-4 w-4 rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                          />
+                          <span className="text-xs font-bold text-foreground">
+                            {rule.format === "round_robin" ? "Кругова сітка (Round Robin)" :
+                             rule.format === "single_elimination" ? "Олімпійська (Single Elimination)" :
+                             rule.format === "single_repechage" ? "Олімпійська з репешажем" :
+                             rule.format === "swiss" ? "Швейцарська система" :
+                             "Double Elimination"}
+                          </span>
+                        </label>
+
+                        {rule.format === "double_elimination" && rule.enabled && (
+                          <Select
+                            value={rule.doubleElimType || "full"}
+                            onValueChange={(val: "full" | "short") => updateRule({ doubleElimType: val })}
+                          >
+                            <SelectTrigger className="w-32 h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="full" className="text-xs">Класичний</SelectItem>
+                              <SelectItem value="short" className="text-xs">Спрощений</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+
+                      {rule.enabled && (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-muted-foreground">Мінімум людей</Label>
+                            <Input
+                              type="number"
+                              min={2}
+                              value={rule.min}
+                              onChange={(e) => updateRule({ min: Math.max(2, Number(e.target.value)) })}
+                              className="h-8 text-xs font-semibold"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-muted-foreground">Максимум людей</Label>
+                            <Input
+                              type="number"
+                              min={2}
+                              value={rule.max}
+                              onChange={(e) => updateRule({ max: Math.max(2, Number(e.target.value)) })}
+                              className="h-8 text-xs font-semibold"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Максимум людей</Label>
-                      <Input type="number" value={seMax} onChange={(e) => setSeMax(Number(e.target.value))} />
-                    </div>
-                  </div>
-                </div>
+                  );
+                })}
 
                 {/* Блоки валідації */}
                 {(() => {
-                  const hasMinMaxError = rrMin > rrMax || seMin > seMax;
-                  const hasOverlap = !hasMinMaxError && rrMax >= seMin;
-                  const hasGap = !hasMinMaxError && rrMax + 1 < seMin;
+                  const enabledRules = bulkRules.filter(r => r.enabled);
+                  const hasMinMaxError = enabledRules.some(r => r.min > r.max);
+
+                  let hasOverlap = false;
+                  let overlapDetails = "";
+                  for (let i = 0; i < enabledRules.length; i++) {
+                    for (let j = i + 1; j < enabledRules.length; j++) {
+                      const r1 = enabledRules[i];
+                      const r2 = enabledRules[j];
+                      if (Math.max(r1.min, r2.min) <= Math.min(r1.max, r2.max)) {
+                        hasOverlap = true;
+                        const f1 = r1.format === "round_robin" ? "Кругова" : r1.format === "single_elimination" ? "Олімпійська" : r1.format === "single_repechage" ? "Репешаж" : r1.format === "swiss" ? "Швейцарська" : "Double Elim";
+                        const f2 = r2.format === "round_robin" ? "Кругова" : r2.format === "single_elimination" ? "Олімпійська" : r2.format === "single_repechage" ? "Репешаж" : r2.format === "swiss" ? "Швейцарська" : "Double Elim";
+                        overlapDetails = `Перекриваються діапазони "${f1}" та "${f2}". Пріоритет отримає формат, розташований вище в списку.`;
+                        break;
+                      }
+                    }
+                    if (hasOverlap) break;
+                  }
+
+                  let hasGap = false;
+                  let gapDetails = "";
+                  if (enabledRules.length > 0) {
+                    const maxLimit = Math.max(...enabledRules.map(r => r.max));
+                    const uncovered: number[] = [];
+                    for (let x = 2; x <= maxLimit; x++) {
+                      const isCovered = enabledRules.some(r => x >= r.min && x <= r.max);
+                      if (!isCovered) {
+                        uncovered.push(x);
+                      }
+                    }
+                    if (uncovered.length > 0) {
+                      hasGap = true;
+                      if (uncovered.length <= 5) {
+                        gapDetails = `Категорії з кількістю учасників: ${uncovered.join(", ")} не отримають жодної сітки.`;
+                      } else {
+                        gapDetails = `Є прогалини (наприклад, для ${uncovered.slice(0, 3).join(", ")}... учасників). Ці категорії будуть пропущені.`;
+                      }
+                    }
+                  }
 
                   return (
-                    <div className="space-y-2">
+                    <div className="space-y-2 pt-1">
                       {hasMinMaxError && (
                         <div className="p-2.5 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400 text-[11px] font-medium leading-relaxed">
                           ⚠️ Помилка: мінімальна межа не може бути більшою за максимальну!
@@ -1593,12 +1910,12 @@ export default function TournamentDetailPage() {
                       )}
                       {hasOverlap && (
                         <div className="p-2.5 rounded-lg border border-yellow-500/20 bg-yellow-500/5 text-yellow-500 text-[11px] font-medium leading-relaxed">
-                          ⚠️ Увага: діапазони перекриваються! Категорії з {seMin} до {rrMax} учасниками отримають Кругову сітку (вона має вищий пріоритет).
+                          ⚠️ Увага: {overlapDetails}
                         </div>
                       )}
-                      {hasGap && (
+                      {hasGap && !hasMinMaxError && (
                         <div className="p-2.5 rounded-lg border border-blue-500/20 bg-blue-500/5 text-blue-400 text-[11px] font-medium leading-relaxed">
-                          ⚠️ Увага: виявлено прогалину! Категорії з {rrMax + 1} до {seMin - 1} учасниками не отримають жодної сітки.
+                          ℹ️ {gapDetails}
                         </div>
                       )}
                     </div>
@@ -1606,6 +1923,109 @@ export default function TournamentDetailPage() {
                 })()}
               </div>
             )}
+
+            {/* Блок попереднього перегляду (Dry Run Preview) */}
+            <div className="border border-border rounded-lg p-3 bg-muted/40 space-y-2 text-xs">
+              <div className="flex items-center justify-between border-b border-border/40 pb-1.5">
+                <span className="font-bold text-foreground flex items-center gap-1.5">
+                  🔍 Попередній аналіз генерації
+                </span>
+                <span className="font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded text-[10px]">
+                  {previewData.totalEligible} кат. буде створено
+                </span>
+              </div>
+
+              {previewData.totalEligible === 0 ? (
+                <p className="text-[11px] text-muted-foreground text-center py-1.5 italic">
+                  Немає нестворених категорій, які підходять під вибрані правила.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {previewData.counts.round_robin.count > 0 && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Кругова сітка (Round Robin):</span>
+                      <span className="font-semibold text-right">
+                        {previewData.counts.round_robin.count} кат.
+                        <span className="text-[10px] text-muted-foreground block font-normal max-w-[200px] truncate">
+                          {previewData.counts.round_robin.examples.join(", ")}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {previewData.counts.single_elimination.count > 0 && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Олімпійська (Single Elimination):</span>
+                      <span className="font-semibold text-right">
+                        {previewData.counts.single_elimination.count} кат.
+                        <span className="text-[10px] text-muted-foreground block font-normal max-w-[200px] truncate">
+                          {previewData.counts.single_elimination.examples.join(", ")}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {previewData.counts.single_repechage.count > 0 && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Олімпійська з репешажем:</span>
+                      <span className="font-semibold text-right">
+                        {previewData.counts.single_repechage.count} кат.
+                        <span className="text-[10px] text-muted-foreground block font-normal max-w-[200px] truncate">
+                          {previewData.counts.single_repechage.examples.join(", ")}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {previewData.counts.double_elimination_full.count > 0 && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Double Elim (Класичний):</span>
+                      <span className="font-semibold text-right">
+                        {previewData.counts.double_elimination_full.count} кат.
+                        <span className="text-[10px] text-muted-foreground block font-normal max-w-[200px] truncate">
+                          {previewData.counts.double_elimination_full.examples.join(", ")}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {previewData.counts.double_elimination_short.count > 0 && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Double Elim (Спрощений):</span>
+                      <span className="font-semibold text-right">
+                        {previewData.counts.double_elimination_short.count} кат.
+                        <span className="text-[10px] text-muted-foreground block font-normal max-w-[200px] truncate">
+                          {previewData.counts.double_elimination_short.examples.join(", ")}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {previewData.counts.swiss && previewData.counts.swiss.count > 0 && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Швейцарська система:</span>
+                      <span className="font-semibold text-right">
+                        {previewData.counts.swiss.count} кат.
+                        <span className="text-[10px] text-muted-foreground block font-normal max-w-[200px] truncate">
+                          {previewData.counts.swiss.examples.join(", ")}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {previewData.counts.none.count > 0 && (
+                    <div className="flex items-start justify-between text-yellow-500">
+                      <span>⚠️ Пропущено (не підходять під межі):</span>
+                      <span className="font-semibold text-right">
+                        {previewData.counts.none.count} кат.
+                        <span className="text-[10px] text-yellow-500/80 block font-normal max-w-[200px] truncate">
+                          {previewData.counts.none.examples.join(", ")}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="border-t border-border/40 pt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>Вже згенеровано: <strong className="text-foreground">{previewData.alreadyGenerated}</strong></span>
+                <span>Замало учасників (&lt;2): <strong className="text-foreground">{previewData.tooFewParticipants}</strong></span>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkDialogOpen(false)}>
@@ -1614,7 +2034,13 @@ export default function TournamentDetailPage() {
             <Button
               variant="sport"
               onClick={handleGenerateAllBracketsWithThresholds}
-              disabled={generatingAllBrackets || (bulkGenMode === "custom" && (rrMin > rrMax || seMin > seMax))}
+              disabled={
+                generatingAllBrackets ||
+                (bulkGenMode === "custom" && (
+                  bulkRules.filter(r => r.enabled).length === 0 ||
+                  bulkRules.filter(r => r.enabled).some(r => r.min > r.max)
+                ))
+              }
             >
               {generatingAllBrackets ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
               Згенерувати сітки

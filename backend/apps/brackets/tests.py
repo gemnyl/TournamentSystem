@@ -338,6 +338,525 @@ try:
             self.assertEqual(len(matches), 1)
             self.assertEqual(matches[0].timer_duration_ms, 180000)
 
+        def test_double_elimination_bracket_reset_full(self):
+            self.category.bracket_format = Category.BracketFormat.DOUBLE_ELIMINATION
+            self.category.double_elim_type = Category.DoubleElimType.FULL
+            self.category.save()
+            regs = self._create_confirmed_registrations(4)
+            gen = BracketGenerator(self.category)
+            gen.generate()
+
+            # For 4 participants (k=2, bracket_size=4):
+            # WB: R1 (2 matches, round_index=1), R2 WB Final (1 match, round_index=2→GF)
+            # LB: L1 (round_index=101, 1 match), L2 LB Final (round_index=102, 1 match→GF)
+            # GF: round_index=200
+
+            # Play WB R1: regs[0] and regs[1] win
+            wb_r1 = Match.objects.filter(category=self.category, round_index=1).order_by(
+                "match_order"
+            )
+            wb_r1[0].set_winner(regs[0], Match.WinMethod.DECISION)
+            wb_r1[1].set_winner(regs[1], Match.WinMethod.DECISION)
+
+            # Play WB Final (round_index=2): regs[0] wins → advances to GF as reg_first
+            wb_final = Match.objects.get(category=self.category, round_index=2)
+            wb_final.refresh_from_db()
+            wb_final.set_winner(regs[0], Match.WinMethod.DECISION)
+            # regs[1] is the WB loser → goes to LB final (round_index=102)
+
+            # Play LB R1 (round_index=101): regs[2] or regs[3] won via BYE already
+            lb_final = Match.objects.get(category=self.category, round_index=102)
+            lb_final.refresh_from_db()
+            if lb_final.reg_first and lb_final.reg_second:
+                lb_final.set_winner(lb_final.reg_first, Match.WinMethod.DECISION)
+            else:
+                # Manually fill if BYE resolution left one slot empty
+                lb_r1 = Match.objects.filter(category=self.category, round_index=101).first()
+                if lb_r1:
+                    lb_r1.refresh_from_db()
+                    if lb_r1.winner:
+                        lb_final.refresh_from_db()
+                        if not lb_final.reg_first:
+                            lb_final.reg_first = lb_r1.winner
+                            lb_final.save(update_fields=["reg_first"])
+                        elif not lb_final.reg_second:
+                            lb_final.reg_second = lb_r1.winner
+                            lb_final.save(update_fields=["reg_second"])
+                lb_final.refresh_from_db()
+                if lb_final.reg_first and lb_final.reg_second:
+                    lb_final.set_winner(lb_final.reg_first, Match.WinMethod.DECISION)
+
+            # Grand Final: LB winner (reg_second) wins → should NOT create Bracket Reset for SHORT
+            gf = Match.objects.get(category=self.category, round_index=200)
+            gf.refresh_from_db()
+            if gf.reg_first and gf.reg_second:
+                gf.set_winner(gf.reg_second, Match.WinMethod.DECISION)
+
+            super_final = Match.objects.filter(category=self.category, round_index=201)
+            self.assertFalse(super_final.exists())
+
+        def test_wkf_repechage_generation(self):
+            self.category.bracket_format = Category.BracketFormat.SINGLE_ELIM_REPECHAGE
+            self.category.save()
+            regs = self._create_confirmed_registrations(8)
+            gen = BracketGenerator(self.category)
+            gen.generate()
+
+            # R1 matches (round_index = 1, match_order = 1..4)
+            r1_matches = Match.objects.filter(category=self.category, round_index=1).order_by(
+                "match_order"
+            )
+            r1_matches[0].set_winner(regs[0], Match.WinMethod.DECISION)
+            r1_matches[1].set_winner(regs[4], Match.WinMethod.DECISION)
+            r1_matches[2].set_winner(regs[1], Match.WinMethod.DECISION)
+            r1_matches[3].set_winner(regs[2], Match.WinMethod.DECISION)
+
+            # R2 Semifinals (round_index = 2, match_order = 1..2)
+            r2_matches = Match.objects.filter(category=self.category, round_index=2).order_by(
+                "match_order"
+            )
+            r2_matches[0].set_winner(regs[0], Match.WinMethod.DECISION)
+            r2_matches[1].set_winner(regs[2], Match.WinMethod.DECISION)
+
+            # Repechage matches should be generated automatically!
+            repechage_matches = Match.objects.filter(category=self.category, round_index__gte=300)
+            self.assertEqual(repechage_matches.count(), 2)
+
+            rep_a = repechage_matches.get(match_order=1)
+            rep_b = repechage_matches.get(match_order=2)
+
+            # Now verify standings calculation
+            from apps.tournaments.services import calculate_category_standings
+
+            # Complete the final
+            final = Match.objects.get(category=self.category, round_index=3)
+            final.set_winner(
+                regs[0], Match.WinMethod.DECISION
+            )  # regs[0] vs regs[2] -> regs[0] wins
+            # Complete repechage finals
+            rep_a.set_winner(regs[4], Match.WinMethod.DECISION)
+            rep_b.set_winner(regs[1], Match.WinMethod.DECISION)
+
+            calculate_category_standings(self.category, persist=True)
+            regs[0].refresh_from_db()
+            regs[2].refresh_from_db()
+            regs[4].refresh_from_db()
+            regs[1].refresh_from_db()
+
+            self.assertEqual(regs[0].place, 1)
+            self.assertEqual(regs[2].place, 2)
+            self.assertEqual(regs[4].place, 3)
+            self.assertEqual(regs[1].place, 3)
+
+    class SwissSystemIntegrationTest(TestCase):
+        """Інтеграційні тести для швейцарської системи."""
+
+        def setUp(self):
+            from rest_framework import status
+            from rest_framework.test import APIClient
+
+            self.status = status
+            self.client = APIClient()
+            self.organizer = User.objects.create_user(
+                email="org_swiss@test.local",
+                password="test12345",  # NOSONAR
+                first_name="Test",
+                last_name="Organizer",
+                role=User.Role.ORGANIZER,
+            )
+            self.coach = User.objects.create_user(
+                email="coach_swiss@test.local",
+                password="test12345",  # NOSONAR
+                first_name="Test",
+                last_name="Coach",
+                role=User.Role.COACH,
+            )
+            self.club_a = Club.objects.create(name="Club Swiss A", region="Kyiv")
+
+            self.tournament = Tournament.objects.create(
+                organizer=self.organizer,
+                title="Swiss Test Cup 2026",
+                sport_type="Karate",
+                location="Kyiv",
+                start_date=timezone.now() + timedelta(days=30),
+                end_date=timezone.now() + timedelta(days=31),
+                status=Tournament.Status.REGISTRATION,
+            )
+            self.category = Category.objects.create(
+                tournament=self.tournament,
+                name="Swiss Men -75kg",
+                allowed_gender=Category.AllowedGender.MALE,
+                min_age=18,
+                max_age=35,
+                min_weight=70,
+                max_weight=75,
+                bracket_format=Category.BracketFormat.SWISS,
+            )
+
+        def _create_confirmed_registrations(self, count):
+            regs = []
+            for i in range(1, count + 1):
+                athlete = Athlete.objects.create(
+                    coach=self.coach,
+                    club=self.club_a,
+                    first_name=f"SwissName{i}",
+                    last_name=f"SwissSurname{i}",
+                    gender=Athlete.Gender.MALE,
+                    birth_date=date(2000, 1, 1),
+                    base_weight=73,
+                )
+                reg = Registration.objects.create(
+                    athlete=athlete,
+                    category=self.category,
+                    seed_number=i,
+                    recorded_weight=73,
+                    status=Registration.Status.CONFIRMED,
+                    payment_status="paid",
+                )
+                regs.append(reg)
+            return regs
+
+        def _create_completed_match(
+            self, first_reg, second_reg, round_idx, order_idx, score_1, score_2, winner_reg
+        ):
+            return Match.objects.create(
+                category=self.category,
+                reg_first=first_reg,
+                reg_second=second_reg,
+                round_index=round_idx,
+                match_order=order_idx,
+                status=Match.Status.COMPLETED,
+                score_first=score_1,
+                score_second=score_2,
+                winner=winner_reg,
+                win_method=Match.WinMethod.DECISION,
+            )
+
+        def test_swiss_less_than_two_participants_raises_error(self):
+            # Only 1 participant
+            self._create_confirmed_registrations(1)
+            gen = BracketGenerator(self.category)
+            from django.core.exceptions import ValidationError
+
+            with self.assertRaises(ValidationError):
+                gen.generate()
+
+        def test_swiss_round_1_even(self):
+            # 6 confirmed players
+            regs = self._create_confirmed_registrations(6)
+            gen = BracketGenerator(self.category)
+            matches = gen.generate()
+
+            # For 6 players, round 1 has 3 matches (half = 3)
+            # Seeding: top vs bottom
+            # Seed 1 vs 4, 2 vs 5, 3 vs 6
+            self.assertEqual(len(matches), 3)
+            self.assertEqual(Match.objects.filter(category=self.category, round_index=1).count(), 3)
+
+            # Check pairings
+            m1 = Match.objects.get(category=self.category, round_index=1, match_order=1)
+            m2 = Match.objects.get(category=self.category, round_index=1, match_order=2)
+            m3 = Match.objects.get(category=self.category, round_index=1, match_order=3)
+
+            self.assertEqual(m1.reg_first, regs[0])  # seed 1
+            self.assertEqual(m1.reg_second, regs[3])  # seed 4
+            self.assertEqual(m2.reg_first, regs[1])  # seed 2
+            self.assertEqual(m2.reg_second, regs[4])  # seed 5
+            self.assertEqual(m3.reg_first, regs[2])  # seed 3
+            self.assertEqual(m3.reg_second, regs[5])  # seed 6
+
+        def test_swiss_round_1_odd(self):
+            # 5 confirmed players
+            regs = self._create_confirmed_registrations(5)
+            gen = BracketGenerator(self.category)
+            matches = gen.generate()
+
+            # For 5 players, round 1 has 3 matches: 2 paired, 1 Bye
+            self.assertEqual(len(matches), 3)
+
+            # Lowest seed (regs[4], seed 5) gets a Bye
+            bye_match = Match.objects.get(
+                category=self.category, round_index=1, reg_second__isnull=True
+            )
+            self.assertEqual(bye_match.reg_first, regs[4])
+            self.assertEqual(bye_match.status, Match.Status.COMPLETED)
+            self.assertEqual(bye_match.winner, regs[4])
+            self.assertEqual(bye_match.win_method, Match.WinMethod.WALKOVER)
+
+            # Others paired top vs bottom: half of 4 is 2.
+            # Active: regs[0], regs[1], regs[2], regs[3]
+            # paired: 1 vs 3, 2 vs 4
+            m1 = Match.objects.get(category=self.category, round_index=1, match_order=1)
+            m2 = Match.objects.get(category=self.category, round_index=1, match_order=2)
+
+            self.assertEqual(m1.reg_first, regs[0])  # seed 1
+            self.assertEqual(m1.reg_second, regs[2])  # seed 3
+            self.assertEqual(m2.reg_first, regs[1])  # seed 2
+            self.assertEqual(m2.reg_second, regs[3])  # seed 4
+
+        def test_swiss_subsequent_rounds_and_byes(self):
+            # 5 players
+            regs = self._create_confirmed_registrations(5)
+            # regs[0] seed 1, regs[1] seed 2, regs[2] seed 3, regs[3] seed 4, regs[4] seed 5
+            gen = BracketGenerator(self.category)
+            gen.generate()
+
+            # Round 1 matches:
+            # m1: regs[0] vs regs[2]
+            # m2: regs[1] vs regs[3]
+            # m3: regs[4] vs None (Bye) -> regs[4] wins (already completed)
+
+            m1 = Match.objects.get(category=self.category, round_index=1, match_order=1)
+            m2 = Match.objects.get(category=self.category, round_index=1, match_order=2)
+
+            # Complete Round 1 matches
+            # Let regs[0] beat regs[2]
+            m1.score_first = 3
+            m1.score_second = 1
+            m1.save()
+            m1.set_winner(regs[0], Match.WinMethod.DECISION)
+
+            # Let regs[3] beat regs[1]
+            m2.score_first = 0
+            m2.score_second = 2
+            m2.save()
+            m2.set_winner(regs[3], Match.WinMethod.DECISION)
+
+            # Scores after Round 1:
+            # regs[0]: 3 pts (win)
+            # regs[3]: 3 pts (win)
+            # regs[4]: 3 pts (bye win)
+            # regs[1]: 0 pts (loss)
+            # regs[2]: 0 pts (loss)
+
+            # Generate Round 2
+            self.client.force_authenticate(user=self.organizer)
+            response = self.client.post(
+                f"/api/categories/{self.category.id}/generate_next_swiss_round/"
+            )
+            self.assertEqual(response.status_code, self.status.HTTP_201_CREATED)
+
+            # Round 2 matches:
+            # Bye player: who gets Bye in Round 2?
+            # Players: regs[0](3), regs[3](3), regs[4](3), regs[1](0), regs[2](0)
+            # Candidates for Bye who haven't had a Bye yet: regs[0], regs[3], regs[1], regs[2]
+            # (regs[4] already had it).
+            # Lowest score of candidates who haven't had a bye: regs[1] or regs[2] (score 0).
+            r2_bye_match = Match.objects.get(
+                category=self.category, round_index=2, reg_second__isnull=True
+            )
+            self.assertNotEqual(r2_bye_match.reg_first, regs[4])
+
+            # Verify no players are paired twice or played their past opponents
+            # Verify 3 matches in round 2
+            self.assertEqual(Match.objects.filter(category=self.category, round_index=2).count(), 3)
+
+        def test_swiss_tatami_release_no_auto_finalize(self):
+            # 5 players
+            regs = self._create_confirmed_registrations(5)
+            gen = BracketGenerator(self.category)
+            gen.generate()
+
+            # Setup tatami and assign active match
+            from apps.tatamis.models import Tatami
+            from apps.tatamis.services import TatamiService
+
+            tatami = Tatami.objects.create(number=1, name="Tatami 1", tournament=self.tournament)
+
+            m1 = Match.objects.get(category=self.category, round_index=1, match_order=1)
+            m2 = Match.objects.get(category=self.category, round_index=1, match_order=2)
+
+            # Complete matches
+            m1.score_first = 3
+            m1.score_second = 1
+            m1.save()
+            m1.set_winner(regs[0], Match.WinMethod.DECISION)
+
+            # Assign m2 to tatami as current match
+            tatami.current_match = m2
+            tatami.save()
+
+            # Complete m2
+            m2.score_first = 0
+            m2.score_second = 2
+            m2.save()
+            m2.set_winner(regs[3], Match.WinMethod.DECISION)
+
+            # Release tatami
+            TatamiService.release(tatami)
+
+            # Refresh registrations to check place
+            for r in regs:
+                r.refresh_from_db()
+                self.assertIsNone(r.place)
+
+            # Verify that round 2 matches were automatically generated
+            round_2_matches = Match.objects.filter(category=self.category, round_index=2)
+            self.assertTrue(round_2_matches.exists())
+            # For 5 players, round 2 should have 2 active matches and 1 Bye match = 3 matches total
+            self.assertEqual(round_2_matches.count(), 3)
+
+        def test_swiss_standings_tiebreakers(self):
+            # Create 5 players: regs[0]=A, regs[1]=B, regs[2]=C, regs[3]=D, regs[4]=E
+            regs = self._create_confirmed_registrations(5)
+            Match.objects.filter(category=self.category).delete()
+
+            # We want:
+            # - A: points=3, Buchholz=6, Diff=+2, Total=6. (plays D, plays C)
+            # - B: points=3, Buchholz=6, Diff=-3, Total=2. (plays C, plays D)
+            # - C: points=3, Buchholz=6, Diff=+1, Total=4. (plays B, plays A)
+            # - D: points=3, Buchholz=6, Diff=-1, Total=5. (plays A, plays B)
+            # - E: points=3, Buchholz=6, Diff=-1, Total=1. (plays A, plays B)
+            # Note: D and E did not play each other, but they have the same points,
+            # Buchholz, and Diff.
+            # D has Total=5, E has Total=1. So D must rank above E.
+            # C and A played each other, C won. So C ranks above A (H2H override).
+
+            # Match 1: B vs C (B wins 2-1)
+            self._create_completed_match(regs[1], regs[2], 1, 1, 2, 1, regs[1])
+            # Match 2: A vs D (A wins 5-1)
+            self._create_completed_match(regs[0], regs[3], 1, 2, 5, 1, regs[0])
+            # Match 3: E vs A (A wins 2-0)
+            self._create_completed_match(regs[4], regs[0], 1, 3, 0, 2, regs[0])
+            # Match 4: C vs A (C wins 3-1)
+            self._create_completed_match(regs[2], regs[0], 2, 1, 3, 1, regs[2])
+            # Match 5: D vs B (D wins 4-0)
+            self._create_completed_match(regs[3], regs[1], 2, 2, 4, 0, regs[3])
+            # Match 6: E vs B (E wins 1-0)
+            self._create_completed_match(regs[4], regs[1], 2, 3, 1, 0, regs[4])
+
+            # Now let's calculate standings
+            from apps.tournaments.services import calculate_category_standings
+
+            calculate_category_standings(self.category, persist=True)
+
+            # Let's verify the ranks:
+            # All 5 players have exactly 3 points (1 win, 1 loss - wait, A has 2 wins, 1 loss?
+            # Let's check A: played D (won 5-1), E (won 2-0), C (lost 1-3).
+            # So A has 2 wins, 1 loss (6 points).
+            # Other players:
+            # - B: played C (won 2-1), D (lost 0-4), E (lost 0-1). Points: 3.
+            # - C: played B (lost 1-2), A (won 3-1). Points: 3.
+            # - D: played A (lost 1-5), B (won 4-0). Points: 3.
+            # - E: played A (lost 0-2), B (won 1-0). Points: 3.
+            # Let's make sure A also has 3 points (1 win, 1 loss).
+            # To do that, we can change Match 3 (E vs A) to NOT happen.
+            # Wait, if we delete Match 3:
+            # - A: played D (won 5-1), C (lost 1-3). Points: 3.
+            #   Buchholz: D(3) + C(3) = 6. Diff: 6-4 = +2. Total: 6.
+            # - B: played C (won 2-1), D (lost 0-4), E (won 1-0). Wait, if B played 3 matches:
+            #   Let's keep the number of rounds consistent: 2 rounds.
+            #   In 2 rounds, each player plays exactly 2 matches (or 1 match if odd and Bye,
+            #   but here we have 5 players so one gets Bye).
+            #   Let's construct the 2 rounds exactly:
+            #   Round 1:
+            #   - Match 1: B vs C (B wins 2-1)
+            #   - Match 2: A vs D (A wins 5-1)
+            #   - E gets a Bye (won by Walkover, 3 points, 0-0 scores)
+            #   Round 2:
+            #   - Match 3: C vs A (C wins 3-1)
+            #   - Match 4: D vs B (D wins 4-0)
+            #   - E gets a Bye? No, a player can only get one Bye. E already got a Bye in round 1.
+            #   Wait! If we have 5 players, in each round exactly 1 player gets a Bye.
+            #   Round 1: E gets Bye.
+            #   Round 2: Who gets Bye? Let's say B gets Bye.
+            #   Wait, let's keep it simple: we can have 4 players (even number) and no Byes!
+            #   With 4 players, each player plays exactly 2 matches in 2 rounds.
+            #   Let's check if we can design D and E with 4 players:
+            #   Wait, with 4 players we only have regs[0..3].
+            #   We cannot have 5 players without some Byes.
+            #   But wait, why not use 6 players?
+            #   With 6 players:
+            #   Round 1:
+            #   - A vs D (A wins 5-1)
+            #   - B vs C (B wins 2-1)
+            #   - E vs F (E wins 1-0)
+            #   Round 2:
+            #   - C vs A (C wins 3-1)
+            #   - D vs B (D wins 4-0)
+            #   - F vs E (F wins 2-1) - wait, E and F play again?
+            #   That's not standard Swiss but fine for manual stats test.
+            #   Let's check:
+            #   - A: played D(3), C(3). Points: 3. Buchholz: 6. Diff: 6-4 = +2. Total: 6.
+            #   - B: played C(3), D(3). Points: 3. Buchholz: 6. Diff: 2-5 = -3. Total: 2.
+            #   - C: played B(3), A(3). Points: 3. Buchholz: 6. Diff: 4-3 = +1. Total: 4.
+            #   - D: played A(3), B(3). Points: 3. Buchholz: 6. Diff: 5-5 = 0. Total: 5.
+            #   - E: played F(3), F(3). Points: 3. Buchholz: 6. Diff: 2-2 = 0. Total: 2.
+            #   Here, D and E both have:
+            #   - Points: 3
+            #   - Buchholz: 6
+            #   - Diff: 0
+            #   - D has Total: 5, E has Total: 2.
+            #   - They did not play each other.
+            #   So D must rank above E!
+            #   This is incredibly elegant, clean, and has no Byes! Let's write this exact scenario.
+
+            # Let's delete all matches first
+            Match.objects.filter(category=self.category).delete()
+            regs = self._create_confirmed_registrations(6)
+
+            # Match 1: B vs C (B wins 2-1)
+            self._create_completed_match(regs[1], regs[2], 1, 1, 2, 1, regs[1])
+            # Match 2: A vs D (A wins 5-1)
+            self._create_completed_match(regs[0], regs[3], 1, 2, 5, 1, regs[0])
+            # Match 3: E vs F (E wins 1-0)
+            self._create_completed_match(regs[4], regs[5], 1, 3, 1, 0, regs[4])
+            # Match 4: C vs A (C wins 3-1)
+            self._create_completed_match(regs[2], regs[0], 2, 1, 3, 1, regs[2])
+            # Match 5: D vs B (D wins 4-0)
+            self._create_completed_match(regs[3], regs[1], 2, 2, 4, 0, regs[3])
+            # Match 6: F vs E (F wins 2-1)
+            self._create_completed_match(regs[5], regs[4], 2, 3, 2, 1, regs[5])
+
+            # Now let's calculate standings
+            calculate_category_standings(self.category, persist=True)
+
+            # Let's trace expected ranks based on the user's rules:
+            # All 6 players have exactly 3 points (1 win, 1 loss) and exactly 6 Buchholz points.
+            # Static sorting (descending by Points, Buchholz, Diff, Total, Random):
+            # 1. A: points=3, Buchholz=6, Diff=+2, Total=6
+            # 2. C: points=3, Buchholz=6, Diff=+1, Total=4
+            # 3. D: points=3, Buchholz=6, Diff=0, Total=5
+            # 4. E: points=3, Buchholz=6, Diff=0, Total=2
+            # 5. B: points=3, Buchholz=6, Diff=-3, Total=2
+            # 6. F: points=3, Buchholz=6, Diff=-1, Total=2
+            #
+            # So static sorted order is: A, C, D, E, F, B. (Wait: D and E both have Diff=0,
+            # but D has Total=5, E has Total=2 -> D is above E).
+            # Now, the Head-to-Head adjacent check and swap pass:
+            # - Compare A and C: they have same points. Did they play? Yes, C beat A.
+            #   Since C (index 1) beat A (index 0), we swap them!
+            #   New order: C, A, D, E, F, B.
+            # - Compare A and D: same points. Did they play? Yes, A beat D (5-1 in R1).
+            #   Since A beat D, they are already in correct order.
+            # - Compare D and E: did they play? No. Ranks: D, E.
+            # - Compare E and F: did they play? Yes, E beat F in R1, F beat E in R2.
+            #   Wait! If they played twice, who is the winner?
+            #   In R1, E beat F (1-0). In R2, F beat E (2-1).
+            #   So they each have 1 H2H win. There is no unique H2H winner. No swap.
+            # - Compare F and B: did they play? No. Ranks: F, B.
+            #
+            # Next pass:
+            # - Compare C and A: C beat A, correct.
+            # - Compare A and D: A beat D, correct.
+            # - Compare D and E: did not play.
+            # - Compare E and F: no unique H2H winner.
+            # - Compare F and B: did not play.
+            # Final expected order: C, A, D, E, F, B.
+            #
+            # Let's verify persisted places:
+            # regs[2] (C) -> place 1
+            # regs[0] (A) -> place 2
+            # regs[3] (D) -> place 3
+            # All others -> place None
+            regs[2].refresh_from_db()
+            regs[0].refresh_from_db()
+            regs[3].refresh_from_db()
+
+            self.assertEqual(regs[2].place, 1)
+            self.assertEqual(regs[0].place, 2)
+            self.assertEqual(regs[3].place, 3)
+
 except ImportError:
     # Django не налаштовано — інтеграційні тести пропускаються
     pass

@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search, Loader2, Check, ShieldAlert, Award, Calendar, MapPin, RefreshCw } from "lucide-react";
+import { Search, Loader2, Check, ShieldAlert, Award, Calendar, MapPin, RefreshCw, Trophy } from "lucide-react";
 import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useTournamentSocket } from "@/hooks/useTournamentSocket";
@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { BracketView } from "@/components/bracket/BracketView";
+import { MatchCard } from "@/components/bracket/MatchCard";
 import type { Tournament, Registration, Category, Match, BracketResponse } from "@/types/api";
 
 function getStatusBadgeClass(status: string) {
@@ -896,16 +897,74 @@ function CategoryBracketDialog({ categoryId, onClose }: Readonly<CategoryBracket
 
   const renderBracketContent = () => {
     if (isLoading && !bracket) {
-      return <Loader2 className="w-8 h-8 animate-spin text-amber-500" />;
-    }
-    if (bracket && bracket.rounds.length > 0) {
       return (
-        <div className="w-full">
-          <BracketView bracket={bracket} />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
         </div>
       );
     }
-    return <p className="text-slate-500 text-sm">Сітка порожня або виникла помилка завантаження.</p>;
+    if (bracket && bracket.rounds.length > 0) {
+      return (
+        <div className="w-full space-y-6">
+          <BracketView bracket={bracket} />
+          {bracket.format === "single_repechage" && (
+            <div className="mt-8 border-t border-slate-800 pt-6 space-y-4">
+              <h2 className="text-sm font-bold tracking-tight text-white flex items-center gap-2 select-none">
+                <Trophy className="w-4 h-4 text-amber-500" /> Втішні поєдинки (Репешаж)
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Пул А */}
+                <div className="space-y-3">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2 select-none">
+                    Пул А (Верхня половина сітки)
+                  </div>
+                  <div className="flex flex-col items-center gap-4">
+                    {bracket.rounds
+                      .flat()
+                      .filter((m) => m.round_index >= 300 && m.match_order === 1)
+                      .sort((a, b) => a.round_index - b.round_index)
+                      .map((match) => (
+                        <div key={match.id} className="relative flex items-center justify-center w-full">
+                          <MatchCard match={match} />
+                        </div>
+                      ))}
+                    {bracket.rounds.flat().filter((m) => m.round_index >= 300 && m.match_order === 1).length === 0 && (
+                      <div className="text-xs text-slate-500 italic py-4 select-none">Очікує результатів півфіналів...</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Пул Б */}
+                <div className="space-y-3">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2 select-none">
+                    Пул Б (Нижня половина сітки)
+                  </div>
+                  <div className="flex flex-col items-center gap-4">
+                    {bracket.rounds
+                      .flat()
+                      .filter((m) => m.round_index >= 300 && m.match_order === 2)
+                      .sort((a, b) => a.round_index - b.round_index)
+                      .map((match) => (
+                        <div key={match.id} className="relative flex items-center justify-center w-full">
+                          <MatchCard match={match} />
+                        </div>
+                      ))}
+                    {bracket.rounds.flat().filter((m) => m.round_index >= 300 && m.match_order === 2).length === 0 && (
+                      <div className="text-xs text-slate-500 italic py-4 select-none">Очікує результатів півфіналів...</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center justify-center py-12">
+        <p className="text-slate-500 text-sm">Сітка порожня або виникла помилка завантаження.</p>
+      </div>
+    );
   };
 
   return (
@@ -921,7 +980,7 @@ function CategoryBracketDialog({ categoryId, onClose }: Readonly<CategoryBracket
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-4 overflow-x-auto min-h-[300px] flex items-center justify-center">
+        <div className="py-2 min-h-[300px] flex flex-col justify-start">
           {renderBracketContent()}
         </div>
       </DialogContent>

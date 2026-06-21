@@ -110,14 +110,16 @@ export function formatAthleteName(ath: any): string {
 export function formatRegistrationName(reg: any): string {
   if (!reg) return "";
   if (reg.athlete) {
-    return formatAthleteName(reg.athlete);
+    const name = formatAthleteName(reg.athlete);
+    if (name) return name;
   }
   if (reg.team) {
     const teamName = reg.team.name;
     const athletesList = reg.team.athletes?.map((a: any) => formatAthleteName(a)).join(", ");
-    return athletesList ? `${teamName} (${athletesList})` : teamName;
+    const name = athletesList ? `${teamName} (${athletesList})` : teamName;
+    if (name) return name;
   }
-  return `Учасник #${reg.id}`;
+  return reg.id ? `Учасник #${reg.id}` : "";
 }
 
 export function formatRegistrationClub(reg: any): string {

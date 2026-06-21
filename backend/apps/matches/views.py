@@ -99,6 +99,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             action_func(*args, **kwargs)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        match.refresh_from_db()
         last_event = match.events.order_by("-sequence").first()
         broadcast_match_event(match, last_event)
         return Response(MatchSerializer(match).data)

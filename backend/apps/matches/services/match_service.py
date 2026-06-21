@@ -366,33 +366,65 @@ class MatchService:
 
         from apps.common.broadcast import broadcast_match_event
 
-        broadcast_match_event(m, event)
+        transaction.on_commit(lambda: broadcast_match_event(m, event))
+
+        pass
+
         return m
+
+    def _can_clear_match_cascade(self, match: Match) -> tuple[bool, str]:
+        """
+        Рекурсивно перевіряє, чи можна безпечно очистити поєдинок у каскаді скидання.
+        """
+        match.refresh_from_db()
+
+        # Якщо матч запланований, перевіряємо відсутність балів/попереджень
+        if match.status == Match.Status.SCHEDULED:
+            if (
+                match.score_first > 0
+                or match.score_second > 0
+                or match.warnings_first > 0
+                or match.warnings_second > 0
+            ):
+                return (
+                    False,
+                    "Не можна скинути бій, оскільки в одному з наступних поєдинків "
+                    "уже є набрані бали або попередження.",
+                )
+            return True, ""
+
+        # Якщо матч завершений як технічний BYE (walkover), його можна скинути,
+        # але тільки якщо його власні наступні матчі теж можна безпечно скинути.
+        if match.status == Match.Status.COMPLETED and match.win_method == Match.WinMethod.WALKOVER:
+            if match.next_match:
+                can_clear, err = self._can_clear_match_cascade(match.next_match)
+                if not can_clear:
+                    return False, err
+            if match.loser_next_match:
+                can_clear, err = self._can_clear_match_cascade(match.loser_next_match)
+                if not can_clear:
+                    return False, err
+            return True, ""
+
+        # Будь-який інший статус (триває, або завершений із реальними боями) не можна скинути
+        return (
+            False,
+            "Не можна скинути бій, оскільки один з наступних поєдинків "
+            "уже розпочався або заверсився.",
+        )
 
     def can_reset_match(self) -> tuple[bool, str]:
         """Перевіряє, чи можна безпечно скинути поєдинок."""
         m = self.match
-        if not m.next_match:
-            return True, ""
+        if m.next_match:
+            can_clear, err = self._can_clear_match_cascade(m.next_match)
+            if not can_clear:
+                return False, err
 
-        nxt = m.next_match
-        if nxt.status != Match.Status.SCHEDULED:
-            return (
-                False,
-                "Не можна скинути бій, оскільки наступний поєдинок уже розпочався або заверсився.",
-            )
-
-        if (
-            nxt.score_first > 0
-            or nxt.score_second > 0
-            or nxt.warnings_first > 0
-            or nxt.warnings_second > 0
-        ):
-            return (
-                False,
-                "Не можна скинути бій, оскільки в наступному "
-                "поєдинку вже є набрані бали або попередження.",
-            )
+        if m.loser_next_match:
+            can_clear, err = self._can_clear_match_cascade(m.loser_next_match)
+            if not can_clear:
+                return False, err
 
         return True, ""
 
@@ -517,11 +549,41 @@ class MatchService:
         if m.parent_team_match:
             self._handle_parent_reset_update(m)
 
+        # Знаходимо татамі, які пов'язані з цим матчем або наступними матчами
+        # (куди помилково просунувся атлет)
+        from django.db.models import Q
+
+        from apps.tatamis.models import Tatami
+
+        next_matches_ids = []
+        if m.next_match_id:
+            next_matches_ids.append(m.next_match_id)
+        if m.loser_next_match_id:
+            next_matches_ids.append(m.loser_next_match_id)
+
+        query = Q(current_match=m)
+        if next_matches_ids:
+            query |= Q(current_match_id__in=next_matches_ids)
+        if m.tatami_id:
+            query |= Q(id=m.tatami_id)
+
+        tatamis_to_sync = list(Tatami.objects.filter(query).distinct())
+
+        for t in tatamis_to_sync:
+            # Скидаємо на цей відкочений поєдинок
+            t.current_match = m
+            t.active_results_category = None
+            t.save(update_fields=["current_match", "active_results_category"])
+
         event = self._write_event(MatchEvent.EventType.RESET, {}, judge)
 
-        from apps.common.broadcast import broadcast_match_event
+        from apps.common.broadcast import broadcast_match_event, broadcast_tatami_state
 
-        broadcast_match_event(m, event)
+        # Викликаємо бродкасти після успішного коміту транзакції
+        transaction.on_commit(lambda: broadcast_match_event(m, event))
+        for t in tatamis_to_sync:
+            transaction.on_commit(lambda t_inst=t: broadcast_tatami_state(t_inst))
+
         return m
 
     @transaction.atomic
@@ -591,22 +653,87 @@ class MatchService:
         broadcast_match_event(m, event)
         return m
 
+    def _clear_registration_from_match_tree(self, match: Match, reg) -> None:
+        """
+        Рекурсивно очищає учасника (реєстрацію) з матчу та каскадно скидає
+        всі його подальші поєдинки в сітці.
+        """
+        if not reg:
+            return
+
+        match.refresh_from_db()
+
+        # Перевіряємо, чи є цей учасник у матчі
+        if match.reg_first_id != reg.id and match.reg_second_id != reg.id:
+            return
+
+        old_winner = None
+        old_loser = None
+        if match.status == Match.Status.COMPLETED or match.winner_id is not None:
+            old_winner = match.winner
+            if match.winner_id == match.reg_first_id:
+                old_loser = match.reg_second
+            else:
+                old_loser = match.reg_first
+
+        # Очищаємо відповідний слот
+        if match.reg_first_id == reg.id:
+            match.reg_first = None
+        else:
+            match.reg_second = None
+
+        # Скидаємо поля матчу
+        match.status = Match.Status.SCHEDULED
+        match.winner = None
+        match.win_method = ""
+        match.score_first = 0
+        match.score_second = 0
+        match.save(
+            update_fields=[
+                "reg_first",
+                "reg_second",
+                "status",
+                "winner",
+                "win_method",
+                "score_first",
+                "score_second",
+            ]
+        )
+        from apps.common.broadcast import broadcast_match_update
+
+        transaction.on_commit(lambda: broadcast_match_update(match))
+
+        # Рекурсивний каскад:
+        # 1. Очищаємо старого переможця з next_match
+        if old_winner and match.next_match:
+            self._clear_registration_from_match_tree(match.next_match, old_winner)
+        # 2. Очищаємо старого програвшого з loser_next_match
+        if old_loser and match.loser_next_match:
+            self._clear_registration_from_match_tree(match.loser_next_match, old_loser)
+
     def _clear_winner_from_next_match(self):
         m = self.match
-        if m.next_match:
-            nxt = m.next_match
-            nxt_updated = False
-            if m.winner == nxt.reg_first:
-                nxt.reg_first = None
-                nxt_updated = True
-            elif m.winner == nxt.reg_second:
-                nxt.reg_second = None
-                nxt_updated = True
-            if nxt_updated:
-                nxt.save(update_fields=["reg_first", "reg_second"])
-                from apps.common.broadcast import broadcast_match_update
+        # Якщо це Grand Final у Double Elimination, видаляємо створений Bracket Reset
+        if m.round_index == 200:
+            bracket_resets = Match.objects.filter(category=m.category, round_index=201)
+            for br in bracket_resets:
+                if br.tatami and br.tatami.current_match_id == br.id:
+                    br.tatami.current_match = m
+                    br.tatami.save(update_fields=["current_match"])
+            bracket_resets.delete()
+            m.redirect_to_match_id = None
 
-                broadcast_match_update(nxt)
+        # Визначаємо переможця та програвшого поточного матчу перед скиданням
+        winner = m.winner
+        loser = m.reg_second if m.winner == m.reg_first else m.reg_first
+
+        # Рекурсивно очищаємо переможця з наступного матчу (якщо є)
+        if m.next_match and winner:
+            self._clear_registration_from_match_tree(m.next_match, winner)
+
+        # Рекурсивно очищаємо програвшого з наступного матчу для тих, хто програв (якщо є)
+        if m.loser_next_match and loser:
+            self._clear_registration_from_match_tree(m.loser_next_match, loser)
 
     @transaction.atomic
     def set_judges_count(self, judges_count: int, judge=None) -> Match:

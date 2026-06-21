@@ -12,6 +12,7 @@ import { toast } from "@/hooks/use-toast";
 import api from "@/lib/api";
 import KumiteOperatorControls from "./KumiteOperatorControls";
 import { cn, getErrorMessage, formatAthleteName, formatRegistrationName } from "@/lib/utils";
+import { getRoundName } from "@/lib/bracketUtils";
 import type { Match, ScoreAction } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
 
@@ -27,6 +28,8 @@ interface PointsOperatorPanelProps {
   onCompleteAndNext?: (winner: "aka" | "ao" | "draw", winMethod: string) => void;
   onNextMatch?: () => void;
   disabled?: boolean;
+  allMatches?: Match[];
+  bracketFormat?: string;
 }
 
 function getSuggestedWinner(
@@ -78,9 +81,10 @@ export default function PointsOperatorPanel({
   serverTimeOffset,
   onMatchUpdate,
   onRelease,
-  onCompleteAndNext,
   onNextMatch,
   disabled,
+  allMatches,
+  bracketFormat,
 }: Readonly<PointsOperatorPanelProps>) {
   const { tid } = useParams<{ tid: string }>();
   const [winnerDialog, setWinnerDialog] = useState<"ao" | "aka" | null>(null);
@@ -171,30 +175,25 @@ export default function PointsOperatorPanel({
 
   const handleSuggestedComplete = async () => {
     if (!suggestedWinner) return;
-    if (onCompleteAndNext) {
-      const method = suggestedWinner === "draw" ? "draw" : "points";
-      onCompleteAndNext(suggestedWinner, method);
-    } else {
-      setBusy(true);
-      try {
-        let updated: Match;
-        if (suggestedWinner === "draw") {
-          const { data } = await api.post<Match>(`/matches/${match.id}/set_draw/`);
-          updated = data;
-        } else {
-          const { data } = await api.post<Match>(`/matches/${match.id}/set_winner/`, {
-            corner: suggestedWinner,
-            win_method: "points",
-          });
-          updated = data;
-        }
-        onMatchUpdate(updated);
-        toast({ title: "Результат успішно зафіксовано!" });
-      } catch {
-        toast({ title: "Помилка при фіксації результату", variant: "destructive" });
-      } finally {
-        setBusy(false);
+    setBusy(true);
+    try {
+      let updated: Match;
+      if (suggestedWinner === "draw") {
+        const { data } = await api.post<Match>(`/matches/${match.id}/set_draw/`);
+        updated = data;
+      } else {
+        const { data } = await api.post<Match>(`/matches/${match.id}/set_winner/`, {
+          corner: suggestedWinner,
+          win_method: "points",
+        });
+        updated = data;
       }
+      onMatchUpdate(updated);
+      toast({ title: "Результат успішно зафіксовано!" });
+    } catch {
+      toast({ title: "Помилка при фіксації результату", variant: "destructive" });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -227,7 +226,7 @@ export default function PointsOperatorPanel({
       {/* Match info */}
       <div className="flex items-center justify-between text-xs text-muted-foreground bg-zinc-950/20 px-3 py-1.5 rounded-lg border border-border/20">
         <div>
-          Раунд {match.round_index}, Поєдинок {match.match_order} · Категорія: <span className="font-bold text-foreground">{match.category_name || (match.category as unknown as { name?: string })?.name}</span>
+          {getRoundName(match, allMatches ?? [], bracketFormat)}, Поєдинок {match.match_order} · Категорія: <span className="font-bold text-foreground">{match.category_name || (match.category as unknown as { name?: string })?.name}</span>
         </div>
         {match.status === "completed" && (
           <span className="text-green-400 font-bold uppercase tracking-wider">Завершено</span>
@@ -276,9 +275,9 @@ export default function PointsOperatorPanel({
                 size="sm"
                 disabled={busy}
                 onClick={handleSuggestedComplete}
-                className="bg-green-600 hover:bg-green-500 text-white font-bold px-6 py-2 shadow-lg border border-green-500/50 uppercase tracking-wide text-xs"
+                className="bg-green-600 hover:bg-green-500 text-white font-bold px-6 py-2 shadow-lg border border-green-500/50 uppercase tracking-wide text-xs animate-pulse"
               >
-                Наступний бій
+                {suggestedWinner === "aka" ? "Підтвердити перемогу AKA" : suggestedWinner === "ao" ? "Підтвердити перемогу AO" : "Підтвердити нічию"}
               </Button>
             </>
           ) : (

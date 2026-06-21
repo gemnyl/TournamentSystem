@@ -89,7 +89,8 @@ export interface Tournament {
 
 // ─── Категорія ──────────────────────────────────────────────────────────────
 
-export type BracketFormat = "single_elimination" | "double_elimination" | "round_robin";
+export type BracketFormat = "single_elimination" | "double_elimination" | "round_robin" | "single_repechage" | "swiss";
+export type DoubleElimType = "full" | "short";
 export type CategoryStatus = TournamentStatus;
 
 export interface Category {
@@ -107,6 +108,7 @@ export interface Category {
   match_duration_seconds: number;
   bracket_format: BracketFormat;
   bracket_format_display: string;
+  double_elim_type?: DoubleElimType | null;
   status: CategoryStatus;
   confirmed_registrations_count: number;
   has_bracket: boolean;
@@ -197,6 +199,8 @@ export interface Match {
   is_team_bouts_supported?: boolean;
   tournament_id?: number;
   tournament_title?: string;
+  is_bracket_reset?: boolean;
+  redirect_to_match_id?: number | null;
 }
 
 // ─── Рулсет ─────────────────────────────────────────────────────────────────

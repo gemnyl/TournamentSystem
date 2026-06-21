@@ -44,6 +44,7 @@ class CategorySerializer(serializers.ModelSerializer):
             "match_duration_seconds",
             "bracket_format",
             "bracket_format_display",
+            "double_elim_type",
             "confirmed_registrations_count",
             "has_bracket",
             "status",
