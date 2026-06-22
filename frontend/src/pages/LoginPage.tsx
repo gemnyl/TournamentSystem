@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { GoogleLogin } from "@react-oauth/google";
+import { toast } from "@/hooks/use-toast";
 
 const loginSchema = z.object({
   email: z.string().email("Введіть коректний email"),
@@ -18,7 +20,7 @@ const loginSchema = z.object({
 type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -38,8 +40,16 @@ export default function LoginPage() {
       } else {
         navigate("/tournaments");
       }
-    } catch {
-      // toast вже показаний через axios interceptor
+    } catch (err) {
+      const axiosErr = err as { response?: { data?: { non_field_errors?: string[]; detail?: string } } };
+      const errorMsg = axiosErr.response?.data?.non_field_errors?.[0] || axiosErr.response?.data?.detail;
+      if (errorMsg === "email_not_verified") {
+        toast({
+          title: "Email не підтверджено",
+          description: "Будь ласка, введіть код підтвердження, надісланий на вашу пошту.",
+        });
+        navigate("/confirm-email", { state: { email: data.email } });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -71,22 +81,6 @@ export default function LoginPage() {
           <p className="text-slate-400 text-lg leading-relaxed max-w-sm mx-auto">
             Система проведення турнірних змагань з єдиноборств
           </p>
-          <div className="mt-10 p-4 rounded-xl border border-white/10 bg-white/5 text-left">
-            <p className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-3">
-              Демо облікові записи
-            </p>
-            {[
-              { role: "Організатор", email: "organizer@demo.local" },
-              { role: "Тренер",      email: "coach1@demo.local"    },
-              { role: "Суддя",       email: "judge@demo.local"     },
-            ].map(({ role, email }) => (
-              <div key={email} className="flex justify-between text-xs py-1 border-b border-white/5 last:border-0">
-                <span className="text-amber-400">{role}</span>
-                <span className="text-slate-400 font-mono">{email}</span>
-              </div>
-            ))}
-            <p className="text-xs text-slate-600 mt-2">Пароль: demo12345</p>
-          </div>
         </div>
       </div>
 
@@ -136,6 +130,60 @@ export default function LoginPage() {
               {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Увійти <ArrowRight className="w-4 h-4" /></>}
             </Button>
           </form>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">або увійти за допомогою</span>
+            </div>
+          </div>
+
+          <div className="flex justify-center">
+            <GoogleLogin
+              onSuccess={async (credentialResponse) => {
+                if (credentialResponse.credential) {
+                  try {
+                    const token = credentialResponse.credential;
+                    const base64Url = token.split('.')[1];
+                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                    }).join(''));
+                    const decoded = JSON.parse(jsonPayload);
+
+                    await googleLogin(
+                      token,
+                      decoded.email,
+                      decoded.given_name || "",
+                      decoded.family_name || ""
+                    );
+
+                    toast({
+                      title: "Успішний вхід",
+                      description: "Ви успішно увійшли через Google!",
+                    });
+
+                    const user = useAuthStore.getState().user;
+                    if (user?.role === "coach") {
+                      navigate("/coach/dashboard");
+                    } else if (user?.role === "staff") {
+                      navigate("/staff");
+                    } else {
+                      navigate("/tournaments");
+                    }
+                  } catch (err) {
+                    console.error("Google login failed", err);
+                  }
+                }
+              }}
+              onError={() => {
+                console.log("Login Failed");
+              }}
+              theme="filled_black"
+            />
+          </div>
 
           <p className="text-center text-sm text-muted-foreground mt-6">
             Немає акаунту?{" "}

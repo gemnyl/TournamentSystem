@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search, Loader2, Check, ShieldAlert, Award, Calendar, MapPin, RefreshCw, Trophy } from "lucide-react";
+import { Search, Loader2, Check, Award, Calendar, MapPin, RefreshCw, Trophy } from "lucide-react";
 import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useTournamentSocket } from "@/hooks/useTournamentSocket";
@@ -18,7 +18,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { BracketView } from "@/components/bracket/BracketView";
 import { MatchCard } from "@/components/bracket/MatchCard";
-import type { Tournament, Registration, Category, Match, BracketResponse } from "@/types/api";
+import type { Tournament, Registration, Category, Match, BracketResponse, RoleRequest } from "@/types/api";
+
+const ROLE_LABELS: Record<string, string> = {
+  organizer: "Організатор",
+  coach:     "Тренер",
+  judge:     "Суддя",
+  spectator: "Глядач",
+  staff:     "Персонал",
+};
 
 function getStatusBadgeClass(status: string) {
   switch (status) {
@@ -71,6 +79,20 @@ export default function StaffDashboardPage() {
   const [weighInReg, setWeighInReg] = useState<Registration | null>(null);
   const [weighInValue, setWeighInValue] = useState("");
   const [submittingWeighIn, setSubmittingWeighIn] = useState(false);
+
+  // Role verification states
+  const [roleRequests, setRoleRequests] = useState<RoleRequest[]>([]);
+  const [loadingRoleRequests, setLoadingRoleRequests] = useState(false);
+  const [reviewDialogReq, setReviewDialogReq] = useState<RoleRequest | null>(null);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [reviewStatus, setReviewStatus] = useState<"approved" | "rejected" | "">("");
+  const [activeReviewReq, setActiveReviewReq] = useState<RoleRequest | null>(null);
+
+  useEffect(() => {
+    if (reviewDialogReq) {
+      setActiveReviewReq(reviewDialogReq);
+    }
+  }, [reviewDialogReq]);
 
   const updateQueryParam = (key: string, value: string) => {
     setSearchParams((prev) => {
@@ -126,6 +148,8 @@ export default function StaffDashboardPage() {
         if (list.length > 0) {
           const preselected = list.find((t) => String(t.id) === initialTournamentId);
           handleSelectTournament(preselected || list[0]);
+        } else {
+          setActiveTab("role_requests");
         }
       } catch (err) {
         console.error("fetchTournaments error:", err);
@@ -178,6 +202,211 @@ export default function StaffDashboardPage() {
       setCategories([]);
     }
   }, [selectedTournament]);
+
+  const fetchPendingRoleRequests = async () => {
+    try {
+      setLoadingRoleRequests(true);
+      const res = await api.get<RoleRequest[] | { results: RoleRequest[] }>("/auth/role-requests/pending/");
+      const list = Array.isArray(res.data) ? res.data : (res.data as { results?: RoleRequest[] }).results || [];
+      setRoleRequests(list);
+    } catch (err) {
+      console.error("Error fetching role requests", err);
+    } finally {
+      setLoadingRoleRequests(false);
+    }
+  };
+
+  const handleReviewRoleRequest = async (reqId: number, status: "approved" | "rejected") => {
+    try {
+      await api.post(`/auth/role-requests/${reqId}/review/`, {
+        status,
+        review_notes: reviewNotes,
+      });
+      toast({
+        title: status === "approved" ? "Запит схвалено" : "Запит відхилено",
+        description: `Запит успішно ${status === "approved" ? "схвалено" : "відхилено"}.`,
+      });
+      setReviewDialogReq(null);
+      setReviewNotes("");
+      fetchPendingRoleRequests();
+    } catch (err) {
+      console.error("Error reviewing role request", err);
+      toast({
+        variant: "destructive",
+        title: "Помилка",
+        description: "Не вдалося зберегти рішення щодо запиту.",
+      });
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingRoleRequests();
+  }, []);
+
+  const renderRoleRequestsCard = () => {
+    return (
+      <Card className="border-slate-800 bg-slate-900/40 backdrop-blur">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <div>
+            <CardTitle className="text-lg font-bold">Очікуючі заявки на верифікацію</CardTitle>
+            <CardDescription>Розгляньте та підтвердіть або відхиліть ролі користувачів.</CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchPendingRoleRequests}
+            disabled={loadingRoleRequests}
+            className="border-slate-800 hover:bg-slate-800 text-slate-300"
+          >
+            {loadingRoleRequests ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loadingRoleRequests ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+            </div>
+          ) : roleRequests.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 text-sm">
+              Немає очікуючих заявок на верифікацію ролей.
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+              <Table>
+                <TableHeader className="bg-slate-900 border-slate-800">
+                  <TableRow className="border-slate-800 text-slate-300">
+                    <TableHead className="w-[180px]">Користувач</TableHead>
+                    <TableHead className="w-[150px]">Бажана роль</TableHead>
+                    <TableHead>Деталі</TableHead>
+                    <TableHead className="w-[150px]">Дата подачі</TableHead>
+                    <TableHead className="w-[180px] text-right">Дії</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="text-slate-300">
+                  {roleRequests.map((req) => (
+                    <TableRow key={req.id} className="border-slate-800 hover:bg-slate-950/20">
+                      <TableCell className="font-semibold">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-xs font-bold text-indigo-400">
+                            {req.user?.photo ? (
+                              <img src={req.user.photo} alt="Avatar" className="w-full h-full object-cover rounded-full" />
+                            ) : (
+                              req.user?.first_name?.[0]?.toUpperCase() || "?"
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-white">
+                              {req.user?.last_name} {req.user?.first_name}
+                            </p>
+                            <p className="text-xs text-slate-400 font-mono">{req.user?.email}</p>
+                            {req.user?.phone && (
+                              <p className="text-[11px] text-slate-500 font-sans mt-0.5">
+                                Тел: {req.user.phone}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {req.requested_role === "coach" && (
+                          <Badge className="bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/15">Тренер</Badge>
+                        )}
+                        {req.requested_role === "judge" && (
+                          <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/15">Суддя</Badge>
+                        )}
+                        {req.requested_role === "organizer" && (
+                          <Badge className="bg-purple-500/15 text-purple-400 border border-purple-500/20 hover:bg-purple-500/15">Організатор</Badge>
+                        )}
+                        {req.requested_role === "spectator" && (
+                          <Badge className="bg-slate-500/15 text-slate-400 border border-slate-500/20 hover:bg-slate-500/15">Глядач</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-[300px]">
+                        {req.requested_role === "coach" && req.club && (
+                          <div className="mb-1 text-xs">
+                            <span className="text-slate-500 font-medium">Клуб:</span>{" "}
+                            <span className="text-amber-400 font-bold">{req.club.name}{req.club.region ? ` (${req.club.region})` : ""}</span>
+                          </div>
+                        )}
+                        {req.requested_role === "judge" && req.referee_category && (
+                          <div className="mb-1 text-xs">
+                            <span className="text-slate-500 font-medium">Суддівська категорія:</span>{" "}
+                            <span className="text-emerald-400 font-bold">{req.referee_category}</span>
+                          </div>
+                        )}
+                        {req.details && (
+                          <div className="text-xs text-slate-400 italic mt-0.5 line-clamp-2" title={req.details}>
+                            &ldquo;{req.details}&rdquo;
+                          </div>
+                        )}
+                        {req.document && (
+                          <div className="mt-1.5">
+                            <a
+                              href={req.document}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 underline font-semibold"
+                            >
+                              📎 Дивитись документ
+                            </a>
+                          </div>
+                        )}
+                        {req.photo_with_id && (
+                          <div className="mt-1.5">
+                            <a
+                              href={req.photo_with_id}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 underline font-semibold"
+                            >
+                              📸 Фото з посвідченням
+                            </a>
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-400">
+                        {new Date(req.created_at).toLocaleDateString("uk-UA", {
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 text-xs font-semibold"
+                            onClick={() => {
+                              setReviewStatus("rejected");
+                              setReviewDialogReq(req);
+                              setReviewNotes("");
+                            }}
+                          >
+                            Відхилити
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
+                            onClick={() => {
+                              setReviewStatus("approved");
+                              setReviewDialogReq(req);
+                              setReviewNotes("");
+                            }}
+                          >
+                            Схвалити
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
 
   // Connect to WebSocket for real-time registration sync
   useTournamentSocket(
@@ -590,6 +819,9 @@ export default function StaffDashboardPage() {
                 <TabsTrigger value="categories" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
                   Категорії змагань ({categories.length})
                 </TabsTrigger>
+                <TabsTrigger value="role_requests" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
+                  Заявки на ролі ({roleRequests.length})
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="registrations" className="space-y-4 outline-none">
@@ -726,15 +958,25 @@ export default function StaffDashboardPage() {
                   ))}
                 </div>
               </TabsContent>
+
+              <TabsContent value="role_requests" className="outline-none space-y-4">
+                {renderRoleRequestsCard()}
+              </TabsContent>
             </Tabs>
           </div>
         ) : (
-          <div className="text-center p-12 bg-slate-900/30 rounded-2xl border border-slate-800">
-            <ShieldAlert className="mx-auto h-12 w-12 text-slate-500 mb-4 animate-bounce" />
-            <h2 className="text-xl font-bold text-slate-300">Немає призначених турнірів</h2>
-            <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
-              Організатор турніру повинен додати вас до списку робочого персоналу, щоб ви могли керувати явкою та зважуванням.
-            </p>
+          <div className="space-y-6">
+            <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="w-full space-y-4">
+              <TabsList className="bg-slate-900 border border-slate-800 p-1">
+                <TabsTrigger value="role_requests" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
+                  Заявки на ролі ({roleRequests.length})
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="role_requests" className="outline-none space-y-4">
+                {renderRoleRequestsCard()}
+              </TabsContent>
+            </Tabs>
           </div>
         )}
       </div>
@@ -830,6 +1072,58 @@ export default function StaffDashboardPage() {
           onClose={() => setSelectedBracketCategoryId(null)}
         />
       )}
+
+      {/* Role Request Review Dialog */}
+      <Dialog open={reviewDialogReq !== null} onOpenChange={(open) => !open && setReviewDialogReq(null)}>
+        <DialogContent className="bg-slate-900 border-slate-800 text-slate-100">
+          <DialogHeader>
+            <DialogTitle>
+              {reviewStatus === "approved" ? "Схвалення запиту на роль" : "Відхилення запиту на роль"}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              {reviewStatus === "approved"
+                ? `Ви підтверджуєте зміну ролі для ${activeReviewReq?.user?.last_name} ${activeReviewReq?.user?.first_name} на ${ROLE_LABELS[activeReviewReq?.requested_role || ""] || activeReviewReq?.requested_role}.`
+                : `Ви відхиляєте запит на роль ${ROLE_LABELS[activeReviewReq?.requested_role || ""] || activeReviewReq?.requested_role} для користувача ${activeReviewReq?.user?.last_name} ${activeReviewReq?.user?.first_name}.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3">
+            <div className="space-y-2">
+              <label htmlFor="review-notes-textarea" className="text-sm font-medium text-slate-300">
+                Коментар секретаря/адміністратора (необов'язково для схвалення, бажано для відхилення):
+              </label>
+              <textarea
+                id="review-notes-textarea"
+                rows={3}
+                placeholder="Введіть причину відхилення або додаткові вказівки для схвалення..."
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                className="flex min-h-[80px] w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-slate-200"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="border-slate-800 hover:bg-slate-800 bg-slate-950 text-slate-300"
+              onClick={() => setReviewDialogReq(null)}
+            >
+              Скасувати
+            </Button>
+            <Button
+              onClick={() => {
+                if (reviewDialogReq && reviewStatus) {
+                  handleReviewRoleRequest(reviewDialogReq.id, reviewStatus as "approved" | "rejected");
+                }
+              }}
+              className={reviewStatus === "approved" ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "bg-rose-600 hover:bg-rose-700 text-white"}
+            >
+              Підтвердити
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

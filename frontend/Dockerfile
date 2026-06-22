@@ -9,6 +9,8 @@ RUN npm ci --ignore-scripts
 
 # Копіюємо решту і збираємо production bundle
 COPY . .
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN npx vite build
 
 # ─── Stage 2: nginx runtime ──────────────────────────────────────────────────
