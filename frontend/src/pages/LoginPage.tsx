@@ -40,8 +40,9 @@ export default function LoginPage() {
       } else {
         navigate("/tournaments");
       }
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.non_field_errors?.[0] || err.response?.data?.detail;
+    } catch (err) {
+      const axiosErr = err as { response?: { data?: { non_field_errors?: string[]; detail?: string } } };
+      const errorMsg = axiosErr.response?.data?.non_field_errors?.[0] || axiosErr.response?.data?.detail;
       if (errorMsg === "email_not_verified") {
         toast({
           title: "Email не підтверджено",

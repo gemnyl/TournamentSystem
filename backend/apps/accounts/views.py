@@ -10,7 +10,7 @@ Views підсистеми облікових записів.
     GET  /api/users/            — список користувачів (тільки для admin)
 """
 
-import random
+import secrets
 from datetime import timedelta
 
 from django.conf import settings
@@ -65,7 +65,7 @@ def send_confirmation_code(user):
     EmailConfirmationCode.objects.filter(user=user).delete()
 
     # Генеруємо новий 6-значний код
-    code = f"{random.randint(100000, 999999)}"
+    code = f"{secrets.randbelow(900000) + 100000}"
     expires_at = timezone.now() + timedelta(minutes=15)
 
     EmailConfirmationCode.objects.create(user=user, code=code, expires_at=expires_at)

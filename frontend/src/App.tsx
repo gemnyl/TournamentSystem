@@ -26,7 +26,7 @@ import PrivacyPolicyPage from "@/pages/PrivacyPolicyPage";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
 export default function App() {
-  const googleClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || "1028308479201-placeholder.apps.googleusercontent.com";
+  const googleClientId = (import.meta as unknown as { env: { VITE_GOOGLE_CLIENT_ID?: string } }).env?.VITE_GOOGLE_CLIENT_ID || "1028308479201-placeholder.apps.googleusercontent.com";
 
   return (
     <GoogleOAuthProvider clientId={googleClientId}>

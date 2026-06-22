@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import api, { authApi } from "@/lib/api";
+import { authApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import {
   User as UserIcon,
@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { Club, RoleRequest } from "@/types/api";
+import type { RoleRequest } from "@/types/api";
 import { ImageCropperDialog } from "@/components/ui/image-cropper-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -86,7 +86,7 @@ export default function ProfilePage() {
   const fetchRoleRequests = () => {
     authApi.get<RoleRequest[]>("/role-requests/")
       .then((res) => {
-        const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        const list = Array.isArray(res.data) ? res.data : (res.data as { results?: RoleRequest[] }).results || [];
         setRoleRequests(list);
       })
       .catch((err) => console.error("Error fetching role requests", err));
@@ -705,7 +705,7 @@ export default function ProfilePage() {
                         <Label htmlFor="requested_role">Бажана роль</Label>
                         <Select
                           value={requestedRole}
-                          onValueChange={(val: any) => setRequestedRole(val)}
+                          onValueChange={(val) => setRequestedRole(val as "coach" | "judge" | "organizer" | "")}
                         >
                           <SelectTrigger id="requested_role">
                             <SelectValue placeholder="Оберіть роль" />

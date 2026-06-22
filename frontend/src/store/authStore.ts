@@ -14,7 +14,7 @@ interface AuthState {
   confirmEmail: (email: string, code: string) => Promise<void>;
   resendConfirmation: (email: string) => Promise<void>;
   updateProfile: (formData: FormData) => Promise<void>;
-  changePassword: (data: any) => Promise<void>;
+  changePassword: (data: Record<string, string>) => Promise<void>;
   googleLogin: (token: string, email: string, firstName: string, lastName: string) => Promise<void>;
   fetchMe: () => Promise<void>;
 }

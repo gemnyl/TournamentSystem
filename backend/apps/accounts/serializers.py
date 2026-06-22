@@ -3,6 +3,7 @@
 """
 
 from django.contrib.auth import authenticate
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.accounts.models import Club, RoleRequest, User
@@ -304,6 +305,6 @@ class ChangePasswordSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password_confirm"]:
             raise serializers.ValidationError(
-                {"new_password_confirm": "Нові паролі не співпадають."}
+                {"new_password_confirm": _("Нові паролі не співпадають.")}
             )
         return attrs

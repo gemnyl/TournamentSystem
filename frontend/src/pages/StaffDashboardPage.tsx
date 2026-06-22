@@ -207,7 +207,7 @@ export default function StaffDashboardPage() {
     try {
       setLoadingRoleRequests(true);
       const res = await api.get<RoleRequest[] | { results: RoleRequest[] }>("/auth/role-requests/pending/");
-      const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+      const list = Array.isArray(res.data) ? res.data : (res.data as { results?: RoleRequest[] }).results || [];
       setRoleRequests(list);
     } catch (err) {
       console.error("Error fetching role requests", err);
@@ -242,6 +242,171 @@ export default function StaffDashboardPage() {
   useEffect(() => {
     fetchPendingRoleRequests();
   }, []);
+
+  const renderRoleRequestsCard = () => {
+    return (
+      <Card className="border-slate-800 bg-slate-900/40 backdrop-blur">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <div>
+            <CardTitle className="text-lg font-bold">Очікуючі заявки на верифікацію</CardTitle>
+            <CardDescription>Розгляньте та підтвердіть або відхиліть ролі користувачів.</CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchPendingRoleRequests}
+            disabled={loadingRoleRequests}
+            className="border-slate-800 hover:bg-slate-800 text-slate-300"
+          >
+            {loadingRoleRequests ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loadingRoleRequests ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+            </div>
+          ) : roleRequests.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 text-sm">
+              Немає очікуючих заявок на верифікацію ролей.
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+              <Table>
+                <TableHeader className="bg-slate-900 border-slate-800">
+                  <TableRow className="border-slate-800 text-slate-300">
+                    <TableHead className="w-[180px]">Користувач</TableHead>
+                    <TableHead className="w-[150px]">Бажана роль</TableHead>
+                    <TableHead>Деталі</TableHead>
+                    <TableHead className="w-[150px]">Дата подачі</TableHead>
+                    <TableHead className="w-[180px] text-right">Дії</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="text-slate-300">
+                  {roleRequests.map((req) => (
+                    <TableRow key={req.id} className="border-slate-800 hover:bg-slate-950/20">
+                      <TableCell className="font-semibold">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-xs font-bold text-indigo-400">
+                            {req.user?.photo ? (
+                              <img src={req.user.photo} alt="Avatar" className="w-full h-full object-cover rounded-full" />
+                            ) : (
+                              req.user?.first_name?.[0]?.toUpperCase() || "?"
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-white">
+                              {req.user?.last_name} {req.user?.first_name}
+                            </p>
+                            <p className="text-xs text-slate-400 font-mono">{req.user?.email}</p>
+                            {req.user?.phone && (
+                              <p className="text-[11px] text-slate-500 font-sans mt-0.5">
+                                Тел: {req.user.phone}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {req.requested_role === "coach" && (
+                          <Badge className="bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/15">Тренер</Badge>
+                        )}
+                        {req.requested_role === "judge" && (
+                          <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/15">Суддя</Badge>
+                        )}
+                        {req.requested_role === "organizer" && (
+                          <Badge className="bg-purple-500/15 text-purple-400 border border-purple-500/20 hover:bg-purple-500/15">Організатор</Badge>
+                        )}
+                        {req.requested_role === "spectator" && (
+                          <Badge className="bg-slate-500/15 text-slate-400 border border-slate-500/20 hover:bg-slate-500/15">Глядач</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-[300px]">
+                        {req.requested_role === "coach" && req.club && (
+                          <div className="mb-1 text-xs">
+                            <span className="text-slate-500 font-medium">Клуб:</span>{" "}
+                            <span className="text-amber-400 font-bold">{req.club.name}{req.club.region ? ` (${req.club.region})` : ""}</span>
+                          </div>
+                        )}
+                        {req.requested_role === "judge" && req.referee_category && (
+                          <div className="mb-1 text-xs">
+                            <span className="text-slate-500 font-medium">Суддівська категорія:</span>{" "}
+                            <span className="text-emerald-400 font-bold">{req.referee_category}</span>
+                          </div>
+                        )}
+                        {req.details && (
+                          <div className="text-xs text-slate-400 italic mt-0.5 line-clamp-2" title={req.details}>
+                            &ldquo;{req.details}&rdquo;
+                          </div>
+                        )}
+                        {req.document && (
+                          <div className="mt-1.5">
+                            <a
+                              href={req.document}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 underline font-semibold"
+                            >
+                              📎 Дивитись документ
+                            </a>
+                          </div>
+                        )}
+                        {req.photo_with_id && (
+                          <div className="mt-1.5">
+                            <a
+                              href={req.photo_with_id}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 underline font-semibold"
+                            >
+                              📸 Фото з посвідченням
+                            </a>
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-slate-400">
+                        {new Date(req.created_at).toLocaleDateString("uk-UA", {
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 text-xs font-semibold"
+                            onClick={() => {
+                              setReviewStatus("rejected");
+                              setReviewDialogReq(req);
+                              setReviewNotes("");
+                            }}
+                          >
+                            Відхилити
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
+                            onClick={() => {
+                              setReviewStatus("approved");
+                              setReviewDialogReq(req);
+                              setReviewNotes("");
+                            }}
+                          >
+                            Схвалити
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
 
   // Connect to WebSocket for real-time registration sync
   useTournamentSocket(
@@ -795,137 +960,7 @@ export default function StaffDashboardPage() {
               </TabsContent>
 
               <TabsContent value="role_requests" className="outline-none space-y-4">
-                <Card className="border-slate-800 bg-slate-900/40 backdrop-blur">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-                    <div>
-                      <CardTitle className="text-lg font-bold">Очікуючі заявки на верифікацію</CardTitle>
-                      <CardDescription>Розгляньте та підтвердіть або відхиліть ролі користувачів.</CardDescription>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={fetchPendingRoleRequests}
-                      disabled={loadingRoleRequests}
-                      className="border-slate-800 hover:bg-slate-800 text-slate-300"
-                    >
-                      {loadingRoleRequests ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                    </Button>
-                  </CardHeader>
-                  <CardContent>
-                    {loadingRoleRequests ? (
-                      <div className="flex justify-center py-8">
-                        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
-                      </div>
-                    ) : roleRequests.length === 0 ? (
-                      <div className="text-center py-12 text-slate-500 text-sm">
-                        Немає очікуючих заявок на верифікацію ролей.
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                        <Table>
-                          <TableHeader className="bg-slate-900 border-slate-800">
-                            <TableRow className="border-slate-800 text-slate-300">
-                              <TableHead className="w-[180px]">Користувач</TableHead>
-                              <TableHead className="w-[150px]">Бажана роль</TableHead>
-                              <TableHead>Деталі</TableHead>
-                              <TableHead className="w-[150px]">Дата подачі</TableHead>
-                              <TableHead className="w-[180px] text-right">Дії</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody className="text-slate-300">
-                            {roleRequests.map((req) => (
-                              <TableRow key={req.id} className="border-slate-800 hover:bg-slate-950/20">
-                                <TableCell className="font-semibold">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-xs font-bold text-indigo-400">
-                                      {req.user?.photo ? (
-                                        <img src={req.user.photo} alt="Avatar" className="w-full h-full object-cover rounded-full" />
-                                      ) : (
-                                        req.user?.first_name?.[0]?.toUpperCase() || "?"
-                                      )}
-                                    </div>
-                                    <div>
-                                      <p className="text-sm font-bold text-white">
-                                        {req.user?.last_name} {req.user?.first_name}
-                                      </p>
-                                      <p className="text-xs text-slate-500 font-medium font-mono">{req.user?.email}</p>
-                                    </div>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  {req.requested_role === "coach" && (
-                                    <Badge className="bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/15">Тренер</Badge>
-                                  )}
-                                  {req.requested_role === "judge" && (
-                                    <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/15">Суддя</Badge>
-                                  )}
-                                  {req.requested_role === "organizer" && (
-                                    <Badge className="bg-purple-500/15 text-purple-400 border border-purple-500/20 hover:bg-purple-500/15">Організатор</Badge>
-                                  )}
-                                  {req.requested_role === "spectator" && (
-                                    <Badge className="bg-slate-500/15 text-slate-400 border border-slate-500/20 hover:bg-slate-500/15">Глядач</Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell className="max-w-[300px]">
-                                  {req.requested_role === "coach" && req.club && (
-                                    <div className="mb-1 text-xs">
-                                      <span className="text-slate-500 font-medium">Клуб:</span>{" "}
-                                      <span className="text-amber-400 font-bold">{req.club.name} ({req.club.region})</span>
-                                    </div>
-                                  )}
-                                  {req.requested_role === "judge" && req.referee_category && (
-                                    <div className="mb-1 text-xs">
-                                      <span className="text-slate-500 font-medium">Суддівська категорія:</span>{" "}
-                                      <span className="text-emerald-400 font-bold">{req.referee_category}</span>
-                                    </div>
-                                  )}
-                                  {req.details && (
-                                    <div className="text-xs text-slate-400 italic mt-0.5 line-clamp-2" title={req.details}>
-                                      &ldquo;{req.details}&rdquo;
-                                    </div>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-xs text-slate-400">
-                                  {new Date(req.created_at).toLocaleDateString("uk-UA", {
-                                    hour: "2-digit",
-                                    minute: "2-digit"
-                                  })}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex justify-end gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 text-xs font-semibold"
-                                      onClick={() => {
-                                        setReviewStatus("rejected");
-                                        setReviewDialogReq(req);
-                                        setReviewNotes("");
-                                      }}
-                                    >
-                                      Відхилити
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
-                                      onClick={() => {
-                                        setReviewStatus("approved");
-                                        setReviewDialogReq(req);
-                                        setReviewNotes("");
-                                      }}
-                                    >
-                                      Схвалити
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                {renderRoleRequestsCard()}
               </TabsContent>
             </Tabs>
           </div>
@@ -939,166 +974,7 @@ export default function StaffDashboardPage() {
               </TabsList>
 
               <TabsContent value="role_requests" className="outline-none space-y-4">
-                <Card className="border-slate-800 bg-slate-900/40 backdrop-blur">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-                    <div>
-                      <CardTitle className="text-lg font-bold">Очікуючі заявки на верифікацію</CardTitle>
-                      <CardDescription>Розгляньте та підтвердіть або відхиліть ролі користувачів.</CardDescription>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={fetchPendingRoleRequests}
-                      disabled={loadingRoleRequests}
-                      className="border-slate-800 hover:bg-slate-800 text-slate-300"
-                    >
-                      {loadingRoleRequests ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 text-slate-400" />}
-                    </Button>
-                  </CardHeader>
-                  <CardContent>
-                    {loadingRoleRequests ? (
-                      <div className="flex justify-center py-8">
-                        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
-                      </div>
-                    ) : roleRequests.length === 0 ? (
-                      <div className="text-center py-12 text-slate-500 text-sm">
-                        Немає очікуючих заявок на верифікацію ролей.
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                        <Table>
-                          <TableHeader className="bg-slate-900 border-slate-800">
-                            <TableRow className="border-slate-800 text-slate-300">
-                              <TableHead className="w-[180px]">Користувач</TableHead>
-                              <TableHead className="w-[150px]">Бажана роль</TableHead>
-                              <TableHead>Деталі</TableHead>
-                              <TableHead className="w-[150px]">Дата подачі</TableHead>
-                              <TableHead className="w-[180px] text-right">Дії</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody className="text-slate-300">
-                            {roleRequests.map((req) => (
-                              <TableRow key={req.id} className="border-slate-800 hover:bg-slate-950/20">
-                                <TableCell className="font-semibold">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-xs font-bold text-indigo-400">
-                                      {req.user?.photo ? (
-                                        <img src={req.user.photo} alt="Avatar" className="w-full h-full object-cover rounded-full" />
-                                      ) : (
-                                        req.user?.first_name?.[0]?.toUpperCase() || "?"
-                                      )}
-                                    </div>
-                                    <div>
-                                      <p className="text-sm font-bold text-white">
-                                        {req.user?.last_name} {req.user?.first_name}
-                                      </p>
-                                      <p className="text-xs text-slate-400 font-mono">{req.user?.email}</p>
-                                      {req.user?.phone && (
-                                        <p className="text-[11px] text-slate-500 font-sans mt-0.5">
-                                          Тел: {req.user.phone}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  {req.requested_role === "coach" && (
-                                    <Badge className="bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/15">Тренер</Badge>
-                                  )}
-                                  {req.requested_role === "judge" && (
-                                    <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/15">Суддя</Badge>
-                                  )}
-                                  {req.requested_role === "organizer" && (
-                                    <Badge className="bg-purple-500/15 text-purple-400 border border-purple-500/20 hover:bg-purple-500/15">Організатор</Badge>
-                                  )}
-                                  {req.requested_role === "spectator" && (
-                                    <Badge className="bg-slate-500/15 text-slate-400 border border-slate-500/20 hover:bg-slate-500/15">Глядач</Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell className="max-w-[300px]">
-                                  {req.requested_role === "coach" && req.club && (
-                                    <div className="mb-1 text-xs">
-                                      <span className="text-slate-500 font-medium">Клуб:</span>{" "}
-                                      <span className="text-amber-400 font-bold">{req.club.name}{req.club.region ? ` (${req.club.region})` : ""}</span>
-                                    </div>
-                                  )}
-                                  {req.requested_role === "judge" && req.referee_category && (
-                                    <div className="mb-1 text-xs">
-                                      <span className="text-slate-500 font-medium">Суддівська категорія:</span>{" "}
-                                      <span className="text-emerald-400 font-bold">{req.referee_category}</span>
-                                    </div>
-                                  )}
-                                  {req.details && (
-                                    <div className="text-xs text-slate-400 italic mt-0.5 line-clamp-2" title={req.details}>
-                                      &ldquo;{req.details}&rdquo;
-                                    </div>
-                                  )}
-                                  {req.document && (
-                                    <div className="mt-1.5">
-                                      <a
-                                        href={req.document}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 underline font-semibold"
-                                      >
-                                        📎 Дивитись документ
-                                      </a>
-                                    </div>
-                                  )}
-                                  {req.photo_with_id && (
-                                    <div className="mt-1.5">
-                                      <a
-                                        href={req.photo_with_id}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 underline font-semibold"
-                                      >
-                                        📸 Фото з посвідченням
-                                      </a>
-                                    </div>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-xs text-slate-400">
-                                  {new Date(req.created_at).toLocaleDateString("uk-UA", {
-                                    hour: "2-digit",
-                                    minute: "2-digit"
-                                  })}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex justify-end gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 text-xs font-semibold"
-                                      onClick={() => {
-                                        setReviewStatus("rejected");
-                                        setReviewDialogReq(req);
-                                        setReviewNotes("");
-                                      }}
-                                    >
-                                      Відхилити
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
-                                      onClick={() => {
-                                        setReviewStatus("approved");
-                                        setReviewDialogReq(req);
-                                        setReviewNotes("");
-                                      }}
-                                    >
-                                      Схвалити
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                {renderRoleRequestsCard()}
               </TabsContent>
             </Tabs>
           </div>
@@ -1238,7 +1114,7 @@ export default function StaffDashboardPage() {
             <Button
               onClick={() => {
                 if (reviewDialogReq && reviewStatus) {
-                  handleReviewRoleRequest(reviewDialogReq.id, reviewStatus as any);
+                  handleReviewRoleRequest(reviewDialogReq.id, reviewStatus as "approved" | "rejected");
                 }
               }}
               className={reviewStatus === "approved" ? "bg-indigo-600 hover:bg-indigo-700 text-white" : "bg-rose-600 hover:bg-rose-700 text-white"}
