@@ -80,6 +80,7 @@ INSTALLED_APPS = [
     "apps.brackets",
     "apps.rulesets",
     "apps.tatamis",
+    "apps.billing",
 ]
 
 MIDDLEWARE = [
@@ -283,3 +284,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ---------------------------------------------------------------------------
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = "noreply@tournamentapp.local"
+
+# ---------------------------------------------------------------------------
+# Налаштування платіжного шлюзу Monobank
+# ---------------------------------------------------------------------------
+MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN", "")
+MONOBANK_USE_SANDBOX = os.environ.get("MONOBANK_USE_SANDBOX", "True") == "True"
+MONOBANK_MOCK_PAYMENTS = os.environ.get("MONOBANK_MOCK_PAYMENTS", "True") == "True"
