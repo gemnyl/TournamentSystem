@@ -201,6 +201,36 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
         return qs
 
+    @action(detail=True, methods=["post"], url_path="update_credit_limit")
+    def update_credit_limit(self, request, pk=None):
+        if request.user.role != "admin":
+            return Response(
+                {"detail": "Тільки адміністратори можуть змінювати кредитний ліміт."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        user = self.get_object()
+        credit_limit = request.data.get("credit_limit")
+        if credit_limit is None:
+            return Response(
+                {"detail": "Параметр credit_limit є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            user.credit_limit = int(credit_limit)
+            user.save(update_fields=["credit_limit"])
+            return Response(
+                {
+                    "detail": "Кредитний ліміт успішно оновлено.",
+                    "credit_limit": user.credit_limit,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "Некоректне значення ліміту."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
 
 class VerifyPassView(APIView):
     """Ендпоінт для верифікації бейджів учасників за підписаним токеном."""

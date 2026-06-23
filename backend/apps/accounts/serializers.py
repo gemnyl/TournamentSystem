@@ -43,6 +43,8 @@ class UserSerializer(serializers.ModelSerializer):
             "email_verified",
             "date_joined",
             "name_locked",
+            "is_club_leader",
+            "credit_limit",
         ]
         read_only_fields = [
             "email",
@@ -51,6 +53,8 @@ class UserSerializer(serializers.ModelSerializer):
             "email_verified",
             "date_joined",
             "name_locked",
+            "is_club_leader",
+            "credit_limit",
         ]
 
     def get_full_name(self, obj):
