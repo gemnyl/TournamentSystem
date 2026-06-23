@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   Search,
   Layers,
+  ChevronDown,
 } from "lucide-react";
 import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -33,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn, formatSportType, formatRegistrationName, getAgeAsOf } from "@/lib/utils";
@@ -42,6 +44,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useSearchParams, Link } from "react-router-dom";
+import { InvoiceDetailsDialog } from "@/components/tournament/InvoiceDetailsDialog";
 
 const UKRAINIAN_REGIONS = [
   { value: "vinnytsia", label: "Вінницька область" },
@@ -117,6 +120,10 @@ export default function CoachDashboardPage() {
   const initialRegTournamentId = searchParams.get("regTournamentId") || "";
   const initialRegSubTab = (searchParams.get("regSubTab") as any) || "mass";
   const initialLiveSearch = searchParams.get("liveSearch") || "";
+  const initialBillingSubTab = (searchParams.get("billingSubTab") as any) || "unpaid";
+  const initialBillingViewMode = (searchParams.get("billingViewMode") as any) || "athlete";
+  const initialHistoryTournamentFilter = searchParams.get("historyTournamentFilter") || "all";
+  const initialHistorySubTab = (searchParams.get("historySubTab") as any) || "summary";
 
   // Active sub-tab state
   const [activeTab, setActiveTab] = useState<"roster" | "register" | "billing" | "active" | "leaderboard" | "live">(initialTab);
@@ -253,10 +260,55 @@ export default function CoachDashboardPage() {
   const [unpaidRegistrations, setUnpaidRegistrations] = useState<Registration[]>([]);
   const [isLoadingBilling, setIsLoadingBilling] = useState(false);
   const [isPayingInvoice, setIsPayingInvoice] = useState(false);
-  const [showPayModal, setShowPayModal] = useState<Tournament | null>(null);
+  const [showPayModal, setShowPayModal] = useState<any | null>(null);
+  const [billingClubScope, setBillingClubScope] = useState<"coach" | "club">("coach");
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
+  const [billingSubTab, setBillingSubTab] = useState<"unpaid" | "history">(initialBillingSubTab);
+  const [billingViewMode, setBillingViewMode] = useState<"athlete" | "list">(initialBillingViewMode);
+
+  const handleBillingSubTabChange = (val: "unpaid" | "history") => {
+    setBillingSubTab(val);
+    updateQueryParam("billingSubTab", val);
+  };
+
+  const handleBillingViewModeChange = (val: "athlete" | "list") => {
+    setBillingViewMode(val);
+    updateQueryParam("billingViewMode", val);
+  };
+
+  const [selectedBillingRegIds, setSelectedBillingRegIds] = useState<number[]>([]);
+  const [collapsedAthletes, setCollapsedAthletes] = useState<Record<string, boolean>>({});
+  const [withdrawWarningReg, setWithdrawWarningReg] = useState<Registration | null>(null);
+  const [withdrawAllCategories, setWithdrawAllCategories] = useState(false);
+  const [confirmingRefundId, setConfirmingRefundId] = useState<number | null>(null);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [isLoadingInvoices, setIsLoadingInvoices] = useState(false);
+  const [isSyncingInvoiceId, setIsSyncingInvoiceId] = useState<number | null>(null);
+  const [selectedInvoiceForModal, setSelectedInvoiceForModal] = useState<any | null>(null);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+
+  const handleOpenInvoiceModal = (invoice: any) => {
+    setSelectedInvoiceForModal(invoice);
+    setIsInvoiceModalOpen(true);
+  };
+
+  const [historyTournamentFilter, setHistoryTournamentFilter] = useState<string>(initialHistoryTournamentFilter);
+  const [historySubTab, setHistorySubTab] = useState<"summary" | "athlete" | "category" | "transactions">(initialHistorySubTab);
+
+  const handleHistoryTournamentFilterChange = (val: string) => {
+    setHistoryTournamentFilter(val);
+    updateQueryParam("historyTournamentFilter", val);
+  };
+
+  const handleHistorySubTabChange = (val: "summary" | "athlete" | "category" | "transactions") => {
+    setHistorySubTab(val);
+    updateQueryParam("historySubTab", val);
+  };
 
   // Active registrations states
   const [activeRegistrations, setActiveRegistrations] = useState<Registration[]>([]);
+  const [allRegistrations, setAllRegistrations] = useState<Registration[]>([]);
 
   // Tournament filter states
   const [billingTournamentFilter, setBillingTournamentFilter] = useState<string>("all");
@@ -313,6 +365,87 @@ export default function CoachDashboardPage() {
       setWeightHistory([]);
     }
   }, [selectedAthleteProfile]);
+
+  useEffect(() => {
+    if (!withdrawWarningReg) {
+      setWithdrawAllCategories(false);
+    }
+  }, [withdrawWarningReg]);
+
+  const otherRegsToWithdraw = useMemo(() => {
+    if (!withdrawWarningReg) return [];
+    const athleteId = withdrawWarningReg.athlete?.id;
+    const teamId = withdrawWarningReg.team?.id;
+    const tournamentId = withdrawWarningReg.tournament_id;
+
+    return activeRegistrations.filter((r) => {
+      if (r.id === withdrawWarningReg.id) return false;
+      if (r.tournament_id !== tournamentId) return false;
+      if (athleteId && r.athlete?.id === athleteId) return true;
+      if (teamId && r.team?.id === teamId) return true;
+      return false;
+    });
+  }, [withdrawWarningReg, activeRegistrations]);
+
+  const otherRegsCount = otherRegsToWithdraw.length;
+
+  const regsToWithdraw = useMemo(() => {
+    if (!withdrawWarningReg) return [];
+    return [withdrawWarningReg, ...(withdrawAllCategories ? otherRegsToWithdraw : [])].filter(Boolean);
+  }, [withdrawWarningReg, withdrawAllCategories, otherRegsToWithdraw]);
+
+  const hasPaidRegs = useMemo(() => {
+    return regsToWithdraw.some((r) => r.payment_status === "paid");
+  }, [regsToWithdraw]);
+
+  const onlinePaidRegs = useMemo(() => {
+    return regsToWithdraw.filter((r) => r.payment_status === "paid" && r.payment_method === "online");
+  }, [regsToWithdraw]);
+
+  const offlinePaidRegs = useMemo(() => {
+    return regsToWithdraw.filter((r) => r.payment_status === "paid" && r.payment_method !== "online");
+  }, [regsToWithdraw]);
+
+  const onlineBaseFee = useMemo(() => {
+    return onlinePaidRegs.reduce((sum, r) => sum + (r.fee || 0), 0);
+  }, [onlinePaidRegs]);
+
+  const onlineTotalPaid = useMemo(() => {
+    return onlinePaidRegs.reduce((sum, r) => {
+      const base = r.fee || 0;
+      return sum + (r.commission_payer === "buyer" ? Math.round(base * 1.05) : base);
+    }, 0);
+  }, [onlinePaidRegs]);
+
+  const onlineCommission = useMemo(() => {
+    return onlinePaidRegs
+      .filter((r) => r.refund_policy === "refundable")
+      .reduce((sum, r) => sum + Math.round((r.fee || 0) * 0.05), 0);
+  }, [onlinePaidRegs]);
+
+  const onlineRefund = useMemo(() => {
+    return onlinePaidRegs.reduce((sum, r) => {
+      const base = r.fee || 0;
+      if (r.refund_policy === "refundable") {
+        return sum + (r.commission_payer === "buyer" ? base : Math.round(base * 0.95));
+      }
+      return sum;
+    }, 0);
+  }, [onlinePaidRegs]);
+
+  const offlineBaseFee = useMemo(() => {
+    return offlinePaidRegs.reduce((sum, r) => sum + (r.fee || 0), 0);
+  }, [offlinePaidRegs]);
+
+  const offlineRefund = useMemo(() => {
+    return offlinePaidRegs.reduce((sum, r) => {
+      const base = r.fee || 0;
+      if (r.refund_policy === "refundable") {
+        return sum + base;
+      }
+      return sum;
+    }, 0);
+  }, [offlinePaidRegs]);
 
   const handleAddWeightLog = async () => {
     if (!selectedAthleteProfile || !newLogWeight) return;
@@ -1266,10 +1399,14 @@ export default function CoachDashboardPage() {
   const fetchBilling = async () => {
     setIsLoadingBilling(true);
     try {
-      const { data } = await api.get<PaginatedResponse<Registration> | Registration[]>("/registrations/?page_size=1000");
+      let url = "/registrations/?page_size=1000";
+      if (billingClubScope === "club") {
+        url += "&club_scope=true";
+      }
+      const { data } = await api.get<PaginatedResponse<Registration> | Registration[]>(url);
       const list = Array.isArray(data) ? data : data.results;
-      // Filter unpaid coach registrations (exclude completed tournaments)
-      setUnpaidRegistrations(list.filter((r: Registration) => r.payment_status === "unpaid" && r.tournament_status !== "completed"));
+      // Filter unpaid coach registrations (exclude completed tournaments and withdrawn entries)
+      setUnpaidRegistrations(list.filter((r: Registration) => r.payment_status === "unpaid" && r.status !== "withdrawn" && r.tournament_status !== "completed"));
     } catch (e) {
       console.error(e);
     } finally {
@@ -1277,12 +1414,67 @@ export default function CoachDashboardPage() {
     }
   };
 
+  // Fetch billing transactions
+  const fetchTransactions = async () => {
+    setIsLoadingTransactions(true);
+    try {
+      const { data } = await api.get<any>("/billing/transactions/?page_size=1000");
+      const list = Array.isArray(data) ? data : data.results || [];
+      setTransactions(list);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingTransactions(false);
+    }
+  };
+
+  const fetchInvoices = async () => {
+    setIsLoadingInvoices(true);
+    try {
+      const { data } = await api.get<any>("/billing/invoices/?page_size=1000");
+      const list = Array.isArray(data) ? data : data.results || [];
+      setInvoices(list);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingInvoices(false);
+    }
+  };
+
+  const handleSyncInvoice = async (invoiceId: number) => {
+    setIsSyncingInvoiceId(invoiceId);
+    try {
+      const { data } = await api.post(`/billing/invoices/${invoiceId}/sync/`);
+      toast({
+        title: "Синхронізація успішна",
+        description: data.detail || "Статус рахунку успішно оновлено.",
+      });
+      fetchInvoices();
+      fetchTransactions();
+      fetchBilling();
+      fetchActiveRegistrations();
+    } catch (e: any) {
+      toast({
+        title: "Помилка синхронізації",
+        description: e.response?.data?.detail || "Не вдалося синхронізувати статус рахунку.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncingInvoiceId(null);
+    }
+  };
+
   // Fetch all registrations for active registrations tab
   const fetchActiveRegistrations = async () => {
     setIsLoadingActiveRegs(true);
     try {
-      const { data } = await api.get<PaginatedResponse<Registration> | Registration[]>("/registrations/?page_size=1000");
+      let url = "/registrations/?page_size=1000";
+      if (activeTab === "billing" && billingClubScope === "club") {
+        url += "&club_scope=true";
+      }
+      const { data } = await api.get<PaginatedResponse<Registration> | Registration[]>(url);
       const list = Array.isArray(data) ? data : data.results;
+      setAllRegistrations(list);
       // Filter out registrations belonging to completed tournaments
       setActiveRegistrations(list.filter((r: Registration) => r.tournament_status !== "completed"));
     } catch (e) {
@@ -1364,14 +1556,22 @@ export default function CoachDashboardPage() {
       fetchRoster(true);
       fetchActiveRegistrations();
     }
-    if (activeTab === "billing") fetchBilling();
+    if (activeTab === "billing") {
+      fetchActiveRegistrations();
+      if (billingSubTab === "unpaid") {
+        fetchBilling();
+      } else {
+        fetchTransactions();
+        fetchInvoices();
+      }
+    }
     if (activeTab === "active") fetchActiveRegistrations();
     if (activeTab === "live") {
       fetchLiveMatches();
       const interval = setInterval(fetchLiveMatches, 10000);
       return () => clearInterval(interval);
     }
-  }, [activeTab]);
+  }, [activeTab, billingClubScope, billingSubTab]);
 
   useEffect(() => {
     if (activeTab === "register") {
@@ -1506,40 +1706,84 @@ export default function CoachDashboardPage() {
     toast({ title: "Категорії автоматично підібрано!" });
   };
 
-  // Settle invoice simulator
+  // Monobank acquiring checkout flow
   const handleSimulatePayment = async () => {
     if (!showPayModal) return;
     setIsPayingInvoice(true);
     try {
-      const targetTournamentId = showPayModal.id;
-      const regsToPay = unpaidRegistrations.filter((r) => r.tournament_id === targetTournamentId);
-      const regIds = regsToPay.map((r) => r.id);
+      const regIds = showPayModal.registrationIds;
+      const redirectUrl = window.location.origin + "/coach/dashboard?tab=billing";
 
-      await api.post("/registrations/bulk_pay/", {
+      const { data } = await api.post("/billing/invoices/", {
+        payment_type: "registrations",
         registration_ids: regIds,
+        redirect_url: redirectUrl,
       });
 
-      toast({ title: "Оплату зараховано!", description: `Сума успішно перерахована організатору.` });
+      toast({ title: "Платіж ініційовано!", description: `Перенаправлення на платіжну систему Monobank...` });
       setShowPayModal(null);
-      fetchBilling();
-    } catch {
-      // handled by interceptor
+
+      let paymentUrl = data.payment_url;
+      if (paymentUrl && paymentUrl.includes("/billing/mock-pay")) {
+        const urlObj = new URL(paymentUrl);
+        paymentUrl = `/billing/mock-pay${urlObj.search}`;
+      }
+      window.location.href = paymentUrl;
+    } catch (e: any) {
+      toast({
+        title: "Помилка оплати",
+        description: e.response?.data?.detail || "Не вдалося ініціювати платіж.",
+        variant: "destructive"
+      });
     } finally {
       setIsPayingInvoice(false);
     }
   };
 
   // Cancel registration
-  const handleWithdrawRegistration = async (regId: number) => {
+  const handleWithdrawRegistration = async (regId: number, otherRegsIds: number[] = []) => {
     setWithdrawingRegId(regId);
     try {
-      await api.delete(`/registrations/${regId}/`);
-      toast({ title: "Заявку відкликано!" });
+      const idsToWithdraw = [regId, ...otherRegsIds];
+
+      await api.post("/registrations/bulk_withdraw/", {
+        registration_ids: idsToWithdraw
+      });
+
+      toast({ title: idsToWithdraw.length > 1 ? "Заявки відкликано!" : "Заявку відкликано!" });
       fetchActiveRegistrations();
-    } catch {
-      // handled by interceptor
+      if (typeof fetchBilling === "function") {
+        fetchBilling();
+      }
+    } catch (e: any) {
+      console.error(e);
+      toast({
+        title: "Помилка при скасуванні",
+        description: e.response?.data?.detail || "Не вдалося скасувати деякі заявки.",
+        variant: "destructive",
+      });
     } finally {
       setWithdrawingRegId(null);
+    }
+  };
+
+  const handleConfirmOfflineRefundReceived = async (regId: number) => {
+    setConfirmingRefundId(regId);
+    try {
+      await api.post("/registrations/bulk_confirm_offline_refund_received/", {
+        registration_ids: [regId],
+      });
+      toast({ title: "Отримання коштів підтверджено успішно!" });
+      fetchActiveRegistrations();
+    } catch (e: any) {
+      console.error(e);
+      toast({
+        title: "Помилка підтвердження",
+        description: e.response?.data?.detail || "Не вдалося підтвердити отримання коштів.",
+        variant: "destructive"
+      });
+    } finally {
+      setConfirmingRefundId(null);
     }
   };
 
@@ -1564,6 +1808,52 @@ export default function CoachDashboardPage() {
     });
     return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
   }, [activeRegistrations]);
+
+  const billingTournamentOptions = useMemo(() => [
+    { value: "all", label: "Всі турніри" },
+    ...billingTournamentsList.map((t) => ({ value: String(t.id), label: t.title }))
+  ], [billingTournamentsList]);
+
+  const activeTournamentOptions = useMemo(() => [
+    { value: "all", label: "Всі турніри" },
+    ...activeTournamentsList.map((t) => ({ value: String(t.id), label: t.title }))
+  ], [activeTournamentsList]);
+
+  const getInvoiceTournamentId = (inv: any) => {
+    if (inv.tournament) return inv.tournament;
+    if (inv.registrations && inv.registrations.length > 0) {
+      const regId = inv.registrations[0];
+      const matchedReg = allRegistrations.find(r => r.id === regId);
+      if (matchedReg) {
+        return matchedReg.tournament_id;
+      }
+    }
+    return null;
+  };
+
+  const historyTournamentsList = useMemo(() => {
+    const map = new Map<number, string>();
+    allRegistrations.forEach((reg) => {
+      const tid = reg.tournament_id;
+      if (tid) {
+        map.set(tid, reg.tournament_title || `Турнір #${tid}`);
+      }
+    });
+    // also check invoices
+    invoices.forEach((inv) => {
+      const tid = getInvoiceTournamentId(inv);
+      if (tid && !map.has(tid)) {
+        const foundTourn = tournaments.find(t => t.id === tid);
+        map.set(tid, foundTourn ? foundTourn.title : `Турнір #${tid}`);
+      }
+    });
+    return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
+  }, [allRegistrations, invoices, tournaments]);
+
+  const historyTournamentOptions = useMemo(() => [
+    { value: "all", label: "Всі турніри" },
+    ...historyTournamentsList.map((t) => ({ value: String(t.id), label: t.title }))
+  ], [historyTournamentsList]);
 
   const filteredActiveRegistrations = useMemo(() => {
     let result = [...activeRegistrations];
@@ -1672,6 +1962,123 @@ export default function CoachDashboardPage() {
   const getGrandTotalFor = (regs: Registration[]) => {
     return getSubtotalFor(regs) + getServiceFeeFor(regs);
   };
+
+  const filteredHistoryRegs = useMemo(() => {
+    if (historyTournamentFilter === "all") {
+      return allRegistrations;
+    }
+    return allRegistrations.filter(r => String(r.tournament_id) === historyTournamentFilter);
+  }, [allRegistrations, historyTournamentFilter]);
+
+  const filteredHistoryInvoices = useMemo(() => {
+    if (historyTournamentFilter === "all") {
+      return invoices;
+    }
+    return invoices.filter(inv => {
+      const tid = getInvoiceTournamentId(inv);
+      return tid && String(tid) === historyTournamentFilter;
+    });
+  }, [invoices, historyTournamentFilter, allRegistrations]);
+
+  const filteredHistoryTransactions = useMemo(() => {
+    const invoiceMap = new Map(invoices.map(inv => [inv.id, inv]));
+    if (historyTournamentFilter === "all") {
+      return transactions;
+    }
+    return transactions.filter(tx => {
+      const inv = invoiceMap.get(tx.invoice);
+      if (!inv) return false;
+      const tid = getInvoiceTournamentId(inv);
+      return tid && String(tid) === historyTournamentFilter;
+    });
+  }, [transactions, invoices, historyTournamentFilter, allRegistrations]);
+
+  const getRegFeesBreakdown = (reg: Registration) => {
+    if (reg.status === "withdrawn" && reg.payment_status !== "paid") {
+      return { onlinePaid: 0, offlinePaid: 0, unpaid: 0, total: 0 };
+    }
+    const baseFee = reg.fee || 500;
+    const finalFee = baseFee * (reg.commission_payer === "buyer" ? 1.05 : 1.0);
+    const isPaid = reg.payment_status === "paid";
+    const isOnline = reg.payment_method === "online";
+    return {
+      onlinePaid: isPaid && isOnline ? finalFee : 0,
+      offlinePaid: isPaid && !isOnline ? baseFee : 0,
+      unpaid: !isPaid ? finalFee : 0,
+      total: isPaid ? (isOnline ? finalFee : baseFee) : 0
+    };
+  };
+
+  const historyAthleteGroups = useMemo(() => {
+    const groups: Record<string, {
+      athleteName: string;
+      registrations: Registration[];
+      onlinePaid: number;
+      offlinePaid: number;
+      unpaid: number;
+      total: number;
+    }> = {};
+
+    filteredHistoryRegs.forEach((reg) => {
+      const key = reg.athlete
+        ? `athlete-${reg.athlete.id}`
+        : (reg.team ? `team-${reg.team.id}` : `reg-${reg.id}`);
+
+      if (!groups[key]) {
+        groups[key] = {
+          athleteName: formatRegistrationName(reg),
+          registrations: [],
+          onlinePaid: 0,
+          offlinePaid: 0,
+          unpaid: 0,
+          total: 0,
+        };
+      }
+      groups[key].registrations.push(reg);
+
+      const breakdown = getRegFeesBreakdown(reg);
+      groups[key].onlinePaid += breakdown.onlinePaid;
+      groups[key].offlinePaid += breakdown.offlinePaid;
+      groups[key].unpaid += breakdown.unpaid;
+      groups[key].total += breakdown.total;
+    });
+
+    return Object.values(groups);
+  }, [filteredHistoryRegs]);
+
+  const historyCategoryGroups = useMemo(() => {
+    const groups: Record<string, {
+      categoryName: string;
+      regCount: number;
+      onlinePaid: number;
+      offlinePaid: number;
+      unpaid: number;
+      total: number;
+    }> = {};
+
+    filteredHistoryRegs.forEach((reg) => {
+      const key = reg.category_name || "Інші";
+      if (!groups[key]) {
+        groups[key] = {
+          categoryName: key,
+          regCount: 0,
+          onlinePaid: 0,
+          offlinePaid: 0,
+          unpaid: 0,
+          total: 0,
+        };
+      }
+      groups[key].regCount += 1;
+
+      const breakdown = getRegFeesBreakdown(reg);
+      groups[key].onlinePaid += breakdown.onlinePaid;
+      groups[key].offlinePaid += breakdown.offlinePaid;
+      groups[key].unpaid += breakdown.unpaid;
+      groups[key].total += breakdown.total;
+    });
+
+    return Object.values(groups);
+  }, [filteredHistoryRegs]);
 
   // Club Leaderboard calculations
   const getLeaderboard = () => {
@@ -2630,131 +3037,789 @@ export default function CoachDashboardPage() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <h2 className="text-2xl font-bold tracking-tight">Розрахункові рахунки та оплати</h2>
             <div className="flex items-center gap-2">
-              <Select value={billingTournamentFilter} onValueChange={setBillingTournamentFilter}>
-                <SelectTrigger className="w-full md:w-[220px] h-9 rounded-xl text-xs">
-                  <SelectValue placeholder="Фільтр за турніром" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Всі турніри</SelectItem>
-                  {billingTournamentsList.map((t) => (
-                    <SelectItem key={t.id} value={String(t.id)}>
-                      {t.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" size="sm" className="h-9 rounded-xl" onClick={fetchBilling} disabled={isLoadingBilling}>
+              {billingSubTab === "unpaid" ? (
+                <SearchableSelect
+                  options={billingTournamentOptions}
+                  value={billingTournamentFilter}
+                  onValueChange={setBillingTournamentFilter}
+                  placeholder="Фільтр за турніром"
+                  searchPlaceholder="Пошук турніру..."
+                  className="w-full md:w-[220px]"
+                  triggerClassName="h-9 rounded-xl text-xs border border-border bg-background"
+                />
+              ) : (
+                <SearchableSelect
+                  options={historyTournamentOptions}
+                  value={historyTournamentFilter}
+                  onValueChange={handleHistoryTournamentFilterChange}
+                  placeholder="Фільтр за турніром"
+                  searchPlaceholder="Пошук турніру..."
+                  className="w-full md:w-[220px]"
+                  triggerClassName="h-9 rounded-xl text-xs border border-border bg-background"
+                />
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 rounded-xl font-semibold border-amber-500/20 text-amber-500 hover:bg-amber-500/10"
+                onClick={() => {
+                  if (billingSubTab === "unpaid") {
+                    fetchBilling();
+                    fetchActiveRegistrations();
+                  } else {
+                    fetchActiveRegistrations();
+                    fetchTransactions();
+                    fetchInvoices();
+                  }
+                }}
+                disabled={isLoadingBilling || isLoadingTransactions || isLoadingInvoices || isLoadingActiveRegs}
+              >
                 Оновити
               </Button>
             </div>
           </div>
 
-          {isLoadingBilling && unpaidRegistrations.length === 0 ? (
-            <div className="flex justify-center py-20">
-              <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+          {/* Sub-tab selection and Club Scope Toggle */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/20 pb-4">
+            <div className="flex bg-muted/30 p-1 rounded-xl border border-border/10 shrink-0">
+              <Button
+                variant={billingSubTab === "unpaid" ? "sport" : "ghost"}
+                size="sm"
+                className="h-8 text-xs px-3 rounded-lg"
+                onClick={() => handleBillingSubTabChange("unpaid")}
+              >
+                Неоплачені внески
+              </Button>
+              <Button
+                variant={billingSubTab === "history" ? "sport" : "ghost"}
+                size="sm"
+                className="h-8 text-xs px-3 rounded-lg"
+                onClick={() => handleBillingSubTabChange("history")}
+              >
+                Фінансова історія
+              </Button>
             </div>
-          ) : unpaidRegistrations.length === 0 ? (
-            <div className="text-center py-20 border border-dashed border-border rounded-xl bg-green-500/5 border-green-500/20">
-              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-              <h3 className="font-bold text-lg text-green-500">Усі заявки оплачено!</h3>
-              <p className="text-muted-foreground text-xs mt-1">Немає заборгованостей перед організаторами турнірів.</p>
-            </div>
-          ) : Object.keys(groupedBilling).length === 0 ? (
-            <div className="text-center py-20 border border-dashed border-border rounded-xl bg-muted/5">
-              <CheckCircle className="w-12 h-12 text-green-500/40 mx-auto mb-4" />
-              <h3 className="font-bold text-lg text-muted-foreground">Немає рахунків</h3>
-              <p className="text-muted-foreground text-xs mt-1">Для вибраного турніру немає неоплачених внесків.</p>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {Object.entries(groupedBilling).map(([tidStr, group]) => {
-                const tid = Number(tidStr);
-                const tournamentRegs = group.registrations;
-                const tournamentTitle = group.tournamentTitle;
-                const subtotal = getSubtotalFor(tournamentRegs);
-                const serviceFee = getServiceFeeFor(tournamentRegs);
-                const grandTotal = getGrandTotalFor(tournamentRegs);
 
-                return (
-                  <div key={tid} className="p-6 border border-border bg-card/10 rounded-2xl space-y-4 shadow-sm">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/20 pb-4">
-                      <div>
-                        <h3 className="font-bold text-lg">{tournamentTitle}</h3>
-                        <p className="text-xs text-muted-foreground">Неоплачені заявки на цей турнір та комісія платіжного шлюзу.</p>
+            <div className="flex flex-wrap items-center gap-3">
+              {billingSubTab === "unpaid" && (
+                <div className="flex items-center bg-muted/40 border border-border/30 rounded-xl p-0.5 shrink-0">
+                  <Button
+                    variant={billingViewMode === "list" ? "sport" : "ghost"}
+                    size="sm"
+                    className="h-8 text-xs px-3 rounded-lg"
+                    onClick={() => handleBillingViewModeChange("list")}
+                  >
+                    Список
+                  </Button>
+                  <Button
+                    variant={billingViewMode === "athlete" ? "sport" : "ghost"}
+                    size="sm"
+                    className="h-8 text-xs px-3 rounded-lg"
+                    onClick={() => handleBillingViewModeChange("athlete")}
+                  >
+                    По спортсменах
+                  </Button>
+                </div>
+              )}
+
+              {billingSubTab === "unpaid" && user?.is_club_leader && (
+                <div className="flex items-center bg-muted/40 border border-border/30 rounded-xl p-0.5 shrink-0">
+                  <Button
+                    variant={billingClubScope === "coach" ? "sport" : "ghost"}
+                    size="sm"
+                    className="h-8 text-xs px-3 rounded-lg"
+                    onClick={() => setBillingClubScope("coach")}
+                  >
+                    Мої спортсмени
+                  </Button>
+                  <Button
+                    variant={billingClubScope === "club" ? "sport" : "ghost"}
+                    size="sm"
+                    className="h-8 text-xs px-3 rounded-lg"
+                    onClick={() => setBillingClubScope("club")}
+                  >
+                    Спортсмени клубу
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {billingSubTab === "unpaid" ? (
+            isLoadingBilling && unpaidRegistrations.length === 0 ? (
+              <div className="flex justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+              </div>
+            ) : unpaidRegistrations.length === 0 ? (
+              <div className="text-center py-20 border border-dashed border-border rounded-xl bg-green-500/5 border-green-500/20">
+                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
+                <h3 className="font-bold text-lg text-green-500">Усі заявки оплачено!</h3>
+                <p className="text-muted-foreground text-xs mt-1">Немає заборгованостей перед організаторами турнірів.</p>
+              </div>
+            ) : Object.keys(groupedBilling).length === 0 ? (
+              <div className="text-center py-20 border border-dashed border-border rounded-xl bg-muted/5">
+                <CheckCircle className="w-12 h-12 text-green-500/40 mx-auto mb-4" />
+                <h3 className="font-bold text-lg text-muted-foreground">Немає рахунків</h3>
+                <p className="text-muted-foreground text-xs mt-1">Для вибраного турніру немає неоплачених внесків.</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {Object.entries(groupedBilling).map(([tidStr, group]) => {
+                  const tid = Number(tidStr);
+                  const tournamentRegs = group.registrations;
+                  const tournamentTitle = group.tournamentTitle;
+
+                  const tournamentGrandTotal = getGrandTotalFor(tournamentRegs);
+
+                  // Group tournament registrations by athlete/team for athlete view mode
+                  const athleteGroups: Record<string, {
+                    athleteName: string;
+                    registrations: Registration[];
+                  }> = {};
+
+                  tournamentRegs.forEach((reg) => {
+                    const athleteKey = reg.athlete
+                      ? `athlete-${reg.athlete.id}`
+                      : (reg.team ? `team-${reg.team.id}` : `reg-${reg.id}`);
+
+                    if (!athleteGroups[athleteKey]) {
+                      athleteGroups[athleteKey] = {
+                        athleteName: formatRegistrationName(reg),
+                        registrations: [],
+                      };
+                    }
+                    athleteGroups[athleteKey].registrations.push(reg);
+                  });
+
+                  // For list view mode, calculate selected registrations total
+                  const tournamentSelectedRegs = tournamentRegs.filter(r => selectedBillingRegIds.includes(r.id));
+                  const selectedGrandTotal = getGrandTotalFor(tournamentSelectedRegs);
+
+                  return (
+                    <div key={tid} className="p-6 border border-border bg-card/10 rounded-2xl space-y-6 shadow-sm">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/20 pb-4">
+                        <div>
+                          <h3 className="font-bold text-lg">{tournamentTitle}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {billingViewMode === "athlete"
+                              ? "Неоплачені заявки на цей турнір, згруповані за спортсменами."
+                              : "Неоплачені заявки на цей турнір у вигляді загального списку."
+                            }
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {billingViewMode === "list" && group.onlinePaymentEnabled && tournamentSelectedRegs.length > 0 && (
+                            <Button
+                              variant="sport"
+                              size="sm"
+                              className="h-9 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
+                              onClick={() => setShowPayModal({
+                                tournamentId: tid,
+                                tournamentTitle: tournamentTitle,
+                                athleteName: `${tournamentSelectedRegs.length} вибраних заявок`,
+                                registrationIds: tournamentSelectedRegs.map(r => r.id),
+                                registrations: tournamentSelectedRegs
+                              })}
+                            >
+                              <CreditCard className="w-3.5 h-3.5 mr-1.5" /> Сплатити вибрані ({selectedGrandTotal.toFixed(0)} UAH)
+                            </Button>
+                          )}
+                          {group.onlinePaymentEnabled && tournamentGrandTotal > 0 && (
+                            <Button
+                              variant="sport"
+                              size="sm"
+                              className="h-9 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-black border-none"
+                              onClick={() => setShowPayModal({
+                                tournamentId: tid,
+                                tournamentTitle: tournamentTitle,
+                                athleteName: "Всі неоплачені заявки турніру",
+                                registrationIds: tournamentRegs.map(r => r.id),
+                                registrations: tournamentRegs
+                              })}
+                            >
+                              <CreditCard className="w-4 h-4 mr-1.5" /> Сплатити за весь турнір ({tournamentGrandTotal.toFixed(0)} UAH)
+                            </Button>
+                          )}
+                          {!group.onlinePaymentEnabled && (
+                            <span className="text-xs px-2.5 py-1 rounded-md border border-amber-500/20 bg-amber-500/5 text-amber-500 font-semibold">
+                              Онлайн-оплату вимкнено
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      {group.onlinePaymentEnabled ? (
-                        <Button variant="sport" onClick={() => setShowPayModal({ id: tid, title: tournamentTitle } as any)}>
-                          <CreditCard className="w-4 h-4 mr-1.5" /> Сплатити онлайн
-                        </Button>
+
+                      {group.paymentDetails && (
+                        <div className="p-4 border border-border/30 bg-muted/5 rounded-xl space-y-1 text-xs">
+                          <div className="font-semibold text-muted-foreground flex items-center gap-1">
+                            <Info className="w-3.5 h-3.5 text-amber-500" /> Реквізити для оплати (IBAN / опис):
+                          </div>
+                          <div className="text-muted-foreground whitespace-pre-wrap pl-4.5 mt-1">{group.paymentDetails}</div>
+                        </div>
+                      )}
+
+                      {billingViewMode === "athlete" ? (
+                        <div className="space-y-4">
+                          {Object.entries(athleteGroups).map(([athKey, athGroup]) => {
+                            const athSubtotal = getSubtotalFor(athGroup.registrations);
+                            const athServiceFee = getServiceFeeFor(athGroup.registrations);
+                            const athGrandTotal = getGrandTotalFor(athGroup.registrations);
+                            const isCollapsed = collapsedAthletes[athKey] ?? false;
+
+                            return (
+                              <div key={athKey} className="border border-border bg-card/5 rounded-xl overflow-hidden shadow-sm transition-all duration-200">
+                                {/* Collapsible Header */}
+                                <div
+                                  className="p-4 bg-muted/10 flex items-center justify-between cursor-pointer hover:bg-muted/20 select-none"
+                                  onClick={() => setCollapsedAthletes(prev => ({ ...prev, [athKey]: !isCollapsed }))}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform duration-200", isCollapsed && "-rotate-90")} />
+                                    <div>
+                                      <h4 className="font-semibold text-sm text-slate-250">{athGroup.athleteName}</h4>
+                                      <p className="text-xs text-muted-foreground mt-0.5">
+                                        {athGroup.registrations.length} {athGroup.registrations.length === 1 ? 'заявка' : athGroup.registrations.length < 5 ? 'заявки' : 'заявок'} • Разом до сплати: <strong className="text-amber-500">{athGrandTotal.toFixed(0)} UAH</strong>
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                                    {group.onlinePaymentEnabled ? (
+                                      <Button
+                                        variant="sport"
+                                        size="sm"
+                                        className="h-8 rounded-xl text-xs font-semibold"
+                                        onClick={() => setShowPayModal({
+                                          tournamentId: tid,
+                                          tournamentTitle: tournamentTitle,
+                                          athleteName: athGroup.athleteName,
+                                          registrationIds: athGroup.registrations.map(r => r.id),
+                                          registrations: athGroup.registrations
+                                        })}
+                                      >
+                                        <CreditCard className="w-3.5 h-3.5 mr-1.5" /> Сплатити онлайн ({athGrandTotal.toFixed(0)} UAH)
+                                      </Button>
+                                    ) : (
+                                      <span className="text-[10px] px-2 py-0.5 rounded-md border border-amber-500/20 bg-amber-500/5 text-amber-500 font-medium">
+                                        Онлайн-оплату вимкнено
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Collapsible Body */}
+                                {!isCollapsed && (
+                                  <div className="p-4 border-t border-border/20 bg-card/10">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow className="hover:bg-transparent">
+                                          <TableHead className="h-8 text-xs">Категорія</TableHead>
+                                          <TableHead className="h-8 text-right text-xs">Внесок</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {athGroup.registrations.map((reg) => (
+                                          <TableRow key={reg.id} className="hover:bg-slate-900/10">
+                                            <TableCell className="py-2 text-xs text-muted-foreground">{reg.category_name}</TableCell>
+                                            <TableCell className="py-2 text-right font-mono text-xs">{reg.fee || 500} UAH</TableCell>
+                                          </TableRow>
+                                        ))}
+                                        <TableRow className="hover:bg-transparent border-t border-border/10">
+                                          <TableCell className="py-1.5 text-right text-xs text-muted-foreground">Сума внесків:</TableCell>
+                                          <TableCell className="py-1.5 text-right font-mono text-xs">{athSubtotal} UAH</TableCell>
+                                        </TableRow>
+                                        {athServiceFee > 0 && (
+                                          <TableRow className="hover:bg-transparent">
+                                            <TableCell className="py-1.5 text-right text-xs text-muted-foreground">Комісія сервісу (5%):</TableCell>
+                                            <TableCell className="py-1.5 text-right font-mono text-xs">{athServiceFee.toFixed(0)} UAH</TableCell>
+                                          </TableRow>
+                                        )}
+                                        <TableRow className="hover:bg-transparent bg-amber-500/5 font-bold text-amber-500">
+                                          <TableCell className="py-2 text-right text-xs">Разом до сплати:</TableCell>
+                                          <TableCell className="py-2 text-right font-mono text-sm">{athGrandTotal.toFixed(0)} UAH</TableCell>
+                                        </TableRow>
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       ) : (
-                        <div className="px-3 py-1.5 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-500 text-xs font-semibold flex items-center gap-1.5">
-                          <AlertTriangle className="w-3.5 h-3.5 animate-pulse text-amber-500" /> Онлайн-оплату вимкнено
+                        <div className="border border-border rounded-xl overflow-hidden bg-card/5">
+                          <Table>
+                            <TableHeader className="bg-muted/10">
+                              <TableRow>
+                                {group.onlinePaymentEnabled && (
+                                  <TableHead className="w-[50px] text-center">
+                                    <input
+                                      type="checkbox"
+                                      className="rounded border-border bg-background text-primary w-4 h-4 cursor-pointer"
+                                      checked={
+                                        tournamentRegs.length > 0 &&
+                                        tournamentRegs.every((r) => selectedBillingRegIds.includes(r.id))
+                                      }
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedBillingRegIds(prev => [
+                                            ...prev.filter(id => !tournamentRegs.some(r => r.id === id)),
+                                            ...tournamentRegs.map(r => r.id)
+                                          ]);
+                                        } else {
+                                          setSelectedBillingRegIds(prev => prev.filter(id => !tournamentRegs.some(r => r.id === id)));
+                                        }
+                                      }}
+                                    />
+                                  </TableHead>
+                                )}
+                                <TableHead className="text-xs">Спортсмен</TableHead>
+                                <TableHead className="text-xs">Категорія</TableHead>
+                                <TableHead className="text-right text-xs">Внесок</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {tournamentRegs.map((reg) => (
+                                <TableRow key={reg.id} className="hover:bg-slate-900/10">
+                                  {group.onlinePaymentEnabled && (
+                                    <TableCell className="text-center py-2">
+                                      <input
+                                        type="checkbox"
+                                        className="rounded border-border bg-background text-primary w-4 h-4 cursor-pointer"
+                                        checked={selectedBillingRegIds.includes(reg.id)}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setSelectedBillingRegIds(prev => [...prev, reg.id]);
+                                          } else {
+                                            setSelectedBillingRegIds(prev => prev.filter(id => id !== reg.id));
+                                          }
+                                        }}
+                                      />
+                                    </TableCell>
+                                  )}
+                                  <TableCell className="py-2 text-sm font-semibold text-slate-200">
+                                    {formatRegistrationName(reg)}
+                                  </TableCell>
+                                  <TableCell className="py-2 text-xs text-muted-foreground">
+                                    {reg.category_name}
+                                  </TableCell>
+                                  <TableCell className="py-2 text-right font-mono text-xs">
+                                    {reg.fee || 500} UAH
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
                         </div>
                       )}
                     </div>
+                  );
+                })}
+              </div>
+            )
+          ) : (
+            <div className="space-y-6">
+              {/* History Sub-tabs Selector */}
+              <div className="flex bg-muted/20 p-1 rounded-xl border border-border/10 w-fit shrink-0">
+                <Button
+                  variant={historySubTab === "summary" ? "sport" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs px-3 rounded-lg font-semibold"
+                  onClick={() => handleHistorySubTabChange("summary")}
+                >
+                  Загальне
+                </Button>
+                <Button
+                  variant={historySubTab === "athlete" ? "sport" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs px-3 rounded-lg font-semibold"
+                  onClick={() => handleHistorySubTabChange("athlete")}
+                >
+                  По спортсменах
+                </Button>
+                <Button
+                  variant={historySubTab === "category" ? "sport" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs px-3 rounded-lg font-semibold"
+                  onClick={() => handleHistorySubTabChange("category")}
+                >
+                  По категоріях
+                </Button>
+                <Button
+                  variant={historySubTab === "transactions" ? "sport" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs px-3 rounded-lg font-semibold"
+                  onClick={() => handleHistorySubTabChange("transactions")}
+                >
+                  Рахунки та транзакції
+                </Button>
+              </div>
 
-                    {group.paymentDetails && (
-                      <div className="p-4 border border-border/30 bg-muted/5 rounded-xl space-y-1 text-xs">
-                        <div className="font-semibold text-muted-foreground flex items-center gap-1">
-                          <Info className="w-3.5 h-3.5 text-amber-500" /> Реквізити для оплати (IBAN / опис):
+              {historySubTab === "summary" && (() => {
+                const totalRegsCount = filteredHistoryRegs.length;
+                const paidRegsCount = filteredHistoryRegs.filter(r => r.payment_status === "paid").length;
+                const totalOnlinePaid = filteredHistoryRegs.reduce((sum, r) => r.payment_status === "paid" && r.payment_method === "online" ? sum + (r.fee || 500) * (r.commission_payer === "buyer" ? 1.05 : 1) : sum, 0);
+                const totalOfflinePaid = filteredHistoryRegs.reduce((sum, r) => r.payment_status === "paid" && r.payment_method !== "online" ? sum + (r.fee || 500) : sum, 0);
+                const totalUnpaid = filteredHistoryRegs.reduce((sum, r) => r.payment_status !== "paid" ? sum + (r.fee || 500) * (r.commission_payer === "buyer" ? 1.05 : 1) : sum, 0);
+                const grandTotal = totalOnlinePaid + totalOfflinePaid + totalUnpaid;
+                const paidPercentage = grandTotal > 0 ? ((totalOnlinePaid + totalOfflinePaid) / grandTotal) * 100 : 0;
+
+                return (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="p-5 border border-border bg-card/10 rounded-2xl space-y-2 shadow-sm">
+                        <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
+                          <span>Всього заявок</span>
+                          <Users className="w-4 h-4 text-indigo-500" />
                         </div>
-                        <div className="text-muted-foreground whitespace-pre-wrap pl-4.5 mt-1">{group.paymentDetails}</div>
+                        <div className="text-3xl font-extrabold tracking-tight">{totalRegsCount}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Оплачено: <strong className="text-emerald-500">{paidRegsCount}</strong> з {totalRegsCount}
+                        </div>
                       </div>
-                    )}
 
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Спортсмен</TableHead>
-                          <TableHead>Категорія</TableHead>
-                          <TableHead className="text-right">Сума внеску</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {tournamentRegs.map((reg) => (
-                          <TableRow key={reg.id}>
-                            <TableCell className="font-semibold">{formatRegistrationName(reg)}</TableCell>
-                            <TableCell className="text-muted-foreground text-sm">{reg.category_name}</TableCell>
-                            <TableCell className="text-right font-mono font-bold">{reg.fee || 500} UAH</TableCell>
-                          </TableRow>
-                        ))}
-                        {/* Subtotal calculations */}
-                        <TableRow className="bg-muted/10 font-semibold">
-                          <TableCell colSpan={2} className="text-right">Сума внесків:</TableCell>
-                          <TableCell className="text-right font-mono">{subtotal} UAH</TableCell>
-                        </TableRow>
-                        <TableRow className="bg-muted/10 font-semibold">
-                          <TableCell colSpan={2} className="text-right">Комісія сервісу (5%):</TableCell>
-                          <TableCell className="text-right font-mono">{serviceFee.toFixed(0)} UAH</TableCell>
-                        </TableRow>
-                        <TableRow className="bg-amber-500/10 font-bold text-amber-500 text-base">
-                          <TableCell colSpan={2} className="text-right">Разом до сплати:</TableCell>
-                          <TableCell className="text-right font-mono">{grandTotal.toFixed(0)} UAH</TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
+                      <div className="p-5 border border-border bg-card/10 rounded-2xl space-y-2 shadow-sm">
+                        <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
+                          <span>Оплачено Онлайн</span>
+                          <CreditCard className="w-4 h-4 text-emerald-500" />
+                        </div>
+                        <div className="text-3xl font-extrabold tracking-tight font-mono text-emerald-400">
+                          {totalOnlinePaid.toFixed(0)} <span className="text-sm">UAH</span>
+                        </div>
+                        <div className="text-[10px] text-emerald-500 font-semibold flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5 shrink-0" /> З урахуванням комісії сервісу
+                        </div>
+                      </div>
+
+                      <div className="p-5 border border-border bg-card/10 rounded-2xl space-y-2 shadow-sm">
+                        <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
+                          <span>Оплачено Готівкою</span>
+                          <Trophy className="w-4 h-4 text-amber-500" />
+                        </div>
+                        <div className="text-3xl font-extrabold tracking-tight font-mono text-amber-400">
+                          {totalOfflinePaid.toFixed(0)} <span className="text-sm">UAH</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Офлайн-розрахунок (секретар)
+                        </div>
+                      </div>
+
+                      <div className="p-5 border border-border bg-card/10 rounded-2xl space-y-2 shadow-sm">
+                        <div className="flex items-center justify-between text-muted-foreground text-[10px] uppercase font-bold tracking-wider">
+                          <span>Борг (Неоплачено)</span>
+                          <AlertTriangle className="w-4 h-4 text-rose-500" />
+                        </div>
+                        <div className="text-3xl font-extrabold tracking-tight font-mono text-rose-500">
+                          {totalUnpaid.toFixed(0)} <span className="text-sm">UAH</span>
+                        </div>
+                        <div className="text-[10px] text-rose-450 font-semibold">
+                          Очікують підтвердження / оплати
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="p-6 border border-border bg-card/10 rounded-2xl space-y-4 shadow-sm">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-bold text-slate-200">Прогрес оплати внесків</span>
+                        <span className="font-mono font-black text-amber-500 text-base">{paidPercentage.toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full h-3 bg-muted/60 rounded-full overflow-hidden p-[2px] border border-border/10">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-emerald-500 rounded-full transition-all duration-500"
+                          style={{ width: `${paidPercentage}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-muted-foreground pt-1">
+                        <span>Загалом сплачено: <strong className="text-emerald-400 font-mono">{(totalOnlinePaid + totalOfflinePaid).toFixed(0)} UAH</strong></span>
+                        <span>Необхідно сплатити: <strong className="text-foreground font-mono">{grandTotal.toFixed(0)} UAH</strong></span>
+                      </div>
+                    </div>
                   </div>
                 );
-              })}
+              })()}
+
+              {historySubTab === "athlete" && (
+                <div className="border border-border rounded-2xl overflow-hidden bg-card/10 shadow-sm">
+                  <Table>
+                    <TableHeader className="bg-muted/20">
+                      <TableRow>
+                        <TableHead className="text-xs font-bold uppercase text-muted-foreground">Спортсмен / Команда</TableHead>
+                        <TableHead className="text-center text-xs font-bold uppercase text-muted-foreground">Заявки</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-muted-foreground">Оплачено Онлайн</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-muted-foreground">Оплачено Готівкою</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-muted-foreground">Неоплачено</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-foreground">Всього</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {historyAthleteGroups.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center py-10 text-muted-foreground text-xs">
+                            Немає даних про спортсменів.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        historyAthleteGroups.map((ath, idx) => (
+                          <TableRow key={idx} className="hover:bg-slate-900/10 border-b border-border/10 last:border-0">
+                            <TableCell className="py-3 text-sm font-semibold text-slate-200">
+                              {ath.athleteName}
+                            </TableCell>
+                            <TableCell className="py-3 text-center font-mono text-xs text-muted-foreground">
+                              {ath.registrations.length}
+                            </TableCell>
+                            <TableCell className="py-3 text-right font-mono text-xs text-emerald-450 font-medium">
+                              {ath.onlinePaid > 0 ? `${ath.onlinePaid.toFixed(0)} UAH` : "—"}
+                            </TableCell>
+                            <TableCell className="py-3 text-right font-mono text-xs text-slate-350">
+                              {ath.offlinePaid > 0 ? `${ath.offlinePaid.toFixed(0)} UAH` : "—"}
+                            </TableCell>
+                            <TableCell className={`py-3 text-right font-mono text-xs font-medium ${ath.unpaid > 0 ? "text-rose-450" : "text-muted-foreground"}`}>
+                              {ath.unpaid > 0 ? `${ath.unpaid.toFixed(0)} UAH` : "—"}
+                            </TableCell>
+                            <TableCell className="py-3 text-right font-mono text-xs font-bold text-foreground">
+                              {ath.total.toFixed(0)} UAH
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {historySubTab === "category" && (
+                <div className="border border-border rounded-2xl overflow-hidden bg-card/10 shadow-sm">
+                  <Table>
+                    <TableHeader className="bg-muted/20">
+                      <TableRow>
+                        <TableHead className="text-xs font-bold uppercase text-muted-foreground">Категорія змагань</TableHead>
+                        <TableHead className="text-center text-xs font-bold uppercase text-muted-foreground">Кількість заявок</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-muted-foreground">Оплачено Онлайн</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-muted-foreground">Оплачено Готівкою</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-muted-foreground">Неоплачено</TableHead>
+                        <TableHead className="text-right text-xs font-bold uppercase text-foreground">Всього</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {historyCategoryGroups.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center py-10 text-muted-foreground text-xs">
+                            Немає даних по категоріях.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        historyCategoryGroups.map((cat, idx) => (
+                          <TableRow key={idx} className="hover:bg-slate-900/10 border-b border-border/10 last:border-0">
+                            <TableCell className="py-3 text-sm text-slate-300 font-medium">
+                              {cat.categoryName}
+                            </TableCell>
+                            <TableCell className="py-3 text-center font-mono text-xs text-muted-foreground">
+                              {cat.regCount}
+                            </TableCell>
+                            <TableCell className="py-3 text-right font-mono text-xs text-emerald-450 font-medium">
+                              {cat.onlinePaid > 0 ? `${cat.onlinePaid.toFixed(0)} UAH` : "—"}
+                            </TableCell>
+                            <TableCell className="py-3 text-right font-mono text-xs text-slate-350">
+                              {cat.offlinePaid > 0 ? `${cat.offlinePaid.toFixed(0)} UAH` : "—"}
+                            </TableCell>
+                            <TableCell className={`py-3 text-right font-mono text-xs font-medium ${cat.unpaid > 0 ? "text-rose-450" : "text-muted-foreground"}`}>
+                              {cat.unpaid > 0 ? `${cat.unpaid.toFixed(0)} UAH` : "—"}
+                            </TableCell>
+                            <TableCell className="py-3 text-right font-mono text-xs font-bold text-foreground">
+                              {cat.total.toFixed(0)} UAH
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {historySubTab === "transactions" && (
+                <div className="space-y-8">
+                  {/* Invoices List */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      <CreditCard className="w-5 h-5 text-amber-500" /> Рахунки на оплату (Monobank)
+                    </h3>
+                    {isLoadingInvoices && invoices.length === 0 ? (
+                      <div className="flex justify-center py-10">
+                        <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                      </div>
+                    ) : invoices.length === 0 ? (
+                      <div className="text-center py-10 border border-dashed border-border rounded-xl bg-muted/5 text-sm text-muted-foreground">
+                        Немає згенерованих рахунків.
+                      </div>
+                    ) : (
+                      <div className="border border-border rounded-2xl overflow-hidden bg-card/10 shadow-sm">
+                        <Table>
+                          <TableHeader className="bg-muted/30">
+                            <TableRow>
+                              <TableHead>Дата створення</TableHead>
+                              <TableHead>Тип оплати</TableHead>
+                              <TableHead>Сума</TableHead>
+                              <TableHead>Статус</TableHead>
+                              <TableHead className="text-right">Дії</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredHistoryInvoices.map((inv) => (
+                              <TableRow key={inv.id} className="border-b border-border/10 last:border-0">
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {new Date(inv.created_at).toLocaleString("uk-UA")}
+                                </TableCell>
+                                <TableCell
+                                  className="text-sm font-semibold text-indigo-400 hover:text-indigo-300 cursor-pointer hover:underline"
+                                  onClick={() => handleOpenInvoiceModal(inv)}
+                                >
+                                  {inv.payment_type === "registrations" ? "Стартові внески" : "Комісія платформи"}
+                                </TableCell>
+                                <TableCell className="font-mono font-bold">{inv.amount} UAH</TableCell>
+                                <TableCell>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    inv.status === "paid"
+                                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                      : inv.status === "pending"
+                                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                                      : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  }`}>
+                                    {inv.status === "paid" ? "Сплачено" : inv.status === "pending" ? "Очікує оплати" : "Скасовано/Помилка"}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right space-x-2">
+                                  {inv.status === "pending" && (
+                                    <>
+                                      {inv.payment_url && (
+                                        <Button
+                                          size="sm"
+                                          variant="sport"
+                                          className="h-7 text-xs px-2.5 rounded-lg"
+                                          onClick={() => window.open(inv.payment_url, "_blank")}
+                                        >
+                                          Сплатити
+                                        </Button>
+                                      )}
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs px-2.5 rounded-lg border-border hover:bg-muted"
+                                        onClick={() => handleSyncInvoice(inv.id)}
+                                        disabled={isSyncingInvoiceId === inv.id}
+                                      >
+                                        {isSyncingInvoiceId === inv.id ? (
+                                          <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                        ) : null}
+                                        Синхронізувати
+                                      </Button>
+                                    </>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Transactions List */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-amber-500" /> Історія транзакцій (Успішні оплати)
+                    </h3>
+                    {isLoadingTransactions ? (
+                      <div className="flex justify-center py-10">
+                        <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                      </div>
+                    ) : transactions.length === 0 ? (
+                      <div className="text-center py-10 border border-dashed border-border rounded-xl bg-muted/5 text-sm text-muted-foreground">
+                        Ви ще не проводили транзакцій через платформу.
+                      </div>
+                    ) : (
+                      <div className="border border-border rounded-2xl overflow-hidden bg-card/10 shadow-sm">
+                        <Table>
+                          <TableHeader className="bg-muted/30">
+                            <TableRow>
+                              <TableHead>Дата</TableHead>
+                              <TableHead>ID / Референс</TableHead>
+                              <TableHead>Призначення</TableHead>
+                              <TableHead>Метод</TableHead>
+                              <TableHead className="text-right">Сума</TableHead>
+                              <TableHead className="text-center">Квитанція</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredHistoryTransactions.map((tx) => (
+                              <TableRow key={tx.id} className="border-b border-border/10 last:border-0">
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {new Date(tx.created_at).toLocaleString("uk-UA")}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs max-w-[120px] truncate" title={tx.reference}>
+                                  {tx.reference}
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  <span
+                                    className="font-medium text-indigo-400 hover:text-indigo-300 cursor-pointer hover:underline"
+                                    onClick={() => {
+                                      const inv = invoices.find(i => i.id === tx.invoice);
+                                      if (inv) handleOpenInvoiceModal(inv);
+                                    }}
+                                  >
+                                    {tx.payment_type_display}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground block">
+                                    {tx.transaction_type_display}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-xs font-semibold text-foreground">
+                                  {tx.method_display}
+                                </TableCell>
+                                <TableCell className={`text-right font-mono font-bold ${tx.amount < 0 ? "text-rose-500" : "text-emerald-500"}`}>
+                                  {tx.amount} UAH
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  {!tx.receipt_url || tx.receipt_url.includes("demo-sandbox-receipt") ? (
+                                    <span className="text-xs text-muted-foreground italic">Локальний режим (квитанція недоступна)</span>
+                                  ) : (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs px-2.5 rounded-lg border-border hover:bg-muted"
+                                      onClick={() => window.open(tx.receipt_url, "_blank")}
+                                    >
+                                      Офіційна квитанція
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Діалог симуляції Stripe / LiqPay */}
+          {/* Діалог підтвердження оплати Monobank */}
           <Dialog open={!!showPayModal} onOpenChange={() => setShowPayModal(null)}>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <CreditCard className="w-5 h-5 text-amber-500" /> Симуляція платіжного шлюзу (Stripe / LiqPay)
+                  <CreditCard className="w-5 h-5 text-amber-500" /> Оплата стартових внесків Monobank Checkout
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-4 py-2">
                 <div className="p-4 border border-amber-500/20 bg-amber-500/5 text-amber-500 text-xs rounded-lg flex items-start gap-2">
                   <Info className="w-4 h-4 shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-semibold">Тестовий платіж (TODO заглушка)</p>
-                    <p className="mt-1 leading-relaxed">
-                      Ви сплачуєте внески за участь у турнірі <strong>{showPayModal?.title}</strong>.
-                      Оплата здійснюється в симуляційному режимі. Жодні реальні кошти з вашої картки списані не будуть.
+                    <p className="font-semibold">Платіжна система Monobank Acquiring</p>
+                    <p className="mt-1 leading-relaxed text-muted-foreground">
+                      Ви сплачуєте внески за участь у турнірі <strong>{showPayModal?.tournamentTitle}</strong> для спортсмена/команди <strong>{showPayModal?.athleteName}</strong>.
+                      Вас буде перенаправлено на безпечну сторінку еквайрингу Monobank для проведення платежу.
                     </p>
                   </div>
                 </div>
@@ -2762,11 +3827,15 @@ export default function CoachDashboardPage() {
                 <div className="p-4 bg-muted/20 border border-border rounded-xl space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Турнір:</span>
-                    <span className="font-medium text-right max-w-[240px] truncate">{showPayModal?.title}</span>
+                    <span className="font-medium text-right max-w-[240px] truncate">{showPayModal?.tournamentTitle}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Учасник:</span>
+                    <span className="font-medium text-right max-w-[240px] truncate">{showPayModal?.athleteName}</span>
                   </div>
                   <div className="flex justify-between font-semibold border-t border-border/40 pt-2 text-base text-amber-500">
                     <span>Сума до сплати:</span>
-                    <span>{showPayModal ? getGrandTotalFor(unpaidRegistrations.filter(r => r.tournament_id === showPayModal.id)).toFixed(0) : 0} UAH</span>
+                    <span>{showPayModal ? getGrandTotalFor(showPayModal.registrations).toFixed(0) : 0} UAH</span>
                   </div>
                 </div>
               </div>
@@ -2774,7 +3843,7 @@ export default function CoachDashboardPage() {
                 <Button variant="outline" onClick={() => setShowPayModal(null)}>Скасувати</Button>
                 <Button variant="sport" onClick={handleSimulatePayment} disabled={isPayingInvoice}>
                   {isPayingInvoice ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : null}
-                  Підтвердити оплату
+                  Сплатити через Monobank
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -2818,19 +3887,15 @@ export default function CoachDashboardPage() {
             <div className="flex flex-wrap items-center gap-4 w-full md:w-auto shrink-0 justify-end">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">Турнір:</span>
-                <Select value={activeTournamentFilter} onValueChange={handleActiveTournamentFilterChange}>
-                  <SelectTrigger className="w-[180px] h-9 rounded-xl text-xs">
-                    <SelectValue placeholder="Всі турніри" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Всі турніри</SelectItem>
-                    {activeTournamentsList.map((t) => (
-                      <SelectItem key={t.id} value={String(t.id)}>
-                        {t.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={activeTournamentOptions}
+                  value={activeTournamentFilter}
+                  onValueChange={handleActiveTournamentFilterChange}
+                  placeholder="Всі турніри"
+                  searchPlaceholder="Пошук турніру..."
+                  className="w-[180px]"
+                  triggerClassName="h-9 rounded-xl text-xs border border-border bg-background"
+                />
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">Сортувати за:</span>
@@ -2889,22 +3954,60 @@ export default function CoachDashboardPage() {
                           "px-2.5 py-0.5 rounded-full text-xs font-semibold border",
                           reg.status === "confirmed"
                             ? "bg-green-500/10 text-green-500 border-green-500/20"
-                            : "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                            : reg.status === "withdrawn"
+                              ? "bg-rose-500/10 text-rose-500 border-rose-500/20"
+                              : "bg-amber-500/10 text-amber-500 border-amber-500/20"
                         )}>
-                          {reg.status === "confirmed" ? "Зважено (OK)" : "Очікує зважування"}
+                          {reg.status === "withdrawn"
+                            ? "Знято"
+                            : reg.status === "confirmed"
+                              ? "Зважено (OK)"
+                              : "Очікує зважування"}
                         </span>
                       </TableCell>
                       <TableCell>
                         <span className={cn(
                           "px-2.5 py-0.5 rounded-full text-xs font-semibold border",
-                          reg.payment_status === "paid"
-                            ? "bg-green-500/10 text-green-500 border-green-500/20"
-                            : "bg-red-500/10 text-red-500 border-red-500/20"
+                          reg.status === "withdrawn"
+                            ? reg.payment_status === "paid"
+                              ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                              : "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                            : reg.payment_status === "paid"
+                              ? "bg-green-500/10 text-green-500 border-green-500/20"
+                              : "bg-red-500/10 text-red-500 border-red-500/20"
                         )}>
-                          {reg.payment_status === "paid" ? "Сплачено" : "Не сплачено"}
+                          {reg.status === "withdrawn"
+                            ? reg.payment_status === "paid"
+                              ? reg.payment_method === "offline"
+                                ? reg.offline_refund_status === "pending"
+                                  ? "Знято (Підтвердьте отримання)"
+                                  : "Знято (Оч. пов. готівки)"
+                                : "Знято (Повернення після завершення)"
+                              : reg.offline_refund_status === "confirmed"
+                                ? "Скасовано (Повернено)"
+                                : "Скасовано"
+                            : reg.payment_status === "paid"
+                              ? "Сплачено"
+                              : "Не сплачено"}
                         </span>
                       </TableCell>
                       <TableCell className="text-right flex items-center justify-end gap-1.5">
+                        {reg.status === "withdrawn" && reg.payment_method === "offline" && reg.offline_refund_status === "pending" && (
+                          <Button
+                            variant="sport"
+                            size="sm"
+                            className="h-8 px-2.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-none"
+                            onClick={() => handleConfirmOfflineRefundReceived(reg.id)}
+                            disabled={confirmingRefundId === reg.id}
+                          >
+                            {confirmingRefundId === reg.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            ) : (
+                              <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                            )}
+                            Отримав готівку
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -2917,9 +4020,27 @@ export default function CoachDashboardPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled={withdrawingRegId === reg.id}
-                          onClick={() => handleWithdrawRegistration(reg.id)}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs h-8 font-semibold"
+                          disabled={
+                            withdrawingRegId === reg.id ||
+                            reg.tournament_status === "active" ||
+                            reg.tournament_status === "completed" ||
+                            reg.status === "withdrawn"
+                          }
+                          onClick={() => {
+                            const hasOtherRegs = activeRegistrations.some(
+                              (r) =>
+                                r.id !== reg.id &&
+                                r.tournament_id === reg.tournament_id &&
+                                ((reg.athlete && r.athlete?.id === reg.athlete.id) ||
+                                  (reg.team && r.team?.id === reg.team.id))
+                            );
+                            if (reg.payment_status === "paid" || hasOtherRegs) {
+                              setWithdrawWarningReg(reg);
+                            } else {
+                              handleWithdrawRegistration(reg.id);
+                            }
+                          }}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs h-8 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {withdrawingRegId === reg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Trash2 className="w-3.5 h-3.5 mr-1" /> Вилучити</>}
                         </Button>
@@ -2930,6 +4051,182 @@ export default function CoachDashboardPage() {
               </Table>
             </div>
           )}
+
+          {/* Dialog confirmation for paid registration withdrawal */}
+          <Dialog open={!!withdrawWarningReg} onOpenChange={() => setWithdrawWarningReg(null)}>
+            <DialogContent className="sm:max-w-md bg-slate-900 border-slate-800 text-slate-100">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-rose-500">
+                  <AlertTriangle className="w-5 h-5 text-rose-500" /> Підтвердження вилучення та повернення
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <p className="text-sm text-slate-300 leading-relaxed">
+                  Ви намагаєтеся вилучити спортсмена <strong>{withdrawWarningReg ? formatRegistrationName(withdrawWarningReg) : ""}</strong> з категорії <strong>{withdrawWarningReg?.category_name}</strong>.
+                </p>
+
+                {otherRegsCount > 0 && (
+                  <div className="flex items-center gap-3 p-3 bg-slate-950/40 border border-slate-800 rounded-xl">
+                    <input
+                      type="checkbox"
+                      id="withdrawAllCategories"
+                      checked={withdrawAllCategories}
+                      onChange={(e) => setWithdrawAllCategories(e.target.checked)}
+                      className="w-4 h-4 rounded text-rose-500 focus:ring-rose-500 focus:ring-opacity-50 cursor-pointer"
+                    />
+                    <div>
+                      <Label htmlFor="withdrawAllCategories" className="text-xs text-foreground font-semibold cursor-pointer select-none">
+                        Зняти також з усіх інших категорій ({otherRegsCount})
+                      </Label>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                        {otherRegsToWithdraw.map((r) => r.category_name).join(", ")}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {hasPaidRegs ? (
+                  <>
+                    {onlinePaidRegs.some((r) => r.refund_policy === "refundable") && (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs rounded-lg flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Увага:</strong> Комісія сервісу (5%) у разі скасування сплачених онлайн-реєстрацій та повернення коштів не повертається!
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl text-xs space-y-2.5">
+                      {onlinePaidRegs.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex justify-between pb-1 border-b border-slate-850 font-semibold text-emerald-400">
+                            <span>Онлайн-оплата:</span>
+                            <span>{onlinePaidRegs.length} кат.</span>
+                          </div>
+                          <div className="flex justify-between pl-3 pb-1 border-b border-slate-850">
+                            <span className="text-slate-400">Стартовий внесок (онлайн):</span>
+                            <span className="font-mono text-slate-200">{onlineBaseFee} UAH</span>
+                          </div>
+                          <div className="flex justify-between pl-3 pb-1 border-b border-slate-850">
+                            <span className="text-slate-400">Сплачено всього (онлайн):</span>
+                            <span className="font-mono text-slate-200">{onlineTotalPaid} UAH</span>
+                          </div>
+                          {onlineCommission > 0 && (
+                            <div className="flex justify-between pl-3 pb-1 border-b border-slate-850">
+                              <span className="text-slate-400">Комісія сервісу (5% - не повертається):</span>
+                              <span className="font-mono text-rose-400">-{onlineCommission} UAH</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between pl-3 pb-1 border-b border-slate-850">
+                            <span className="text-slate-400">Повернення на карту (Monobank):</span>
+                            <span className="font-mono text-emerald-400 font-semibold">{onlineRefund} UAH</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {offlinePaidRegs.length > 0 && (
+                        <div className="space-y-2 mt-2">
+                          <div className="flex justify-between pb-1 border-b border-slate-850 font-semibold text-amber-400">
+                            <span>Оплата готівкою (офлайн):</span>
+                            <span>{offlinePaidRegs.length} кат.</span>
+                          </div>
+                          <div className="flex justify-between pl-3 pb-1 border-b border-slate-850">
+                            <span className="text-slate-400">Сплачено всього (готівка):</span>
+                            <span className="font-mono text-slate-200">{offlineBaseFee} UAH</span>
+                          </div>
+                          <div className="flex justify-between pl-3 pb-1 border-b border-slate-850">
+                            <span className="text-slate-400">Повернення готівкою (через організатора):</span>
+                            <span className="font-mono text-emerald-400 font-semibold">{offlineRefund} UAH</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between pb-1 border-b border-slate-850">
+                        <span className="text-slate-400">Правила повернення:</span>
+                        <span className="font-semibold text-slate-200">
+                          {regsToWithdraw.every((r) => r.payment_status !== "paid" || r.refund_policy === "refundable")
+                            ? "Повернення дозволено (Refundable)"
+                            : regsToWithdraw.every((r) => r.payment_status !== "paid" || r.refund_policy === "non_refundable")
+                            ? "Внески не повертаються (Non-refundable)"
+                            : "Часткове повернення"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between pt-1.5 text-sm font-bold text-slate-100">
+                        <span className="text-slate-350">Сума до повернення (Всього):</span>
+                        <span className="font-mono text-emerald-400 font-bold">
+                          {onlineRefund + offlineRefund} UAH
+                        </span>
+                      </div>
+                    </div>
+
+                    {onlinePaidRegs.length > 0 && (
+                      onlineRefund > 0 ? (
+                        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-lg flex items-start gap-2">
+                          <Info className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+                          <div>
+                            Сума онлайн-оплати <strong>{onlineRefund} UAH</strong> буде автоматично повернута на карту покупця через Monobank Refund API.
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-lg flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                          <div>
+                            <strong>Увага:</strong> Для онлайн-оплат правила турніру не передбачають повернення коштів. Онлайн-внесок буде анульовано!
+                          </div>
+                        </div>
+                      )
+                    )}
+
+                    {offlinePaidRegs.length > 0 && (
+                      offlineRefund > 0 ? (
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs rounded-lg flex items-start gap-2">
+                          <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                          <div>
+                            Оплата здійснювалася готівкою поза платформою. Для повернення суми <strong>{offlineRefund} UAH</strong> зверніться безпосередньо до організатора турніру.
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-lg flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                          <div>
+                            <strong>Увага:</strong> Для оплачених готівкою реєстрацій правила турніру не передбачають повернення коштів. Внесок буде анульовано!
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </>
+                ) : (
+                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs space-y-2.5">
+                    <div className="flex justify-between pb-1 border-b border-slate-850">
+                      <span className="text-slate-400">Статус оплати:</span>
+                      <span className="font-semibold text-slate-400">Не сплачено</span>
+                    </div>
+                    <p className="text-slate-350 leading-relaxed text-xs">
+                      Ці реєстрації не були сплачені, тому вони будуть просто видалені без фінансових транзакцій.
+                    </p>
+                  </div>
+                )}
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setWithdrawWarningReg(null)} className="border-slate-800 text-slate-300 hover:bg-slate-800">
+                  Скасувати
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (withdrawWarningReg) {
+                      const otherIds = withdrawAllCategories ? otherRegsToWithdraw.map((r) => r.id) : [];
+                      handleWithdrawRegistration(withdrawWarningReg.id, otherIds);
+                      setWithdrawWarningReg(null);
+                    }
+                  }}
+                  className="bg-rose-600 hover:bg-rose-700 text-white border-none"
+                >
+                  Підтвердити вилучення
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
 
@@ -3360,17 +4657,33 @@ export default function CoachDashboardPage() {
                                 "px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0",
                                 reg.status === "confirmed"
                                   ? "bg-green-500/10 text-green-500 border-green-500/20"
-                                  : "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                                  : reg.status === "withdrawn"
+                                    ? "bg-rose-500/10 text-rose-500 border-rose-500/20"
+                                    : "bg-amber-500/10 text-amber-500 border-amber-500/20"
                               )}>
-                                {reg.status === "confirmed" ? "Зважено" : "Очікує зважування"}
+                                {reg.status === "withdrawn"
+                                  ? "Знято"
+                                  : reg.status === "confirmed"
+                                    ? "Зважено"
+                                    : "Очікує зважування"}
                               </span>
                               <span className={cn(
                                 "px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0",
-                                reg.payment_status === "paid"
-                                  ? "bg-green-500/10 text-green-500 border-green-500/20"
-                                  : "bg-red-500/10 text-red-500 border-red-500/20"
+                                reg.status === "withdrawn"
+                                  ? reg.payment_status === "paid"
+                                    ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                                    : "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                                  : reg.payment_status === "paid"
+                                    ? "bg-green-500/10 text-green-500 border-green-500/20"
+                                    : "bg-red-500/10 text-red-500 border-red-500/20"
                               )}>
-                                {reg.payment_status === "paid" ? "Сплачено" : "Борг"}
+                                {reg.status === "withdrawn"
+                                  ? reg.payment_status === "paid"
+                                    ? "Знято (Повернення після завершення)"
+                                    : "Скасовано"
+                                  : reg.payment_status === "paid"
+                                    ? "Сплачено"
+                                    : "Борг"}
                               </span>
                             </div>
                             <Button
@@ -3521,6 +4834,15 @@ export default function CoachDashboardPage() {
           onUpdate={handleMatchUpdate}
         />
       ))}
+
+      <InvoiceDetailsDialog
+        invoice={selectedInvoiceForModal}
+        isOpen={isInvoiceModalOpen}
+        onClose={() => {
+          setIsInvoiceModalOpen(false);
+          setSelectedInvoiceForModal(null);
+        }}
+      />
     </div>
   );
 }

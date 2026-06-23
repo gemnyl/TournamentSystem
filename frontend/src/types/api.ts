@@ -19,6 +19,8 @@ export interface User {
   email_verified?: boolean;
   date_joined?: string;
   name_locked?: boolean;
+  is_club_leader?: boolean;
+  credit_limit?: number;
 }
 
 export interface RoleRequest {
@@ -174,8 +176,11 @@ export interface Registration {
   coach_name_short?: string;
   online_payment_enabled?: boolean;
   payment_details?: string;
+  refund_policy?: "refundable" | "non_refundable";
+  offline_refund_status?: "none" | "pending" | "confirmed";
   qr_token?: string;
   tournament_status?: string;
+  payment_invoice?: any;
 }
 
 // ─── Матч ───────────────────────────────────────────────────────────────────
