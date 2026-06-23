@@ -36,6 +36,12 @@ class Tatami(models.Model):
         verbose_name="Категорія для відображення результатів на табло",
     )
     is_active = models.BooleanField(default=True, verbose_name="Активне")
+    scoreboard_ip = models.GenericIPAddressField(
+        null=True, blank=True, verbose_name="IP-адреса апаратного табло"
+    )
+    scoreboard_connected = models.BooleanField(
+        default=False, verbose_name="Статус підключення табло"
+    )
 
     class Meta:
         db_table = "tatami"
