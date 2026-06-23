@@ -1,0 +1,147 @@
+{% extends "admin/index.html" %}
+{% load i18n %}
+
+{% block content %}
+    <div class="space-y-6">
+        <!-- Header Section -->
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Панель управління TournamentSystem</h1>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Метрики та стан турнірної платформи в реальному часі</p>
+            </div>
+        </div>
+
+        <!-- Metric Cards -->
+        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <!-- Active Tournaments -->
+            <div class="relative overflow-hidden rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                <div class="flex items-center justify-between">
+                    <div class="space-y-2">
+                        <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Активні турніри</span>
+                        <div class="flex items-baseline space-x-2">
+                            <span class="text-3xl font-semibold tracking-tight text-primary-600 dark:text-primary-400">{{ active_tournaments_count }}</span>
+                        </div>
+                    </div>
+                    <div class="rounded-lg bg-primary-50 p-3 text-primary-600 dark:bg-primary-950/50 dark:text-primary-400">
+                        <span class="material-symbols-outlined !text-2xl">emoji_events</span>
+                    </div>
+                </div>
+                <div class="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <a href="{% url 'admin:tournaments_tournament_changelist' %}?status__exact=active" class="inline-flex items-center text-xs font-semibold text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300">
+                        Переглянути список
+                        <span class="material-symbols-outlined !text-xs ml-1">arrow_forward</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Role Requests -->
+            <div class="relative overflow-hidden rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                <div class="flex items-center justify-between">
+                    <div class="space-y-2">
+                        <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Запити на верифікацію ролей</span>
+                        <div class="flex items-baseline space-x-2">
+                            <span class="text-3xl font-semibold tracking-tight text-amber-600 dark:text-amber-400">{{ pending_role_requests_count }}</span>
+                            <span class="text-xs font-medium text-gray-400">очікують</span>
+                        </div>
+                    </div>
+                    <div class="rounded-lg bg-amber-50 p-3 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+                        <span class="material-symbols-outlined !text-2xl">rule_folder</span>
+                    </div>
+                </div>
+                <div class="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <a href="{% url 'admin:accounts_rolerequest_changelist' %}?status__exact=pending" class="inline-flex items-center text-xs font-semibold text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300">
+                        Розглянути запити
+                        <span class="material-symbols-outlined !text-xs ml-1">arrow_forward</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Ongoing Matches -->
+            <div class="relative overflow-hidden rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                <div class="flex items-center justify-between">
+                    <div class="space-y-2">
+                        <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Активні поєдинки</span>
+                        <div class="flex items-baseline space-x-2">
+                            <span class="text-3xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">{{ ongoing_matches_count }}</span>
+                        </div>
+                    </div>
+                    <div class="rounded-lg bg-emerald-50 p-3 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
+                        <span class="material-symbols-outlined !text-2xl">sports_martial_arts</span>
+                    </div>
+                </div>
+                <div class="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <a href="{% url 'admin:matches_match_changelist' %}?status__exact=ongoing" class="inline-flex items-center text-xs font-semibold text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 dark:hover:text-emerald-300">
+                        Переглянути матчі
+                        <span class="material-symbols-outlined !text-xs ml-1">arrow_forward</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Load Statistics & System Info -->
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <!-- System Metrics -->
+            <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                <div class="mb-4 flex items-center justify-between">
+                    <h2 class="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                        <span class="material-symbols-outlined text-primary-500">monitoring</span>
+                        Навантаження та ресурси сервера
+                    </h2>
+                </div>
+                <div class="space-y-4">
+                    <!-- CPU Usage -->
+                    <div>
+                        <div class="mb-2 flex items-center justify-between text-sm">
+                            <span class="text-gray-600 dark:text-gray-400">Завантаження процесора (CPU)</span>
+                            <span class="font-semibold text-gray-900 dark:text-white">{{ cpu_usage|floatformat:1 }}%</span>
+                        </div>
+                        <div class="h-2 w-full rounded-full bg-gray-100 dark:bg-gray-800">
+                            <div class="h-2 rounded-full bg-primary-600 transition-all duration-500" style="width: {{ cpu_usage }}%"></div>
+                        </div>
+                    </div>
+
+                    <!-- RAM Usage -->
+                    <div>
+                        <div class="mb-2 flex items-center justify-between text-sm">
+                            <span class="text-gray-600 dark:text-gray-400">Використання оперативної пам'яті (RAM)</span>
+                            <span class="font-semibold text-gray-900 dark:text-white">{{ ram_usage|floatformat:1 }}%</span>
+                        </div>
+                        <div class="h-2 w-full rounded-full bg-gray-100 dark:bg-gray-800">
+                            <div class="h-2 rounded-full bg-emerald-500 transition-all duration-500" style="width: {{ ram_usage }}%"></div>
+                        </div>
+                    </div>
+
+                    <!-- DB Connections -->
+                    <div class="flex items-center justify-between border-t border-gray-100 pt-3 text-sm dark:border-gray-800">
+                        <span class="text-gray-600 dark:text-gray-400">Активні з'єднання з PostgreSQL</span>
+                        <span class="font-semibold text-gray-900 dark:text-white">{{ db_connections }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Server Status & Stats -->
+            <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 flex flex-col justify-between">
+                <div>
+                    <h2 class="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2 mb-3">
+                        <span class="material-symbols-outlined text-primary-500">info</span>
+                        Загальний статус системи
+                    </h2>
+                    <p class="text-sm text-gray-600 dark:text-gray-400">
+                        Сервер ASGI (Daphne), черга повідомлень Redis та база даних PostgreSQL запущені у середовищі Docker. WebSocket-з'єднання з табло та клієнтами працюють у фоновому режимі.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mt-6">
+                    <div class="rounded-lg bg-gray-50 p-4 text-center dark:bg-gray-950/50">
+                        <span class="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Всього користувачів</span>
+                        <span class="mt-1 block text-2xl font-bold text-gray-900 dark:text-white">{{ total_users_count }}</span>
+                    </div>
+                    <div class="rounded-lg bg-gray-50 p-4 text-center dark:bg-gray-950/50">
+                        <span class="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Всього турнірів</span>
+                        <span class="mt-1 block text-2xl font-bold text-gray-900 dark:text-white">{{ total_tournaments_count }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
