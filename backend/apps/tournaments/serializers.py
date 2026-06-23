@@ -107,6 +107,7 @@ class TournamentSerializer(serializers.ModelSerializer):
             "platform_fee_amount",
             "staff_members",
             "use_check_in",
+            "refund_policy",
             "created_at",
         ]
         read_only_fields = [
@@ -121,17 +122,35 @@ class TournamentSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         request = self.context.get("request")
         if request and request.user and request.user.is_authenticated:
-            if self.instance is None:
-                has_debt = Tournament.objects.filter(
+            request.user.refresh_from_db()
+            from django.db.models import Sum
+
+            total_debt = (
+                Tournament.objects.filter(
                     organizer=request.user,
                     status=Tournament.Status.COMPLETED,
                     platform_fee_status="unpaid",
                     platform_fee_amount__gt=0,
-                ).exists()
-                if has_debt:
+                ).aggregate(total=Sum("platform_fee_amount"))["total"]
+                or 0
+            )
+
+            # Блокуємо при створенні нового або при спробі перевести існуючий з draft
+            new_status = attrs.get("status")
+            is_activating = False
+            if (
+                self.instance
+                and self.instance.status == Tournament.Status.DRAFT
+                and new_status in (Tournament.Status.REGISTRATION, Tournament.Status.ACTIVE)
+            ):
+                is_activating = True
+
+            if total_debt > request.user.credit_limit:
+                if self.instance is None or is_activating:
                     raise serializers.ValidationError(
-                        "Неможливо створити турнір, оскільки у вас є "
-                        + "неоплачена комісія за попередні турніри."
+                        f"Неможливо створити турнір або відкрити реєстрацію. Ваш борг за комісію "
+                        f"({total_debt} UAH) перевищує встановлений кредитний ліміт "
+                        f"({request.user.credit_limit} UAH)."
                     )
         return attrs
 
@@ -179,8 +198,12 @@ class RegistrationSerializer(serializers.ModelSerializer):
     payment_details = serializers.CharField(
         source="category.tournament.payment_details", read_only=True
     )
+    refund_policy = serializers.CharField(
+        source="category.tournament.refund_policy", read_only=True
+    )
     qr_token = serializers.SerializerMethodField()
     tournament_status = serializers.CharField(source="category.tournament.status", read_only=True)
+    payment_invoice = serializers.SerializerMethodField()
 
     class Meta:
         model = Registration
@@ -200,16 +223,19 @@ class RegistrationSerializer(serializers.ModelSerializer):
             "coach_name_short",
             "online_payment_enabled",
             "payment_details",
+            "refund_policy",
             "seed_number",
             "recorded_weight",
             "status",
             "status_display",
             "payment_status",
             "payment_method",
+            "offline_refund_status",
             "place",
             "checked_in",
             "created_at",
             "qr_token",
+            "payment_invoice",
         ]
         read_only_fields = ["seed_number", "recorded_weight", "place", "created_at"]
 
@@ -218,6 +244,29 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
         signer = signing.Signer(salt="qr-verification")
         return signer.sign(f"reg:{obj.id}")
+
+    def get_payment_invoice(self, obj):
+        invoice = obj.payment_invoices.filter(status="paid").first()
+        if invoice:
+            return {
+                "id": invoice.id,
+                "invoice_id": invoice.invoice_id,
+                "amount": invoice.amount,
+                "status": invoice.status,
+                "payment_url": invoice.payment_url,
+                "created_at": invoice.created_at.isoformat() if invoice.created_at else None,
+                "registration_details": [
+                    {
+                        "id": r.id,
+                        "athlete_name": f"{r.athlete.last_name} {r.athlete.first_name}"
+                        if r.athlete
+                        else (r.team.name if r.team else ""),
+                        "category_name": r.category.name if r.category else "",
+                    }
+                    for r in invoice.registrations.all()
+                ],
+            }
+        return None
 
     def get_fee(self, obj):
         price = obj.category.get_athlete_fee()
@@ -390,6 +439,21 @@ class RegistrationSerializer(serializers.ModelSerializer):
                 self._validate_recorded_weight_range(float(recorded_weight), curr_category)
 
     def validate(self, attrs):
+        # Перевірка блокування змін для онлайн-оплат
+        if (
+            self.instance
+            and self.instance.payment_method == "online"
+            and self.instance.payment_status == "paid"
+        ):
+            if "payment_status" in attrs and attrs["payment_status"] != "paid":
+                raise serializers.ValidationError(
+                    {"payment_status": "Неможливо змінити статус успішної онлайн-оплати."}
+                )
+            if "payment_method" in attrs and attrs["payment_method"] != "online":
+                raise serializers.ValidationError(
+                    {"payment_method": "Неможливо змінити спосіб успішної онлайн-оплати."}
+                )
+
         category = attrs.get("category")
         athlete = attrs.get("athlete")
         team = attrs.get("team")
