@@ -170,6 +170,11 @@ class TournamentAdmin(UnfoldModelAdmin):
                 category__tournament=obj, payment_status="paid"
             ).exists():
                 return False
+            if request.user.role == User.Role.ORGANIZER:
+                return True
+        else:
+            if request.user.role == User.Role.ORGANIZER:
+                return True
         if request.user.role not in (User.Role.ORGANIZER, User.Role.ADMIN):
             return False
         return super().has_delete_permission(request, obj)
