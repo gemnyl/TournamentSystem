@@ -129,6 +129,16 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
     email_verified = models.BooleanField(default=False, verbose_name="Email підтверджено")
     name_locked = models.BooleanField(default=True, verbose_name="ПІБ заблоковано")
+    is_club_leader = models.BooleanField(
+        default=False,
+        verbose_name="Керівник клубу",
+        help_text="Дає право сплачувати за всіх членів клубу",
+    )
+    credit_limit = models.PositiveIntegerField(
+        default=1000,
+        verbose_name="Кредитний ліміт комісії (UAH)",
+        help_text="Максимальна сума боргу перед платформою",
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)

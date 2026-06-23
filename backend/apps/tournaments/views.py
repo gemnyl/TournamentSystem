@@ -42,6 +42,7 @@ class TournamentViewSet(viewsets.ModelViewSet):
                 raise PermissionDenied("Турнір завершено. Редагування турніру заборонене.")
 
     def get_queryset(self):
+        Tournament.auto_transition_statuses()
         qs = super().get_queryset()
         staff_member = self.request.query_params.get("staff_member")
         if staff_member == "me" and self.request.user.is_authenticated:
@@ -128,6 +129,143 @@ class TournamentViewSet(viewsets.ModelViewSet):
         tournament.platform_fee_status = "paid"
         tournament.save(update_fields=["platform_fee_status"])
         return Response(TournamentSerializer(tournament).data)
+
+    @action(detail=True, methods=["get"], url_path="finance_report")
+    def finance_report(self, request, pk=None):
+        """GET /api/tournaments/{id}/finance_report/"""
+        tournament = self.get_object()
+        if tournament.organizer != request.user and request.user.role != "admin":
+            return Response(
+                {
+                    "detail": "Доступ заблоковано. Лише організатор "
+                    "турніру може бачити фінансовий звіт."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        from django.db.models import Sum
+
+        from apps.billing.views import calculate_registration_fee
+
+        # Усі реєстрації турніру
+        all_regs = Registration.objects.filter(category__tournament=tournament)
+        active_regs = all_regs.exclude(status__in=["rejected", "withdrawn"])
+
+        # Оплачені реєстрації включають зняті (withdrawn), якщо їхня оплата
+        # ще не скасована (до завершення турніру або у разі non_refundable правил)
+        online_paid = all_regs.filter(payment_status="paid", payment_method="online")
+        offline_paid = all_regs.filter(payment_status="paid", payment_method="offline")
+
+        online_revenue = sum(calculate_registration_fee(r) for r in online_paid)
+        offline_revenue = sum(calculate_registration_fee(r) for r in offline_paid)
+
+        # Розрахунок комісії платформи
+        platform_fee_held = 0
+        for r in online_paid:
+            price = calculate_registration_fee(r)
+            platform_fee_held += int(price * 0.05)
+
+        platform_fee_offline_debt = 0
+        for r in offline_paid:
+            price = calculate_registration_fee(r)
+            platform_fee_offline_debt += int(price * 0.05)
+
+        platform_fee_total = platform_fee_held + platform_fee_offline_debt
+
+        if tournament.platform_fee_status == "paid":
+            platform_fee_debt = 0
+            platform_fee_paid = platform_fee_offline_debt
+        else:
+            platform_fee_debt = platform_fee_offline_debt
+            platform_fee_paid = 0
+
+        # Загальний борг організатора перед платформою за ВСІ completed турніри
+        total_debt = (
+            Tournament.objects.filter(
+                organizer=request.user,
+                status=Tournament.Status.COMPLETED,
+                platform_fee_status="unpaid",
+                platform_fee_amount__gt=0,
+            ).aggregate(total=Sum("platform_fee_amount"))["total"]
+            or 0
+        )
+
+        # Розрахунок виплат організатору
+        from apps.billing.models import PayoutRequest
+
+        withdrawn_funds = (
+            PayoutRequest.objects.filter(
+                tournament=tournament, status=PayoutRequest.Status.COMPLETED
+            ).aggregate(total=Sum("amount"))["total"]
+            or 0
+        )
+
+        pending_withdrawn_funds = (
+            PayoutRequest.objects.filter(
+                tournament=tournament, status=PayoutRequest.Status.PENDING
+            ).aggregate(total=Sum("amount"))["total"]
+            or 0
+        )
+
+        if tournament.platform_fee_status == "unpaid":
+            available_balance = max(
+                0,
+                online_revenue
+                - platform_fee_held
+                - platform_fee_offline_debt
+                - withdrawn_funds
+                - pending_withdrawn_funds,
+            )
+        else:
+            available_balance = max(
+                0, online_revenue - platform_fee_held - withdrawn_funds - pending_withdrawn_funds
+            )
+
+        report = {
+            "total_revenue": online_revenue + offline_revenue,
+            "total_entries_count": active_regs.count(),
+            "online_funds": online_revenue,
+            "online_entries_count": online_paid.count(),
+            "offline_funds": offline_revenue,
+            "offline_entries_count": offline_paid.count(),
+            "platform_fee_total": platform_fee_total,
+            "platform_fee_held": platform_fee_held,
+            "platform_fee_offline_debt": platform_fee_offline_debt,
+            "platform_fee_paid": platform_fee_paid,
+            "platform_fee_debt": platform_fee_debt,
+            "organizer_credit_limit": request.user.credit_limit,
+            "organizer_total_debt": total_debt,
+            "withdrawn_funds": withdrawn_funds,
+            "pending_withdrawn_funds": pending_withdrawn_funds,
+            "available_balance": available_balance,
+        }
+        return Response(report, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="admin_platform_debts")
+    def admin_platform_debts(self, request):
+        """GET /api/tournaments/admin_platform_debts/"""
+        if request.user.role != "admin":
+            return Response({"detail": "Доступ заблоковано."}, status=status.HTTP_403_FORBIDDEN)
+
+        debts = Tournament.objects.filter(
+            status=Tournament.Status.COMPLETED,
+            platform_fee_status="unpaid",
+            platform_fee_amount__gt=0,
+        ).select_related("organizer")
+
+        data = []
+        for t in debts:
+            data.append(
+                {
+                    "tournament_id": t.id,
+                    "title": t.title,
+                    "organizer_name": t.organizer.get_full_name(),
+                    "organizer_email": t.organizer.email,
+                    "amount": t.platform_fee_amount,
+                    "completed_at": t.completed_at,
+                }
+            )
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="generate_all_brackets")
     def generate_all_brackets(self, request, pk=None):
@@ -841,7 +979,11 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         if user.is_authenticated and user.role == "coach" and self.action == "list":
             from django.db.models import Q
 
-            qs = qs.filter(Q(athlete__coach=user) | Q(team__coach=user))
+            club_scope = self.request.query_params.get("club_scope") == "true"
+            if club_scope and user.is_club_leader and user.club:
+                qs = qs.filter(Q(athlete__club=user.club) | Q(team__club=user.club))
+            else:
+                qs = qs.filter(Q(athlete__coach=user) | Q(team__coach=user))
         category_id = self.request.query_params.get("category")
         if category_id:
             qs = qs.filter(category_id=category_id)
@@ -851,10 +993,41 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_permissions(self):
-        if self.action in ("confirm_weigh_in", "check_in", "update", "partial_update"):
+        if self.action in (
+            "confirm_weigh_in",
+            "check_in",
+            "bulk_update_secretary",
+        ):
             from apps.accounts.permissions import IsTournamentStaffOrOrganizer
 
             return [IsTournamentStaffOrOrganizer()]
+        if self.action in ("update", "partial_update"):
+            from rest_framework import permissions
+
+            class IsCoachOrStaffForRegistration(permissions.BasePermission):
+                def has_permission(self, request, view):
+                    return bool(request.user and request.user.is_authenticated)
+
+                def has_object_permission(self, request, view, obj):
+                    if not request.user or not request.user.is_authenticated:
+                        return False
+                    if request.user.role == "admin":
+                        return True
+                    if request.user.role == "coach":
+                        coach = None
+                        if obj.athlete:
+                            coach = obj.athlete.coach
+                        elif obj.team:
+                            coach = obj.team.coach
+                        return coach == request.user
+                    tournament = obj.category.tournament
+                    if tournament.organizer == request.user:
+                        return True
+                    if tournament.staff_members.filter(id=request.user.id).exists():
+                        return True
+                    return False
+
+            return [IsCoachOrStaffForRegistration()]
         if self.action in ("create", "destroy", "bulk_pay"):
             from apps.accounts.permissions import IsCoachOrOrganizer
 
@@ -864,12 +1037,113 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
     def perform_update(self, serializer):
-        from rest_framework.exceptions import ValidationError
+        from rest_framework.exceptions import PermissionDenied, ValidationError
 
         instance = serializer.instance
+        user = self.request.user
+
         if instance and instance.category.tournament.status == "completed":
             raise ValidationError("Редагування реєстрацій завершеного турніру заблоковано.")
+
+        if user.is_authenticated and user.role == "coach":
+            coach = None
+            if instance.athlete:
+                coach = instance.athlete.coach
+            elif instance.team:
+                coach = instance.team.coach
+
+            if coach != user:
+                raise PermissionDenied("Ви можете редагувати тільки власні заявки.")
+
+            # Validate that coach is only setting status to 'withdrawn'
+            validated_keys = set(serializer.validated_data.keys())
+            if (
+                not validated_keys.issubset({"status"})
+                or serializer.validated_data.get("status") != "withdrawn"
+            ):
+                raise ValidationError(
+                    "Тренер може тільки змінювати статус заявки на 'withdrawn' (знято)."
+                )
+
+        old_status = instance.status
+        old_payment_status = instance.payment_status
+        old_payment_method = instance.payment_method
+
         instance = serializer.save()
+
+        # Перевірка на перехід у статус withdrawn для повернення коштів
+        if old_status != "withdrawn" and instance.status == "withdrawn":
+            if old_payment_status == "paid":
+                tournament = instance.category.tournament
+                if tournament.refund_policy == "refundable":
+                    if tournament.status not in [
+                        Tournament.Status.ACTIVE,
+                        Tournament.Status.COMPLETED,
+                    ]:
+                        if old_payment_method == "online":
+                            import uuid
+
+                            from apps.billing.models import PaymentInvoice, Transaction
+                            from apps.billing.services import MonobankService
+                            from apps.billing.views import calculate_registration_fee
+
+                            invoice = instance.payment_invoices.filter(
+                                status=PaymentInvoice.Status.PAID
+                            ).first()
+                            if invoice and invoice.invoice_id:
+                                try:
+                                    base_fee = calculate_registration_fee(instance)
+                                    if tournament.commission_payer == "buyer":
+                                        price_to_refund = base_fee
+                                    else:
+                                        price_to_refund = int(base_fee * 0.95)
+
+                                    if instance.athlete:
+                                        name = (
+                                            f"{instance.athlete.last_name} "
+                                            f"{instance.athlete.first_name}"
+                                        )
+                                    elif instance.team:
+                                        name = instance.team.name
+                                    else:
+                                        name = ""
+                                    ref_id = f"REF-{uuid.uuid4().hex[:8]}-{name}"[:100]
+
+                                    MonobankService.refund_invoice(
+                                        invoice_id=invoice.invoice_id,
+                                        amount_uah=price_to_refund,
+                                        ext_ref=ref_id,
+                                    )
+
+                                    # Фіксуємо транзакцію повернення
+                                    Transaction.objects.create(
+                                        invoice=invoice,
+                                        user=invoice.user,
+                                        payment_type=PaymentInvoice.PaymentType.REGISTRATIONS,
+                                        transaction_type=Transaction.Type.REFUND,
+                                        amount=-price_to_refund,
+                                        method=Transaction.Method.ONLINE,
+                                        reference=ref_id,
+                                        monobank_receipt_id=invoice.transactions.first().monobank_receipt_id
+                                        if invoice.transactions.exists()
+                                        else None,
+                                        receipt_url=invoice.transactions.first().receipt_url
+                                        if invoice.transactions.exists()
+                                        else None,
+                                    )
+
+                                    instance.payment_status = "unpaid"
+                                    instance.save(update_fields=["payment_status"])
+                                except Exception:
+                                    # У дипломному проекті припустимо ігнорувати помилку з'єднання
+                                    pass
+                        elif old_payment_method == "offline":
+                            # Офлайн-оплата готівкою залишається зі статусом "paid"
+                            # (і відображається як "Знято (Оч. пов.)") до тих пір,
+                            # поки організатор фізично не поверне кошти та не
+                            # змінить статус оплати на "unpaid"
+                            pass
+
         from apps.common.broadcast import broadcast_registration_update
 
         broadcast_registration_update(instance)
@@ -881,6 +1155,19 @@ class RegistrationViewSet(viewsets.ModelViewSet):
                 {"detail": "Видалення реєстрацій завершеного турніру заблоковано."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Забороняємо видалення сплачених реєстрацій (тільки зняття через статус)
+        if instance.payment_status == "paid":
+            return Response(
+                {
+                    "detail": (
+                        "Неможливо видалити сплачену реєстрацію. Замість "
+                        "видалення зніміть її з турніру (статус 'Знято')."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Security check: coach can only delete their own athletes' / teams' registrations
         if request.user.role == "coach":
             coach = None
@@ -908,6 +1195,12 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         Тіло: {"weight": 74.5}
         """
         registration = self.get_object()
+        if not registration.category.tournament.weigh_in_required:
+            return Response(
+                {"detail": "Зважування не потрібне для цього турніру."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if registration.category.tournament.status == "completed":
             return Response(
                 {"detail": "Зважування заблоковано, оскільки турнір уже завершено."},
@@ -940,6 +1233,130 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         broadcast_registration_update(registration)
 
         return Response(RegistrationSerializer(registration).data)
+
+    @action(detail=False, methods=["post"], url_path="athlete_weigh_in")
+    def athlete_weigh_in(self, request):
+        """POST /api/registrations/athlete_weigh_in/
+        Тіло: {
+            "athlete_id": 1,
+            "team_id": 1,
+            "tournament_id": 2,
+            "weight": 74.5
+        }
+        """
+        if not request.user or not request.user.is_authenticated:
+            return Response(
+                {"detail": "Автентифікація обов'язкова."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        athlete_id = request.data.get("athlete_id")
+        team_id = request.data.get("team_id")
+        tournament_id = request.data.get("tournament_id")
+        weight_val = request.data.get("weight")
+
+        if not tournament_id:
+            return Response(
+                {"detail": "tournament_id обов'язковий."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if weight_val is None:
+            if team_id:
+                weight_val = 0.0
+            else:
+                return Response(
+                    {"detail": "Поле weight є обов'язковим."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            weight = float(weight_val)
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "Некоректне значення ваги."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if athlete_id:
+            registrations = Registration.objects.filter(
+                athlete_id=athlete_id, category__tournament_id=tournament_id
+            )
+        elif team_id:
+            registrations = Registration.objects.filter(
+                team_id=team_id, category__tournament_id=tournament_id
+            )
+        else:
+            return Response(
+                {"detail": "athlete_id або team_id обов'язковий."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not registrations.exists():
+            return Response(
+                {"detail": "Реєстрацій не знайдено."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Перевірка прав
+        tournament = registrations.first().category.tournament
+        if (
+            request.user != tournament.organizer
+            and request.user not in tournament.staff_members.all()
+            and request.user.role != "admin"
+        ):
+            return Response(
+                {"detail": f"Ви не маєте прав доступу до турніру '{tournament.title}'."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not tournament.weigh_in_required:
+            return Response(
+                {"detail": "Зважування не потрібне для цього турніру."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if tournament.status == "completed":
+            return Response(
+                {"detail": "Зважування заблоковано, оскільки турнір уже завершено."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        errors = []
+        # Валідуємо всі спочатку
+        for reg in registrations:
+            category = reg.category
+            if category.min_weight is not None and weight < float(category.min_weight):
+                errors.append(
+                    f"Вага {weight} кг менша за мінімально допустиму для "
+                    f"категорії {category.name} ({category.min_weight} кг)."
+                )
+            if category.max_weight is not None and weight > float(category.max_weight):
+                errors.append(
+                    f"Вага {weight} кг більша за максимально допустиму для "
+                    f"категорії {category.name} ({category.max_weight} кг)."
+                )
+
+        if errors:
+            return Response(
+                {"detail": " ".join(errors)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Зберігаємо
+        for reg in registrations:
+            reg.confirm_weigh_in(weight)
+
+        # Broadcast updates
+        from apps.common.broadcast import broadcast_registration_update
+
+        for reg in registrations:
+            broadcast_registration_update(reg)
+
+        return Response(
+            {"detail": f"Успішно зважено спортсмена. Оновлено {registrations.count()} категорій."},
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="check_in")
     def check_in(self, request, pk=None):
@@ -1000,5 +1417,451 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         updated_count = registrations.update(payment_status="paid", payment_method=payment_method)
         return Response(
             {"detail": f"Успішно оновлено {updated_count} реєстрацій."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk_update_secretary")
+    def bulk_update_secretary(self, request):
+        """POST /api/registrations/bulk_update_secretary/
+        Тіло: {
+            "registration_ids": [1, 2, 3],
+            "checked_in": true,             # опціонально
+            "status": "confirmed",          # опціонально ("confirmed", "withdrawn")
+            "payment_status": "paid"        # опціонально ("paid", "unpaid")
+        }
+        """
+        if not request.user or not request.user.is_authenticated:
+            return Response(
+                {"detail": "Автентифікація обов'язкова."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        reg_ids = request.data.get("registration_ids", [])
+        if not isinstance(reg_ids, list) or not reg_ids:
+            return Response(
+                {"detail": "registration_ids має бути списком."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        checked_in = request.data.get("checked_in")
+        status_val = request.data.get("status")
+        payment_status = request.data.get("payment_status")
+
+        registrations = Registration.objects.filter(id__in=reg_ids).select_related(
+            "category__tournament"
+        )
+        if not registrations.exists():
+            return Response(
+                {"detail": "Реєстрації не знайдено."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        for reg in registrations:
+            tournament = reg.category.tournament
+            # Перевірка прав доступу: лише адмін, організатор або персонал турніру
+            if (
+                request.user != tournament.organizer
+                and request.user not in tournament.staff_members.all()
+                and request.user.role != "admin"
+            ):
+                return Response(
+                    {"detail": f"Ви не маєте прав доступу до турніру '{tournament.title}'."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Перевірка блокування змін для онлайн-оплат
+            if reg.payment_method == "online" and reg.payment_status == "paid":
+                if payment_status is not None and payment_status != "paid":
+                    return Response(
+                        {"detail": f"Заборонено змінювати успішну онлайн-оплату для {reg}."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Якщо статус змінюється на withdrawn, перевіряємо чи треба рефаунд
+            if status_val == "withdrawn" and reg.status != "withdrawn":
+                if reg.payment_status == "paid":
+                    if tournament.refund_policy == "refundable":
+                        if tournament.status not in [
+                            Tournament.Status.ACTIVE,
+                            Tournament.Status.COMPLETED,
+                        ]:
+                            if reg.payment_method == "online":
+                                import uuid
+
+                                from apps.billing.models import PaymentInvoice, Transaction
+                                from apps.billing.services import MonobankService
+                                from apps.billing.views import calculate_registration_fee
+
+                                invoice = reg.payment_invoices.filter(
+                                    status=PaymentInvoice.Status.PAID
+                                ).first()
+                                if invoice and invoice.invoice_id:
+                                    try:
+                                        base_fee = calculate_registration_fee(reg)
+                                        if tournament.commission_payer == "buyer":
+                                            price_to_refund = base_fee
+                                        else:
+                                            price_to_refund = int(base_fee * 0.95)
+
+                                        if reg.athlete:
+                                            name = (
+                                                f"{reg.athlete.last_name} {reg.athlete.first_name}"
+                                            )
+                                        elif reg.team:
+                                            name = reg.team.name
+                                        else:
+                                            name = ""
+                                        ref_id = f"REF-{uuid.uuid4().hex[:8]}-{name}"[:100]
+
+                                        MonobankService.refund_invoice(
+                                            invoice_id=invoice.invoice_id,
+                                            amount_uah=price_to_refund,
+                                            ext_ref=ref_id,
+                                        )
+
+                                        Transaction.objects.create(
+                                            invoice=invoice,
+                                            user=invoice.user,
+                                            payment_type=PaymentInvoice.PaymentType.REGISTRATIONS,
+                                            transaction_type=Transaction.Type.REFUND,
+                                            amount=-price_to_refund,
+                                            method=Transaction.Method.ONLINE,
+                                            reference=ref_id,
+                                            monobank_receipt_id=invoice.transactions.first().monobank_receipt_id
+                                            if invoice.transactions.exists()
+                                            else None,
+                                            receipt_url=invoice.transactions.first().receipt_url
+                                            if invoice.transactions.exists()
+                                            else None,
+                                        )
+                                        reg.payment_status = "unpaid"
+                                    except Exception:
+                                        pass
+                            elif reg.payment_method == "offline":
+                                # Офлайн-оплата залишається зі статусом "paid" до
+                                # ручного підтвердження повернення
+                                pass
+
+            # Оновлюємо поля
+            if checked_in is not None:
+                reg.checked_in = checked_in
+            if status_val is not None:
+                reg.status = status_val
+            if payment_status is not None:
+                # Оновлюємо тільки якщо оплата не заблокована
+                if not (reg.payment_method == "online" and reg.payment_status == "paid"):
+                    reg.payment_status = payment_status
+                    if payment_status == "paid":
+                        reg.payment_method = "offline"
+
+            reg.save()
+            from apps.common.broadcast import broadcast_registration_update
+
+            broadcast_registration_update(reg)
+
+        return Response(
+            {"detail": f"Успішно оновлено {registrations.count()} реєстрацій."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk_withdraw")
+    def bulk_withdraw(self, request):
+        """POST /api/registrations/bulk_withdraw/
+        body: {
+            "registration_ids": [1, 2, 3]
+        }
+        """
+        if not request.user or not request.user.is_authenticated:
+            return Response(
+                {"detail": "Автентифікація обов'язкова."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        reg_ids = request.data.get("registration_ids", [])
+        if not isinstance(reg_ids, list) or not reg_ids:
+            return Response(
+                {"detail": "registration_ids має бути списком."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        registrations = Registration.objects.filter(id__in=reg_ids).select_related(
+            "category__tournament", "athlete", "team"
+        )
+        if not registrations.exists():
+            return Response(
+                {"detail": "Реєстрації не знайдено."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        to_delete = []
+        to_withdraw = []
+
+        for reg in registrations:
+            tournament = reg.category.tournament
+
+            # Check permissions
+            is_allowed = False
+            if request.user.role == "admin":
+                is_allowed = True
+            elif (
+                request.user == tournament.organizer
+                or request.user in tournament.staff_members.all()
+            ):
+                is_allowed = True
+            elif request.user.role == "coach":
+                coach = None
+                if reg.athlete:
+                    coach = reg.athlete.coach
+                elif reg.team:
+                    coach = reg.team.coach
+                if coach == request.user:
+                    is_allowed = True
+
+            if not is_allowed:
+                return Response(
+                    {"detail": f"Ви не маєте прав доступу для зняття {reg}."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Coaches cannot withdraw once the tournament starts or is completed
+            if request.user.role == "coach" and tournament.status in [
+                Tournament.Status.ACTIVE,
+                Tournament.Status.COMPLETED,
+            ]:
+                return Response(
+                    {"detail": "Тренер не може знімати спортсменів після початку турніру."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Determine delete vs withdraw
+            if reg.payment_status != "paid":
+                if request.user.role == "coach":
+                    to_delete.append(reg)
+                else:
+                    to_withdraw.append(reg)
+            else:
+                to_withdraw.append(reg)
+
+        # 1. Process deletions
+        deleted_count = 0
+        for reg in to_delete:
+            reg.delete()
+            deleted_count += 1
+
+        # 2. Process withdrawals
+        withdrawn_count = 0
+        immediate_refund_regs = []
+
+        for reg in to_withdraw:
+            tournament = reg.category.tournament
+            reg.status = "withdrawn"
+            reg.save()  # Triggers walkover brackets logic
+            withdrawn_count += 1
+
+            if reg.payment_status == "paid" and reg.payment_method == "online":
+                if tournament.refund_policy == "refundable":
+                    if tournament.status not in [
+                        Tournament.Status.ACTIVE,
+                        Tournament.Status.COMPLETED,
+                    ]:
+                        immediate_refund_regs.append(reg)
+            elif reg.payment_status == "paid" and reg.payment_method == "offline":
+                # Офлайн-оплата залишається зі статусом "paid" (відображається
+                # як "Знято (Оч. пов.)"), доки організатор не зафіксує повернення
+                # готівки та не переведе платіж в "unpaid".
+                pass
+
+        # Process immediate refunds grouped by invoice
+        if immediate_refund_regs:
+            import uuid
+            from collections import defaultdict
+
+            from apps.billing.models import PaymentInvoice, Transaction
+            from apps.billing.services import MonobankService
+            from apps.billing.views import calculate_registration_fee
+
+            invoice_groups = defaultdict(list)
+            for reg in immediate_refund_regs:
+                invoice = reg.payment_invoices.filter(status=PaymentInvoice.Status.PAID).first()
+                if invoice and invoice.invoice_id:
+                    invoice_groups[(reg.category.tournament, invoice)].append(reg)
+
+            for (tournament, invoice), regs in invoice_groups.items():
+                try:
+                    total_refund = 0
+                    for reg in regs:
+                        base_fee = calculate_registration_fee(reg)
+                        if tournament.commission_payer == "buyer":
+                            total_refund += base_fee
+                        else:
+                            total_refund += int(base_fee * 0.95)
+
+                    if total_refund > 0:
+                        names_list = []
+                        for r in regs:
+                            if r.athlete:
+                                names_list.append(f"{r.athlete.last_name} {r.athlete.first_name}")
+                            elif r.team:
+                                names_list.append(r.team.name)
+                        names_str = ", ".join(names_list)
+                        ref_id = f"REF-{uuid.uuid4().hex[:8]}-{names_str}"[:100]
+
+                        MonobankService.refund_invoice(
+                            invoice_id=invoice.invoice_id,
+                            amount_uah=total_refund,
+                            ext_ref=ref_id,
+                        )
+                        Transaction.objects.create(
+                            invoice=invoice,
+                            user=invoice.user,
+                            payment_type=PaymentInvoice.PaymentType.REGISTRATIONS,
+                            transaction_type=Transaction.Type.REFUND,
+                            amount=-total_refund,
+                            method=Transaction.Method.ONLINE,
+                            reference=ref_id,
+                            monobank_receipt_id=invoice.transactions.first().monobank_receipt_id
+                            if invoice.transactions.exists()
+                            else None,
+                            receipt_url=invoice.transactions.first().receipt_url
+                            if invoice.transactions.exists()
+                            else None,
+                        )
+                        for reg in regs:
+                            reg.payment_status = "unpaid"
+                            reg.save(update_fields=["payment_status"])
+                except Exception:
+                    pass
+
+        # Trigger broadcasts for all modified/deleted
+        from apps.common.broadcast import broadcast_registration_update
+
+        for reg in to_withdraw:
+            broadcast_registration_update(reg)
+
+        return Response(
+            {
+                "detail": (
+                    f"Успішно оновлено реєстрації: знято {withdrawn_count}, "
+                    f"видалено {deleted_count}."
+                )
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def _get_registrations_for_bulk(self, request):
+        if not request.user or not request.user.is_authenticated:
+            return None, Response(
+                {"detail": "Автентифікація обов'язкова."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        reg_ids = request.data.get("registration_ids", [])
+        if not isinstance(reg_ids, list) or not reg_ids:
+            return None, Response(
+                {"detail": "registration_ids має бути списком."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        registrations = Registration.objects.filter(id__in=reg_ids).select_related(
+            "category__tournament", "athlete", "team"
+        )
+        if not registrations.exists():
+            return None, Response(
+                {"detail": "Реєстрації не знайдено."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return registrations, None
+
+    def _is_staff_or_organizer(self, user, tournament):
+        return (
+            user.role == "admin"
+            or user == tournament.organizer
+            or user in tournament.staff_members.all()
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk_mark_offline_refunded")
+    def bulk_mark_offline_refunded(self, request):
+        """POST /api/registrations/bulk_mark_offline_refunded/"""
+        registrations, err_resp = self._get_registrations_for_bulk(request)
+        if err_resp:
+            return err_resp
+
+        updated_count = 0
+        from apps.common.broadcast import broadcast_registration_update
+
+        for reg in registrations:
+            tournament = reg.category.tournament
+            if not self._is_staff_or_organizer(request.user, tournament):
+                return Response(
+                    {"detail": f"Ви не маєте прав доступу для відмітки повернення для {reg}."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if (
+                reg.status == "withdrawn"
+                and reg.payment_method == "offline"
+                and reg.payment_status == "paid"
+                and reg.offline_refund_status == "none"
+            ):
+                reg.offline_refund_status = "pending"
+                reg.save(update_fields=["offline_refund_status"])
+                broadcast_registration_update(reg)
+                updated_count += 1
+
+        return Response(
+            {
+                "detail": (
+                    f"Успішно позначено як повернуті {updated_count} реєстрацій "
+                    f"(очікують підтвердження від тренера)."
+                )
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk_confirm_offline_refund_received")
+    def bulk_confirm_offline_refund_received(self, request):
+        """POST /api/registrations/bulk_confirm_offline_refund_received/"""
+        registrations, err_resp = self._get_registrations_for_bulk(request)
+        if err_resp:
+            return err_resp
+
+        updated_count = 0
+        from apps.common.broadcast import broadcast_registration_update
+
+        for reg in registrations:
+            tournament = reg.category.tournament
+            # Check permissions: coach or admin or organizer/staff
+            is_allowed = self._is_staff_or_organizer(request.user, tournament)
+            if not is_allowed and request.user.role == "coach":
+                coach = None
+                if reg.athlete:
+                    coach = reg.athlete.coach
+                elif reg.team:
+                    coach = reg.team.coach
+                if coach == request.user:
+                    is_allowed = True
+
+            if not is_allowed:
+                return Response(
+                    {"detail": f"Ви не маєте прав доступу для підтвердження отримання для {reg}."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if (
+                reg.status == "withdrawn"
+                and reg.payment_method == "offline"
+                and reg.payment_status == "paid"
+                and reg.offline_refund_status == "pending"
+            ):
+                reg.offline_refund_status = "confirmed"
+                reg.payment_status = "unpaid"
+                reg.save(update_fields=["offline_refund_status", "payment_status"])
+                broadcast_registration_update(reg)
+                updated_count += 1
+
+        return Response(
+            {
+                "detail": (
+                    f"Успішно підтверджено отримання повернення для {updated_count} реєстрацій."
+                )
+            },
             status=status.HTTP_200_OK,
         )

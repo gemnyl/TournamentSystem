@@ -14,7 +14,7 @@
 
 from datetime import date, timedelta
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -1374,6 +1374,7 @@ class TestTournamentExtraActions(TournamentAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
+@override_settings(MONOBANK_MOCK_PAYMENTS=True)
 class CoachDashboardAndBillingIntegrationTest(TestCase):
     """Інтеграційні тести підсистеми білінгу, кастомного персоналу та командних реєстрацій."""
 
@@ -1632,7 +1633,10 @@ class CoachDashboardAndBillingIntegrationTest(TestCase):
         # Staff is cleared
         self.assertEqual(self.tournament.staff_members.count(), 0)
 
-        # Try to create new tournament with active debt -> should fail
+        # Try to create new tournament with active debt exceeding credit limit -> should fail
+        self.organizer.credit_limit = 0
+        self.organizer.save()
+
         response = self.client.post(
             "/api/tournaments/",
             {
@@ -1644,7 +1648,9 @@ class CoachDashboardAndBillingIntegrationTest(TestCase):
             },
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("у вас є неоплачена комісія", response.data["non_field_errors"][0])
+        self.assertIn(
+            "перевищує встановлений кредитний ліміт", response.data["non_field_errors"][0]
+        )
 
         # Pay platform fee
         response = self.client.post(f"/api/tournaments/{self.tournament.id}/pay_platform_fee/")
@@ -1958,3 +1964,392 @@ class TestTournamentStatisticsAndRatings(TournamentAPITestCase):
         self.assertEqual(len(region_ratings), 27)
         self.assertEqual(region_ratings[0]["region_code"], "kyiv_city")
         self.assertEqual(region_ratings[0]["points"], 10)
+
+
+class TournamentDashboardEnhancementsTestCase(TestCase):
+    """Тести для покращень панелей тренера та секретаря."""
+
+    def setUp(self):
+        self.client = APIClient()
+        import uuid
+
+        test_pass = str(uuid.uuid4())
+        self.organizer = User.objects.create_user(
+            email="organizer@test.local",
+            password=test_pass,
+            first_name="Орг",
+            last_name="Турнірний",
+            role=User.Role.ORGANIZER,
+        )
+        self.coach = User.objects.create_user(
+            email="coach@test.local",
+            password=test_pass,
+            first_name="Тренер",
+            last_name="Клубовий",
+            role=User.Role.COACH,
+        )
+        self.club = Club.objects.create(name="Тест Клуб")
+        self.coach.club = self.club
+        self.coach.is_club_leader = True
+        self.coach.save()
+
+        # Tournament with weigh-in required
+        self.tournament = Tournament.objects.create(
+            organizer=self.organizer,
+            title="Турнір зі зважуванням",
+            sport_type="Карате",
+            location="Київ",
+            start_date=timezone.now() + timezone.timedelta(days=2),
+            end_date=timezone.now() + timezone.timedelta(days=3),
+            registration_start=timezone.now() - timezone.timedelta(days=1),
+            registration_end=timezone.now() + timezone.timedelta(days=1),
+            weigh_in_required=True,
+        )
+        self.category = Category.objects.create(
+            tournament=self.tournament,
+            name="Хлопці 10-11 років, -35 кг",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=10,
+            max_age=11,
+            min_weight=30.0,
+            max_weight=35.0,
+        )
+        self.category_open = Category.objects.create(
+            tournament=self.tournament,
+            name="Хлопці 10-11 років, Абсолютна",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=10,
+            max_age=11,
+        )
+        self.athlete = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club,
+            first_name="Іван",
+            last_name="Іванов",
+            gender="male",
+            birth_date=date(2015, 5, 5),
+            base_weight=33.0,
+        )
+        self.reg1 = Registration.objects.create(
+            athlete=self.athlete,
+            category=self.category,
+            status=Registration.Status.PENDING,
+        )
+        self.reg2 = Registration.objects.create(
+            athlete=self.athlete,
+            category=self.category_open,
+            status=Registration.Status.PENDING,
+        )
+
+    def _login(self, user):
+        self.client.force_authenticate(user=user)
+
+    def test_athlete_weigh_in_success(self):
+        """Успішне зважування спортсмена для всіх категорій."""
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/athlete_weigh_in/",
+            {
+                "athlete_id": self.athlete.id,
+                "tournament_id": self.tournament.id,
+                "weight": 32.5,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Перевіряємо, що обидві реєстрації отримали вагу і статус confirmed
+        self.reg1.refresh_from_db()
+        self.reg2.refresh_from_db()
+        self.assertEqual(float(self.reg1.recorded_weight), 32.5)
+        self.assertEqual(self.reg1.status, Registration.Status.CONFIRMED)
+        self.assertEqual(float(self.reg2.recorded_weight), 32.5)
+        self.assertEqual(self.reg2.status, Registration.Status.CONFIRMED)
+
+    def test_athlete_weigh_in_validation_error(self):
+        """Помилка зважування, якщо вага виходить за межі категорії."""
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/athlete_weigh_in/",
+            {
+                "athlete_id": self.athlete.id,
+                "tournament_id": self.tournament.id,
+                "weight": 38.0,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("більша за максимально допустиму", response.data["detail"])
+
+        # Перевіряємо, що нічого не змінилося
+        self.reg1.refresh_from_db()
+        self.assertEqual(self.reg1.status, Registration.Status.PENDING)
+
+    def test_athlete_weigh_in_disabled(self):
+        """Помилка при спробі зважування, якщо зважування вимкнено для турніру."""
+        self.tournament.weigh_in_required = False
+        self.tournament.save()
+
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/athlete_weigh_in/",
+            {
+                "athlete_id": self.athlete.id,
+                "tournament_id": self.tournament.id,
+                "weight": 32.5,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["detail"], "Зважування не потрібне для цього турніру.")
+
+    def test_auto_transition_statuses(self):
+        """Автоматична зміна статусів турніру по датах."""
+        t_draft = Tournament.objects.create(
+            organizer=self.organizer,
+            title="Чернетка статусів",
+            sport_type="Карате",
+            location="Київ",
+            start_date=timezone.now() + timezone.timedelta(days=2),
+            end_date=timezone.now() + timezone.timedelta(days=3),
+            registration_start=timezone.now() - timezone.timedelta(hours=1),
+            registration_end=timezone.now() + timezone.timedelta(days=1),
+            status=Tournament.Status.DRAFT,
+        )
+
+        response = self.client.get(f"/api/tournaments/{t_draft.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Має автоматично змінити статус на registration
+        t_draft.refresh_from_db()
+        self.assertEqual(t_draft.status, Tournament.Status.REGISTRATION)
+
+        t_reg = Tournament.objects.create(
+            organizer=self.organizer,
+            title="Реєстрація статусів",
+            sport_type="Карате",
+            location="Київ",
+            start_date=timezone.now() - timezone.timedelta(hours=1),
+            end_date=timezone.now() + timezone.timedelta(hours=5),
+            status=Tournament.Status.REGISTRATION,
+        )
+
+        response = self.client.get(f"/api/tournaments/{t_reg.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        t_reg.refresh_from_db()
+        self.assertEqual(t_reg.status, Tournament.Status.ACTIVE)
+
+    def test_bulk_withdraw_coach_restricted(self):
+        """
+        Зняття через bulk_withdraw дозволено під час реєстрації,
+        але заблоковано для тренера після старту.
+        """
+        self.tournament.status = Tournament.Status.REGISTRATION
+        self.tournament.save()
+
+        # Coach bulk withdraws reg1 and reg2
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/bulk_withdraw/",
+            {"registration_ids": [self.reg1.id, self.reg2.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Regs should be deleted because they are unpaid
+        self.assertFalse(Registration.objects.filter(id__in=[self.reg1.id, self.reg2.id]).exists())
+
+        # Re-create registrations
+        self.reg1 = Registration.objects.create(
+            athlete=self.athlete, category=self.category, status=Registration.Status.PENDING
+        )
+        self.reg2 = Registration.objects.create(
+            athlete=self.athlete, category=self.category_open, status=Registration.Status.PENDING
+        )
+
+        # Move tournament to active
+        self.tournament.status = Tournament.Status.ACTIVE
+        self.tournament.save()
+
+        # Coach tries to withdraw now - should be blocked
+        response = self.client.post(
+            "/api/registrations/bulk_withdraw/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Тренер не може знімати", response.data["detail"])
+
+    def test_bulk_withdraw_unpaid_delete_vs_withdraw(self):
+        """Несплачені заявки видаляються для тренера, але стають 'withdrawn' для секретаря."""
+        self.tournament.status = Tournament.Status.REGISTRATION
+        self.tournament.save()
+
+        # Secretary bulk withdraws reg1 (unpaid)
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/bulk_withdraw/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Since it was done by organizer/secretary, it is NOT deleted,
+        # but status is set to withdrawn
+        self.reg1.refresh_from_db()
+        self.assertEqual(self.reg1.status, Registration.Status.WITHDRAWN)
+
+    def test_deferred_refunds_on_completion(self):
+        """
+        Під час активного турніру зняття не запускає рефаунд відразу,
+        а відкладає його до завершення турніру.
+        """
+        from apps.billing.models import PaymentInvoice, Transaction
+
+        self.tournament.status = Tournament.Status.ACTIVE
+        self.tournament.save()
+
+        # Mark reg1 as paid online
+        self.reg1.payment_status = "paid"
+        self.reg1.payment_method = "online"
+        self.reg1.save()
+
+        # Create paid PaymentInvoice and link to reg1
+        invoice = PaymentInvoice.objects.create(
+            user=self.coach,
+            amount=500,
+            status=PaymentInvoice.Status.PAID,
+            invoice_id="mock-inv-123",
+            payment_type=PaymentInvoice.PaymentType.REGISTRATIONS,
+        )
+        invoice.registrations.add(self.reg1)
+
+        # Create paid transaction
+        Transaction.objects.create(
+            invoice=invoice,
+            user=self.coach,
+            payment_type=PaymentInvoice.PaymentType.REGISTRATIONS,
+            transaction_type=Transaction.Type.PAYMENT,
+            amount=500,
+            method=Transaction.Method.ONLINE,
+            reference="TX-123",
+        )
+
+        # Secretary withdraws reg1 during ACTIVE tournament
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/bulk_withdraw/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Refund should be DEFERRED: registration status is withdrawn,
+        # but payment_status remains paid!
+        self.reg1.refresh_from_db()
+        self.assertEqual(self.reg1.status, Registration.Status.WITHDRAWN)
+        self.assertEqual(self.reg1.payment_status, "paid")
+
+        # No refund transactions should exist yet
+        self.assertFalse(
+            Transaction.objects.filter(transaction_type=Transaction.Type.REFUND).exists()
+        )
+
+        # Complete tournament
+        response = self.client.post(f"/api/tournaments/{self.tournament.id}/complete/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Now refund should be processed: payment_status is unpaid,
+        # and REFUND Transaction is created!
+        self.reg1.refresh_from_db()
+        self.assertEqual(self.reg1.payment_status, "unpaid")
+
+        refund_tx = Transaction.objects.filter(transaction_type=Transaction.Type.REFUND).first()
+        self.assertIsNotNone(refund_tx)
+        self.assertEqual(refund_tx.invoice, invoice)
+        self.assertEqual(refund_tx.amount, -500)
+
+    def test_bulk_offline_refund_flow(self):
+        # Setup an offline paid registration
+        self.reg1.payment_method = "offline"
+        self.reg1.payment_status = "paid"
+        self.reg1.status = Registration.Status.WITHDRAWN
+        self.reg1.offline_refund_status = "none"
+        self.reg1.save()
+
+        self.reg2.payment_method = "offline"
+        self.reg2.payment_status = "paid"
+        self.reg2.status = Registration.Status.WITHDRAWN
+        self.reg2.offline_refund_status = "none"
+        self.reg2.save()
+
+        # 1. Anonymous / Non-auth cannot access
+        self.client.force_authenticate(user=None)
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # 2. Coach cannot mark offline refunded (needs to be organizer, staff or admin)
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Organizer marks offline refunded successfully -> status becomes PENDING
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [self.reg1.id, self.reg2.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.reg1.refresh_from_db()
+        self.reg2.refresh_from_db()
+        self.assertEqual(self.reg1.offline_refund_status, "pending")
+        self.assertEqual(self.reg2.offline_refund_status, "pending")
+
+        # 4. Coach confirms refund -> status is CONFIRMED, payment is UNPAID
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/bulk_confirm_offline_refund_received/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.reg1.refresh_from_db()
+        self.assertEqual(self.reg1.offline_refund_status, "confirmed")
+        self.assertEqual(self.reg1.payment_status, "unpaid")
+
+        # 5. Organizer confirms receipt of refund -> status becomes CONFIRMED
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/bulk_confirm_offline_refund_received/",
+            {"registration_ids": [self.reg2.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.reg2.refresh_from_db()
+        self.assertEqual(self.reg2.offline_refund_status, "confirmed")
+        self.assertEqual(self.reg2.payment_status, "unpaid")
+
+        # 6. Invalid registration_ids format
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": "invalid"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 7. Non-existent registrations
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [99999]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

@@ -504,3 +504,47 @@ class AccountsAPITestCase(TestCase):
         spectator.refresh_from_db()
         self.assertEqual(spectator.role, User.Role.COACH)
         self.assertEqual(spectator.club, self.club)
+
+    def test_update_credit_limit(self):
+        # Organizer cannot change limit
+        organizer = User.objects.create_user(
+            email="organizer_limit@demo.local",
+            password="password123",  # NOSONAR
+            role=User.Role.ORGANIZER,
+        )
+        self.client.force_authenticate(user=organizer)
+        response = self.client.post(
+            f"/api/auth/users/{organizer.id}/update_credit_limit/",
+            {"credit_limit": 5000},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Admin can change limit
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(
+            f"/api/auth/users/{organizer.id}/update_credit_limit/",
+            {"credit_limit": 5000},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["credit_limit"], 5000)
+        organizer.refresh_from_db()
+        self.assertEqual(organizer.credit_limit, 5000)
+
+        # Validation checks
+        # 1. Missing credit_limit
+        response = self.client.post(
+            f"/api/auth/users/{organizer.id}/update_credit_limit/",
+            {},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 2. Invalid credit_limit format
+        response = self.client.post(
+            f"/api/auth/users/{organizer.id}/update_credit_limit/",
+            {"credit_limit": "invalid_value"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

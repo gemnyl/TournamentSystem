@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/", include("apps.matches.urls")),
     path("api/", include("apps.rulesets.urls")),
     path("api/", include("apps.tatamis.urls")),
+    path("api/billing/", include("apps.billing.urls")),
 ]
 
 if settings.DEBUG:

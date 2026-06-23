@@ -6,8 +6,18 @@ from .models import Club, EmailConfirmationCode, RoleRequest, User
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ("email", "first_name", "last_name", "role", "club", "is_staff", "is_active")
-    list_filter = ("role", "is_staff", "is_active", "is_superuser")
+    list_display = (
+        "email",
+        "first_name",
+        "last_name",
+        "role",
+        "club",
+        "is_club_leader",
+        "credit_limit",
+        "is_staff",
+        "is_active",
+    )
+    list_filter = ("role", "is_club_leader", "is_staff", "is_active", "is_superuser")
     search_fields = ("email", "first_name", "last_name")
     ordering = ("email",)
 
@@ -31,7 +41,16 @@ class UserAdmin(BaseUserAdmin):
         ("Спортивна інформація", {"fields": ("role", "club", "skill_level", "referee_category")}),
         (
             "Доступи та верифікація",
-            {"fields": ("email_verified", "is_active", "is_staff", "is_superuser")},
+            {
+                "fields": (
+                    "is_club_leader",
+                    "credit_limit",
+                    "email_verified",
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                )
+            },
         ),
         ("Дати", {"fields": ("last_login", "date_joined")}),
     )

@@ -64,6 +64,15 @@ class Tournament(models.Model):
         default="buyer",
         verbose_name="Хто сплачує комісію",
     )
+    refund_policy = models.CharField(
+        max_length=20,
+        choices=[
+            ("refundable", "Повернення дозволено"),
+            ("non_refundable", "Внески не повертаються (штраф 100%)"),
+        ],
+        default="refundable",
+        verbose_name="Правила повернення внесків",
+    )
     platform_fee_status = models.CharField(
         max_length=20,
         choices=[("paid", "Сплачено"), ("unpaid", "Не сплачено")],
@@ -139,6 +148,16 @@ class Tournament(models.Model):
         # 3. Calculate platform fee amount for all offline paid registrations (5%)
         from apps.tournaments.models import Registration
 
+        # If refund policy is refundable, transition withdrawn offline-paid
+        # registrations to unpaid first
+        if self.refund_policy == "refundable":
+            Registration.objects.filter(
+                category__tournament=self,
+                status="withdrawn",
+                payment_status="paid",
+                payment_method="offline",
+            ).update(payment_status="unpaid", offline_refund_status="confirmed")
+
         offline_regs = Registration.objects.filter(
             category__tournament=self,
             payment_status="paid",
@@ -157,6 +176,74 @@ class Tournament(models.Model):
         else:
             self.platform_fee_status = "paid"
 
+        # 4. Process deferred batch refunds for withdrawn online-paid registrations
+        import uuid
+        from collections import defaultdict
+
+        from apps.billing.models import PaymentInvoice, Transaction
+        from apps.billing.services import MonobankService
+        from apps.billing.views import calculate_registration_fee
+
+        withdrawn_paid_regs = Registration.objects.filter(
+            category__tournament=self,
+            status="withdrawn",
+            payment_status="paid",
+            payment_method="online",
+        ).select_related("category")
+
+        if self.refund_policy == "refundable" and withdrawn_paid_regs.exists():
+            invoice_groups = defaultdict(list)
+            for reg in withdrawn_paid_regs:
+                invoice = reg.payment_invoices.filter(status=PaymentInvoice.Status.PAID).first()
+                if invoice and invoice.invoice_id:
+                    invoice_groups[invoice].append(reg)
+
+            for invoice, regs in invoice_groups.items():
+                try:
+                    total_refund = 0
+                    for reg in regs:
+                        base_fee = calculate_registration_fee(reg)
+                        if self.commission_payer == "buyer":
+                            total_refund += base_fee
+                        else:
+                            total_refund += int(base_fee * 0.95)
+
+                    if total_refund > 0:
+                        names_list = []
+                        for r in regs:
+                            if r.athlete:
+                                names_list.append(f"{r.athlete.last_name} {r.athlete.first_name}")
+                            elif r.team:
+                                names_list.append(r.team.name)
+                        names_str = ", ".join(names_list)
+                        ref_id = f"REF-{uuid.uuid4().hex[:8]}-{names_str}"[:100]
+
+                        MonobankService.refund_invoice(
+                            invoice_id=invoice.invoice_id,
+                            amount_uah=total_refund,
+                            ext_ref=ref_id,
+                        )
+                        Transaction.objects.create(
+                            invoice=invoice,
+                            user=invoice.user,
+                            payment_type=PaymentInvoice.PaymentType.REGISTRATIONS,
+                            transaction_type=Transaction.Type.REFUND,
+                            amount=-total_refund,
+                            method=Transaction.Method.ONLINE,
+                            reference=ref_id,
+                            monobank_receipt_id=invoice.transactions.first().monobank_receipt_id
+                            if invoice.transactions.exists()
+                            else None,
+                            receipt_url=invoice.transactions.first().receipt_url
+                            if invoice.transactions.exists()
+                            else None,
+                        )
+                        for reg in regs:
+                            reg.payment_status = "unpaid"
+                            reg.save(update_fields=["payment_status"])
+                except Exception:
+                    pass
+
         self.save(
             update_fields=[
                 "status",
@@ -165,6 +252,85 @@ class Tournament(models.Model):
                 "platform_fee_status",
             ]
         )
+
+    @classmethod
+    def get_organizer_debt(cls, organizer):
+        from django.db.models import Sum
+
+        return (
+            cls.objects.filter(
+                organizer=organizer,
+                status=cls.Status.COMPLETED,
+                platform_fee_status="unpaid",
+                platform_fee_amount__gt=0,
+            ).aggregate(total=Sum("platform_fee_amount"))["total"]
+            or 0
+        )
+
+    def check_and_update_status(self):
+        """Перевіряє дати та автоматично оновлює статус турніру, якщо настав час."""
+        now = timezone.now()
+        updated = False
+
+        # 1. Draft -> Registration (якщо настав час registration_start)
+        if self.status == self.Status.DRAFT:
+            if self.registration_start and now >= self.registration_start:
+                if not self.registration_end or now < self.registration_end:
+                    self.status = self.Status.REGISTRATION
+                    updated = True
+
+        # 2. Registration -> Active (якщо настав час start_date)
+        if self.status == self.Status.REGISTRATION:
+            if self.start_date and now >= self.start_date:
+                # Перевіряємо кредитний ліміт організатора перед активацією
+                total_debt = self.get_organizer_debt(self.organizer)
+
+                if total_debt <= self.organizer.credit_limit:
+                    self.status = self.Status.ACTIVE
+                    updated = True
+
+        # 3. Active -> Completed (якщо настав час end_date)
+        if self.status == self.Status.ACTIVE:
+            if self.end_date and now >= self.end_date:
+                try:
+                    self.complete_tournament()
+                    updated = True
+                except Exception:
+                    pass
+
+        if updated and self.status != self.Status.COMPLETED:
+            self.save(update_fields=["status"])
+
+    @classmethod
+    def auto_transition_statuses(cls):
+        """Оновлює статуси турнірів на основі поточного часу."""
+        now = timezone.now()
+
+        # 1. Draft -> Registration
+        drafts = cls.objects.filter(
+            status=cls.Status.DRAFT, registration_start__isnull=False, registration_start__lte=now
+        )
+        for t in drafts:
+            if not t.registration_end or now < t.registration_end:
+                t.status = cls.Status.REGISTRATION
+                t.save(update_fields=["status"])
+
+        # 2. Registration -> Active
+        registrations = cls.objects.filter(status=cls.Status.REGISTRATION, start_date__lte=now)
+        for t in registrations:
+            total_debt = cls.get_organizer_debt(t.organizer)
+
+            if total_debt <= t.organizer.credit_limit:
+                t.status = cls.Status.ACTIVE
+                t.save(update_fields=["status"])
+
+        # 3. Active -> Completed
+        actives = cls.objects.filter(status=cls.Status.ACTIVE, end_date__lte=now)
+        for t in actives:
+            try:
+                t.complete_tournament()
+            except Exception:
+                pass
 
 
 class Category(models.Model):
@@ -394,6 +560,16 @@ class Registration(models.Model):
         default="offline",
         verbose_name="Спосіб оплати",
     )
+    offline_refund_status = models.CharField(
+        max_length=20,
+        choices=[
+            ("none", "Немає"),
+            ("pending", "Очікує підтвердження"),
+            ("confirmed", "Підтверджено отримання"),
+        ],
+        default="none",
+        verbose_name="Статус повернення готівки",
+    )
     place = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
@@ -430,6 +606,26 @@ class Registration(models.Model):
     def __str__(self):
         participant = self.athlete if self.athlete else self.team
         return f"{participant} → {self.category.name}"
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        old_status = None
+        if not is_new:
+            try:
+                old_status = Registration.objects.get(pk=self.pk).status
+            except Registration.DoesNotExist:
+                pass
+
+        super().save(*args, **kwargs)
+
+        if old_status != self.Status.WITHDRAWN and self.status == self.Status.WITHDRAWN:
+            from apps.matches.models import Match
+
+            matches = Match.objects.filter(
+                category=self.category, status__in=[Match.Status.SCHEDULED, Match.Status.ONGOING]
+            ).filter(models.Q(reg_first=self) | models.Q(reg_second=self))
+            for match in matches:
+                match.handle_auto_walkover()
 
     def _validate_category_participant(self):
         if self.category.is_team:

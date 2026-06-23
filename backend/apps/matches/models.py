@@ -483,6 +483,10 @@ class Match(models.Model):
 
             transaction.on_commit(lambda: broadcast_match_update(nxt))
 
+            # Автоматичне вирішення неявки суперника, якщо він знятий з турніру
+            nxt.refresh_from_db()
+            nxt.handle_auto_walkover()
+
         # Логіка просування того, хто програв (для Double Elimination)
         if self.loser_next_match:
             loser = self.reg_second if self.winner == self.reg_first else self.reg_first
@@ -509,6 +513,39 @@ class Match(models.Model):
                 from apps.common.broadcast import broadcast_match_update
 
                 transaction.on_commit(lambda: broadcast_match_update(nxt_loser))
+
+                # Автоматичне вирішення неявки суперника для нижньої сітки
+                nxt_loser.refresh_from_db()
+                nxt_loser.handle_auto_walkover()
+
+    def handle_auto_walkover(self):
+        """
+        Перевіряє, чи має матч обох учасників і чи є один з них знятим (withdrawn).
+        Якщо так, автоматично призначає технічну перемогу (walkover) опоненту.
+        """
+        if self.status == self.Status.COMPLETED:
+            return
+
+        if self.reg_first_id and self.reg_second_id:
+            from apps.tournaments.models import Registration
+
+            reg_first = Registration.objects.get(id=self.reg_first_id)
+            reg_second = Registration.objects.get(id=self.reg_second_id)
+
+            first_withdrawn = reg_first.status == Registration.Status.WITHDRAWN
+            second_withdrawn = reg_second.status == Registration.Status.WITHDRAWN
+
+            if first_withdrawn and second_withdrawn:
+                self.status = self.Status.COMPLETED
+                self.win_method = self.WinMethod.WALKOVER
+                from django.utils import timezone as django_timezone
+
+                self.completed_at = django_timezone.now()
+                self.save(update_fields=["status", "win_method", "completed_at"])
+            elif first_withdrawn:
+                self.set_winner(reg_second, method=self.WinMethod.WALKOVER)
+            elif second_withdrawn:
+                self.set_winner(reg_first, method=self.WinMethod.WALKOVER)
 
 
 class MatchEvent(models.Model):
