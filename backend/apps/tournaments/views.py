@@ -1746,50 +1746,50 @@ class RegistrationViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], url_path="bulk_mark_offline_refunded")
-    def bulk_mark_offline_refunded(self, request):
-        """POST /api/registrations/bulk_mark_offline_refunded/
-        Body: {
-            "registration_ids": [1, 2, 3]
-        }
-        """
+    def _get_registrations_for_bulk(self, request):
         if not request.user or not request.user.is_authenticated:
-            return Response(
+            return None, Response(
                 {"detail": "Автентифікація обов'язкова."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
         reg_ids = request.data.get("registration_ids", [])
         if not isinstance(reg_ids, list) or not reg_ids:
-            return Response(
+            return None, Response(
                 {"detail": "registration_ids має бути списком."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         registrations = Registration.objects.filter(id__in=reg_ids).select_related(
-            "category__tournament"
+            "category__tournament", "athlete", "team"
         )
         if not registrations.exists():
-            return Response(
+            return None, Response(
                 {"detail": "Реєстрації не знайдено."}, status=status.HTTP_400_BAD_REQUEST
             )
+
+        return registrations, None
+
+    def _is_staff_or_organizer(self, user, tournament):
+        return (
+            user.role == "admin"
+            or user == tournament.organizer
+            or user in tournament.staff_members.all()
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk_mark_offline_refunded")
+    def bulk_mark_offline_refunded(self, request):
+        """POST /api/registrations/bulk_mark_offline_refunded/"""
+        registrations, err_resp = self._get_registrations_for_bulk(request)
+        if err_resp:
+            return err_resp
 
         updated_count = 0
         from apps.common.broadcast import broadcast_registration_update
 
         for reg in registrations:
             tournament = reg.category.tournament
-            # Check permissions: only admin, organizer or staff
-            is_allowed = False
-            if request.user.role == "admin":
-                is_allowed = True
-            elif (
-                request.user == tournament.organizer
-                or request.user in tournament.staff_members.all()
-            ):
-                is_allowed = True
-
-            if not is_allowed:
+            if not self._is_staff_or_organizer(request.user, tournament):
                 return Response(
                     {"detail": f"Ви не маєте прав доступу для відмітки повернення для {reg}."},
                     status=status.HTTP_403_FORBIDDEN,
@@ -1818,31 +1818,10 @@ class RegistrationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bulk_confirm_offline_refund_received")
     def bulk_confirm_offline_refund_received(self, request):
-        """POST /api/registrations/bulk_confirm_offline_refund_received/
-        Body: {
-            "registration_ids": [1, 2, 3]
-        }
-        """
-        if not request.user or not request.user.is_authenticated:
-            return Response(
-                {"detail": "Автентифікація обов'язкова."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        reg_ids = request.data.get("registration_ids", [])
-        if not isinstance(reg_ids, list) or not reg_ids:
-            return Response(
-                {"detail": "registration_ids має бути списком."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        registrations = Registration.objects.filter(id__in=reg_ids).select_related(
-            "category__tournament", "athlete", "team"
-        )
-        if not registrations.exists():
-            return Response(
-                {"detail": "Реєстрації не знайдено."}, status=status.HTTP_400_BAD_REQUEST
-            )
+        """POST /api/registrations/bulk_confirm_offline_refund_received/"""
+        registrations, err_resp = self._get_registrations_for_bulk(request)
+        if err_resp:
+            return err_resp
 
         updated_count = 0
         from apps.common.broadcast import broadcast_registration_update
@@ -1850,15 +1829,8 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         for reg in registrations:
             tournament = reg.category.tournament
             # Check permissions: coach or admin or organizer/staff
-            is_allowed = False
-            if request.user.role == "admin":
-                is_allowed = True
-            elif (
-                request.user == tournament.organizer
-                or request.user in tournament.staff_members.all()
-            ):
-                is_allowed = True
-            elif request.user.role == "coach":
+            is_allowed = self._is_staff_or_organizer(request.user, tournament)
+            if not is_allowed and request.user.role == "coach":
                 coach = None
                 if reg.athlete:
                     coach = reg.athlete.coach
@@ -1888,7 +1860,7 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "detail": (
-                    f"Успішно підтверджено отримання повернення " f"для {updated_count} реєстрацій."
+                    f"Успішно підтверджено отримання повернення для {updated_count} реєстрацій."
                 )
             },
             status=status.HTTP_200_OK,

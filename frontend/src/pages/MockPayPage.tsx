@@ -39,10 +39,11 @@ export default function MockPayPage() {
         });
         navigate("/coach/dashboard");
       }
-    } catch (err: any) {
+    } catch (err) {
+      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка симуляції",
-        description: err.response?.data?.detail || "Не вдалося синхронізувати платіж.",
+        description: error.response?.data?.detail || "Не вдалося синхронізувати платіж.",
         variant: "destructive"
       });
     } finally {

@@ -1971,16 +1971,19 @@ class TournamentDashboardEnhancementsTestCase(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        import uuid
+
+        test_pass = str(uuid.uuid4())
         self.organizer = User.objects.create_user(
             email="organizer@test.local",
-            password="test12345",
+            password=test_pass,
             first_name="Орг",
             last_name="Турнірний",
             role=User.Role.ORGANIZER,
         )
         self.coach = User.objects.create_user(
             email="coach@test.local",
-            password="test12345",
+            password=test_pass,
             first_name="Тренер",
             last_name="Клубовий",
             role=User.Role.COACH,
@@ -2264,3 +2267,89 @@ class TournamentDashboardEnhancementsTestCase(TestCase):
         self.assertIsNotNone(refund_tx)
         self.assertEqual(refund_tx.invoice, invoice)
         self.assertEqual(refund_tx.amount, -500)
+
+    def test_bulk_offline_refund_flow(self):
+        # Setup an offline paid registration
+        self.reg1.payment_method = "offline"
+        self.reg1.payment_status = "paid"
+        self.reg1.status = Registration.Status.WITHDRAWN
+        self.reg1.offline_refund_status = "none"
+        self.reg1.save()
+
+        self.reg2.payment_method = "offline"
+        self.reg2.payment_status = "paid"
+        self.reg2.status = Registration.Status.WITHDRAWN
+        self.reg2.offline_refund_status = "none"
+        self.reg2.save()
+
+        # 1. Anonymous / Non-auth cannot access
+        self.client.force_authenticate(user=None)
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # 2. Coach cannot mark offline refunded (needs to be organizer, staff or admin)
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Organizer marks offline refunded successfully -> status becomes PENDING
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [self.reg1.id, self.reg2.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.reg1.refresh_from_db()
+        self.reg2.refresh_from_db()
+        self.assertEqual(self.reg1.offline_refund_status, "pending")
+        self.assertEqual(self.reg2.offline_refund_status, "pending")
+
+        # 4. Coach confirms refund -> status is CONFIRMED, payment is UNPAID
+        self._login(self.coach)
+        response = self.client.post(
+            "/api/registrations/bulk_confirm_offline_refund_received/",
+            {"registration_ids": [self.reg1.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.reg1.refresh_from_db()
+        self.assertEqual(self.reg1.offline_refund_status, "confirmed")
+        self.assertEqual(self.reg1.payment_status, "unpaid")
+
+        # 5. Organizer confirms receipt of refund -> status becomes CONFIRMED
+        self._login(self.organizer)
+        response = self.client.post(
+            "/api/registrations/bulk_confirm_offline_refund_received/",
+            {"registration_ids": [self.reg2.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.reg2.refresh_from_db()
+        self.assertEqual(self.reg2.offline_refund_status, "confirmed")
+        self.assertEqual(self.reg2.payment_status, "unpaid")
+
+        # 6. Invalid registration_ids format
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": "invalid"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 7. Non-existent registrations
+        response = self.client.post(
+            "/api/registrations/bulk_mark_offline_refunded/",
+            {"registration_ids": [99999]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

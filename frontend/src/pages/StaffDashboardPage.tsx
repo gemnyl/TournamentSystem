@@ -46,6 +46,76 @@ function getCategoryStatusLabel(status: string) {
   return "Завершено";
 }
 
+interface FinanceReport {
+  total_revenue: number;
+  total_entries_count: number;
+  online_funds: number;
+  online_entries_count: number;
+  offline_funds: number;
+  offline_entries_count: number;
+  platform_fee_total: number;
+  platform_fee_held: number;
+  platform_fee_offline_debt: number;
+  platform_fee_paid: number;
+  platform_fee_debt: number;
+  organizer_credit_limit: number;
+  organizer_total_debt: number;
+  withdrawn_funds: number;
+  pending_withdrawn_funds: number;
+  available_balance: number;
+}
+
+interface PayoutRequestItem {
+  id: number;
+  amount: number;
+  bank_details: string;
+  iban?: string;
+  recipient_name?: string;
+  recipient_code?: string;
+  purpose?: string;
+  status: string;
+  created_at: string;
+}
+
+interface UnpaidTournament {
+  id: number;
+  title: string;
+  platform_fee_amount: number;
+}
+
+interface AdminOrganizer {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+  credit_limit: number;
+}
+
+interface AdminDebt {
+  tournament_id: number;
+  title: string;
+  organizer_name: string;
+  organizer_email: string;
+  amount: number;
+  completed_at: string;
+}
+
+interface WeighInGroup {
+  id: string;
+  type: "athlete" | "team";
+  athleteId?: number;
+  teamId?: number;
+  name: string;
+  club: string;
+  coach: string;
+  gender?: string;
+  age?: number;
+  baseWeight?: number | null;
+  registrations: Registration[];
+  checkedIn: boolean;
+  recordedWeight?: number | null;
+}
+
 export default function StaffDashboardPage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -92,13 +162,13 @@ export default function StaffDashboardPage() {
   // Secretary Bulk Actions & Organizer Finance states
   const [selectedRegIds, setSelectedRegIds] = useState<number[]>([]);
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
-  const [financeReport, setFinanceReport] = useState<any>(null);
+  const [financeReport, setFinanceReport] = useState<FinanceReport | null>(null);
   const [isLoadingFinance, setIsLoadingFinance] = useState(false);
   const [isPayingPlatformFee, setIsPayingPlatformFee] = useState(false);
 
   // Financial details & withdrawals states
   const [financeSubTab, setFinanceSubTab] = useState<"summary" | "details" | "withdrawals">("summary");
-  const [payoutRequests, setPayoutRequests] = useState<any[]>([]);
+  const [payoutRequests, setPayoutRequests] = useState<PayoutRequestItem[]>([]);
   const [isLoadingPayouts, setIsLoadingPayouts] = useState(false);
   const [payoutAmount, setPayoutAmount] = useState("");
   const [payoutIBAN, setPayoutIBAN] = useState("");
@@ -106,23 +176,23 @@ export default function StaffDashboardPage() {
   const [payoutRecipientCode, setPayoutRecipientCode] = useState("");
   const [payoutPurpose, setPayoutPurpose] = useState("");
   const [isSubmittingPayout, setIsSubmittingPayout] = useState(false);
-  const [unpaidTournaments, setUnpaidTournaments] = useState<any[]>([]);
+  const [unpaidTournaments, setUnpaidTournaments] = useState<UnpaidTournament[]>([]);
   const [selectedUnpaidTournaments, setSelectedUnpaidTournaments] = useState<number[]>([]);
   const [isPayingBulkFee, setIsPayingBulkFee] = useState(false);
   const [paymentDetailsSearch, setPaymentDetailsSearch] = useState("");
   const [paymentDetailsStatusFilter, setPaymentDetailsStatusFilter] = useState("all");
 
   // Admin limits management states
-  const [adminOrganizers, setAdminOrganizers] = useState<any[]>([]);
+  const [adminOrganizers, setAdminOrganizers] = useState<AdminOrganizer[]>([]);
   const [isLoadingAdminOrganizers, setIsLoadingAdminOrganizers] = useState(false);
-  const [adminDebts, setAdminDebts] = useState<any[]>([]);
+  const [adminDebts, setAdminDebts] = useState<AdminDebt[]>([]);
   const [isLoadingAdminDebts, setIsLoadingAdminDebts] = useState(false);
-  const [editingOrganizerLimit, setEditingOrganizerLimit] = useState<any | null>(null);
+  const [editingOrganizerLimit, setEditingOrganizerLimit] = useState<AdminOrganizer | null>(null);
   const [newLimitValue, setNewLimitValue] = useState("");
   const [isSavingLimit, setIsSavingLimit] = useState(false);
   const [adminOrganizersSearch, setAdminOrganizersSearch] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "athlete">("list");
-  const [weighInGroup, setWeighInGroup] = useState<any | null>(null);
+  const [weighInGroup, setWeighInGroup] = useState<WeighInGroup | null>(null);
 
   useEffect(() => {
     if (reviewDialogReq) {
@@ -237,11 +307,12 @@ export default function StaffDashboardPage() {
     try {
       const { data } = await api.get(`/tournaments/${tournamentId}/finance_report/`);
       setFinanceReport(data);
-    } catch (err: any) {
+    } catch (err) {
       console.error("fetchFinanceReport error:", err);
+      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка завантаження фінансів",
-        description: err.response?.data?.detail || "Не вдалося завантажити фінансовий звіт.",
+        description: error.response?.data?.detail || "Не вдалося завантажити фінансовий звіт.",
         variant: "destructive",
       });
     } finally {
@@ -266,15 +337,15 @@ export default function StaffDashboardPage() {
     try {
       const { data } = await api.get("/tournaments/?staff_member=me&page_size=1000");
       const list = Array.isArray(data) ? data : (data.results || []);
-      const unpaid = list.filter((t: any) =>
+      const unpaid = list.filter((t: Tournament) =>
         t.status === "completed" &&
         t.platform_fee_status === "unpaid" &&
-        t.platform_fee_amount > 0
+        (t.platform_fee_amount ?? 0) > 0
       );
       setUnpaidTournaments(unpaid);
 
       // Auto-select current tournament if it is in the unpaid list
-      if (unpaid.some((t: any) => t.id === currentTournamentId)) {
+      if (unpaid.some((t: Tournament) => t.id === currentTournamentId)) {
         setSelectedUnpaidTournaments([currentTournamentId]);
       } else if (unpaid.length > 0) {
         setSelectedUnpaidTournaments([unpaid[0].id]);
@@ -352,11 +423,12 @@ export default function StaffDashboardPage() {
       setPayoutPurpose("");
       fetchFinanceReport(selectedTournament.id);
       fetchPayoutRequests(selectedTournament.id);
-    } catch (err: any) {
+    } catch (err) {
       console.error("handleRequestPayout error:", err);
+      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка запиту",
-        description: err.response?.data?.detail || "Не вдалося надіслати запит.",
+        description: error.response?.data?.detail || "Не вдалося надіслати запит.",
         variant: "destructive",
       });
     } finally {
@@ -386,11 +458,12 @@ export default function StaffDashboardPage() {
         paymentUrl = `/billing/mock-pay${urlObj.search}`;
       }
       window.location.href = paymentUrl;
-    } catch (err: any) {
+    } catch (err) {
       console.error("handlePayBulkPlatformFee error:", err);
+      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка ініціалізації оплати",
-        description: err.response?.data?.detail || "Не вдалося ініціювати платіж.",
+        description: error.response?.data?.detail || "Не вдалося ініціювати платіж.",
         variant: "destructive",
       });
     } finally {
@@ -871,9 +944,9 @@ export default function StaffDashboardPage() {
   };
 
   // Toggle check-in for grouped athlete
-  const handleAthleteCheckInToggle = async (group: any) => {
+  const handleAthleteCheckInToggle = async (group: WeighInGroup) => {
     const newCheckedIn = !group.checkedIn;
-    const registrationIds = group.registrations.map((r: any) => r.id);
+    const registrationIds = group.registrations.map((r: Registration) => r.id);
     try {
       await api.post("/registrations/bulk_update_secretary/", {
         registration_ids: registrationIds,
@@ -894,7 +967,7 @@ export default function StaffDashboardPage() {
   };
 
   // Open athlete weigh-in dialog
-  const openAthleteWeighIn = (group: any) => {
+  const openAthleteWeighIn = (group: WeighInGroup) => {
     setWeighInGroup(group);
     setWeighInValue(group.recordedWeight ? group.recordedWeight.toString() : "");
   };
@@ -943,9 +1016,10 @@ export default function StaffDashboardPage() {
         description: `Спортсмен: ${weighInGroup.name}, вага: ${weightVal} кг для всіх категорій.`,
       });
       setWeighInGroup(null);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to submit weigh-in:", err);
-      const errMsg = err.response?.data?.detail || "Помилка при зважуванні.";
+      const error = err as { response?: { data?: { detail?: string } } };
+      const errMsg = error.response?.data?.detail || "Помилка при зважуванні.";
       toast({
         title: "Помилка зважування",
         description: errMsg,
@@ -1015,11 +1089,12 @@ export default function StaffDashboardPage() {
           fetchFinanceReport(selectedTournament.id);
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("handleBulkUpdateSecretary error:", err);
+      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка групового оновлення",
-        description: err.response?.data?.detail || "Не вдалося виконати групове оновлення.",
+        description: error.response?.data?.detail || "Не вдалося виконати групове оновлення.",
         variant: "destructive",
       });
     } finally {
@@ -1050,11 +1125,12 @@ export default function StaffDashboardPage() {
         paymentUrl = `/billing/mock-pay${urlObj.search}`;
       }
       window.location.href = paymentUrl;
-    } catch (err: any) {
+    } catch (err) {
       console.error("handlePayPlatformFee error:", err);
+      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка ініціалізації оплати",
-        description: err.response?.data?.detail || "Не вдалося ініціювати платіж.",
+        description: error.response?.data?.detail || "Не вдалося ініціювати платіж.",
         variant: "destructive",
       });
     } finally {
@@ -1103,11 +1179,12 @@ export default function StaffDashboardPage() {
       });
       setEditingOrganizerLimit(null);
       fetchAdminOrganizers(adminOrganizersSearch);
-    } catch (err: any) {
+    } catch (err) {
       console.error("handleUpdateOrganizerLimit error:", err);
+      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка оновлення ліміту",
-        description: err.response?.data?.detail || "Не вдалося оновити кредитний ліміт.",
+        description: error.response?.data?.detail || "Не вдалося оновити кредитний ліміт.",
         variant: "destructive",
       });
     } finally {
@@ -1149,7 +1226,7 @@ export default function StaffDashboardPage() {
 
   // Grouped athletes for athlete-centric view
   const groupedAthletes = useMemo(() => {
-    const groups: any[] = [];
+    const groups: WeighInGroup[] = [];
     filteredRegistrations.forEach((reg) => {
       if (reg.athlete) {
         const key = `athlete-${reg.athlete.id}`;
@@ -1195,8 +1272,8 @@ export default function StaffDashboardPage() {
 
     // Calculate collective status
     groups.forEach((g) => {
-      g.checkedIn = g.registrations.some((r: any) => r.checked_in);
-      const withWeight = g.registrations.find((r: any) => r.recorded_weight !== null && r.recorded_weight !== undefined);
+      g.checkedIn = g.registrations.some((r: Registration) => r.checked_in);
+      const withWeight = g.registrations.find((r: Registration) => r.recorded_weight !== null && r.recorded_weight !== undefined);
       if (withWeight) {
         g.recordedWeight = withWeight.recorded_weight;
       }
@@ -1436,7 +1513,7 @@ export default function StaffDashboardPage() {
           {/* Categories list */}
           <TableCell className="max-w-[300px]">
             <div className="flex flex-wrap gap-2">
-              {group.registrations.map((reg: any) => (
+              {group.registrations.map((reg: Registration) => (
                 <div key={reg.id} className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded border border-slate-850 text-[11px]">
                   <span className="text-slate-300 font-medium max-w-[100px] truncate" title={reg.category_name}>
                     {reg.category_name}
@@ -2568,7 +2645,7 @@ export default function StaffDashboardPage() {
                       {weighInGroup.name} ({weighInGroup.club})
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
-                      Категорії: {weighInGroup.registrations.map((r: any) => r.category_name).join(", ")}
+                      Категорії: {weighInGroup.registrations.map((r: Registration) => r.category_name).join(", ")}
                     </p>
                     {weighInGroup.baseWeight && (
                       <p className="text-xs text-slate-400">

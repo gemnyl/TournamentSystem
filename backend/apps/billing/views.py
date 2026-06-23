@@ -215,8 +215,7 @@ class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
                     return Response(
                         {
                             "detail": (
-                                f"Тільки організатор може сплатити комісію "
-                                f"за турнір '{t.title}'."
+                                f"Тільки організатор може сплатити комісію за турнір '{t.title}'."
                             )
                         },
                         status=status.HTTP_403_FORBIDDEN,
@@ -225,7 +224,7 @@ class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
                     return Response(
                         {
                             "detail": (
-                                f"Комісія за турнір '{t.title}' " f"вже сплачена або дорівнює нулю."
+                                f"Комісія за турнір '{t.title}' вже сплачена або дорівнює нулю."
                             )
                         },
                         status=status.HTTP_400_BAD_REQUEST,

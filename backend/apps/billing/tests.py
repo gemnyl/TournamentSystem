@@ -121,7 +121,7 @@ class BillingAPITestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://localhost:3000/success",
+                "redirect_url": "https://localhost:3000/success",
                 "registration_ids": [self.reg_a.id],
             },
             format="json",
@@ -143,7 +143,7 @@ class BillingAPITestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://localhost:3000/success",
+                "redirect_url": "https://localhost:3000/success",
                 "registration_ids": [self.reg_b.id],  # належить coach_b
             },
             format="json",
@@ -161,7 +161,7 @@ class BillingAPITestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://localhost:3000/success",
+                "redirect_url": "https://localhost:3000/success",
                 "registration_ids": [self.reg_a.id, self.reg_b.id],  # обидва в тому ж клубі
             },
             format="json",
@@ -177,7 +177,7 @@ class BillingAPITestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://localhost:3000/success",
+                "redirect_url": "https://localhost:3000/success",
                 "registration_ids": [self.reg_a.id],
             },
             format="json",
@@ -190,7 +190,7 @@ class BillingAPITestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://localhost:3000/success",
+                "redirect_url": "https://localhost:3000/success",
                 "registration_ids": [self.reg_a.id],
             },
             format="json",
@@ -208,7 +208,7 @@ class BillingAPITestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://localhost:3000/success",
+                "redirect_url": "https://localhost:3000/success",
                 "registration_ids": [self.reg_a.id],
             },
             format="json",
@@ -257,7 +257,7 @@ class BillingAPITestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://localhost:3000/success",
+                "redirect_url": "https://localhost:3000/success",
                 "registration_ids": [self.reg_a.id],
             },
             format="json",
@@ -496,8 +496,8 @@ class BillingViewsAndServicesTestCase(TestCase):
             invoice_id=456,
             amount_uah=500,
             destination="Внесок",
-            redirect_url="http://success",
-            webhook_url="http://webhook",
+            redirect_url="https://success",
+            webhook_url="https://webhook",
         )
         self.assertEqual(res["invoiceId"], "mono-123")
         self.assertEqual(res["pageUrl"], "https://mono/123")
@@ -507,7 +507,7 @@ class BillingViewsAndServicesTestCase(TestCase):
         mock_fp = MagicMock()
         mock_fp.read.return_value = b'{"errCode": "BAD_AMOUNT"}'
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="http://mono", code=400, msg="Bad Request", hdrs={}, fp=mock_fp
+            url="https://mono", code=400, msg="Bad Request", hdrs={}, fp=mock_fp
         )
 
         with self.assertRaises(Exception) as ctx:
@@ -515,8 +515,8 @@ class BillingViewsAndServicesTestCase(TestCase):
                 invoice_id=456,
                 amount_uah=500,
                 destination="Внесок",
-                redirect_url="http://success",
-                webhook_url="http://webhook",
+                redirect_url="https://success",
+                webhook_url="https://webhook",
             )
         self.assertIn('Monobank API error: 400 - {"errCode": "BAD_AMOUNT"}', str(ctx.exception))
 
@@ -549,7 +549,7 @@ class BillingViewsAndServicesTestCase(TestCase):
         mock_fp = MagicMock()
         mock_fp.read.return_value = b'{"errCode": "ALREADY_REFUNDED"}'
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="http://mono", code=400, msg="Bad Request", hdrs={}, fp=mock_fp
+            url="https://mono", code=400, msg="Bad Request", hdrs={}, fp=mock_fp
         )
 
         with self.assertRaises(Exception) as ctx:
@@ -573,7 +573,7 @@ class BillingViewsAndServicesTestCase(TestCase):
         mock_fp = MagicMock()
         mock_fp.read.return_value = b'{"errCode": "NOT_FOUND"}'
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="http://mono", code=404, msg="Not Found", hdrs={}, fp=mock_fp
+            url="https://mono", code=404, msg="Not Found", hdrs={}, fp=mock_fp
         )
 
         with self.assertRaises(Exception) as ctx:
@@ -637,7 +637,7 @@ class BillingViewsAndServicesTestCase(TestCase):
 
         response = self.client.post(
             "/api/billing/invoices/",
-            {"payment_type": "registrations", "redirect_url": "http://success"},
+            {"payment_type": "registrations", "redirect_url": "https://success"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -647,7 +647,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "registration_ids": [99999],
             },
             format="json",
@@ -660,7 +660,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "registration_ids": [self.reg.id],
             },
             format="json",
@@ -676,7 +676,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "registration_ids": [self.reg.id],
             },
             format="json",
@@ -690,7 +690,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "registration_ids": [self.reg.id],
             },
             format="json",
@@ -699,7 +699,7 @@ class BillingViewsAndServicesTestCase(TestCase):
 
         response = self.client.post(
             "/api/billing/invoices/",
-            {"payment_type": "unknown_type", "redirect_url": "http://success"},
+            {"payment_type": "unknown_type", "redirect_url": "https://success"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -711,7 +711,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "registration_ids": [self.reg.id],
             },
             format="json",
@@ -727,7 +727,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "registrations",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "registration_ids": [self.reg.id],
             },
             format="json",
@@ -743,7 +743,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "platform_fee",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "tournament_id": self.tournament.id,
             },
             format="json",
@@ -752,12 +752,12 @@ class BillingViewsAndServicesTestCase(TestCase):
 
         self._login(self.organizer)
         with patch("apps.billing.services.MonobankService.create_invoice") as mock_create:
-            mock_create.return_value = {"invoiceId": "mono-fee", "pageUrl": "http://mono-pay"}
+            mock_create.return_value = {"invoiceId": "mono-fee", "pageUrl": "https://mono-pay"}
             response = self.client.post(
                 "/api/billing/invoices/",
                 {
                     "payment_type": "platform_fee",
-                    "redirect_url": "http://success",
+                    "redirect_url": "https://success",
                     "tournament_id": self.tournament.id,
                 },
                 format="json",
@@ -771,7 +771,7 @@ class BillingViewsAndServicesTestCase(TestCase):
             "/api/billing/invoices/",
             {
                 "payment_type": "platform_fee",
-                "redirect_url": "http://success",
+                "redirect_url": "https://success",
                 "tournament_id": self.tournament.id,
             },
             format="json",
@@ -786,7 +786,7 @@ class BillingViewsAndServicesTestCase(TestCase):
                 "/api/billing/invoices/",
                 {
                     "payment_type": "platform_fee",
-                    "redirect_url": "http://success",
+                    "redirect_url": "https://success",
                     "tournament_id": self.tournament.id,
                 },
                 format="json",

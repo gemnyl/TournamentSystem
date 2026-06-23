@@ -253,6 +253,20 @@ class Tournament(models.Model):
             ]
         )
 
+    @classmethod
+    def get_organizer_debt(cls, organizer):
+        from django.db.models import Sum
+
+        return (
+            cls.objects.filter(
+                organizer=organizer,
+                status=cls.Status.COMPLETED,
+                platform_fee_status="unpaid",
+                platform_fee_amount__gt=0,
+            ).aggregate(total=Sum("platform_fee_amount"))["total"]
+            or 0
+        )
+
     def check_and_update_status(self):
         """Перевіряє дати та автоматично оновлює статус турніру, якщо настав час."""
         now = timezone.now()
@@ -269,17 +283,7 @@ class Tournament(models.Model):
         if self.status == self.Status.REGISTRATION:
             if self.start_date and now >= self.start_date:
                 # Перевіряємо кредитний ліміт організатора перед активацією
-                from django.db.models import Sum
-
-                total_debt = (
-                    Tournament.objects.filter(
-                        organizer=self.organizer,
-                        status=self.Status.COMPLETED,
-                        platform_fee_status="unpaid",
-                        platform_fee_amount__gt=0,
-                    ).aggregate(total=Sum("platform_fee_amount"))["total"]
-                    or 0
-                )
+                total_debt = self.get_organizer_debt(self.organizer)
 
                 if total_debt <= self.organizer.credit_limit:
                     self.status = self.Status.ACTIVE
@@ -301,7 +305,6 @@ class Tournament(models.Model):
     def auto_transition_statuses(cls):
         """Оновлює статуси турнірів на основі поточного часу."""
         now = timezone.now()
-        from django.db.models import Sum
 
         # 1. Draft -> Registration
         drafts = cls.objects.filter(
@@ -315,15 +318,7 @@ class Tournament(models.Model):
         # 2. Registration -> Active
         registrations = cls.objects.filter(status=cls.Status.REGISTRATION, start_date__lte=now)
         for t in registrations:
-            total_debt = (
-                cls.objects.filter(
-                    organizer=t.organizer,
-                    status=cls.Status.COMPLETED,
-                    platform_fee_status="unpaid",
-                    platform_fee_amount__gt=0,
-                ).aggregate(total=Sum("platform_fee_amount"))["total"]
-                or 0
-            )
+            total_debt = cls.get_organizer_debt(t.organizer)
 
             if total_debt <= t.organizer.credit_limit:
                 t.status = cls.Status.ACTIVE

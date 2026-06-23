@@ -3269,8 +3269,16 @@ export default function CoachDashboardPage() {
                               <div key={athKey} className="border border-border bg-card/5 rounded-xl overflow-hidden shadow-sm transition-all duration-200">
                                 {/* Collapsible Header */}
                                 <div
+                                  role="button"
+                                  tabIndex={0}
                                   className="p-4 bg-muted/10 flex items-center justify-between cursor-pointer hover:bg-muted/20 select-none"
                                   onClick={() => setCollapsedAthletes(prev => ({ ...prev, [athKey]: !isCollapsed }))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      setCollapsedAthletes(prev => ({ ...prev, [athKey]: !isCollapsed }));
+                                    }
+                                  }}
                                 >
                                   <div className="flex items-center gap-3">
                                     <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform duration-200", isCollapsed && "-rotate-90")} />
@@ -3282,19 +3290,22 @@ export default function CoachDashboardPage() {
                                     </div>
                                   </div>
 
-                                  <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center gap-3">
                                     {group.onlinePaymentEnabled ? (
                                       <Button
                                         variant="sport"
                                         size="sm"
                                         className="h-8 rounded-xl text-xs font-semibold"
-                                        onClick={() => setShowPayModal({
-                                          tournamentId: tid,
-                                          tournamentTitle: tournamentTitle,
-                                          athleteName: athGroup.athleteName,
-                                          registrationIds: athGroup.registrations.map(r => r.id),
-                                          registrations: athGroup.registrations
-                                        })}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setShowPayModal({
+                                            tournamentId: tid,
+                                            tournamentTitle: tournamentTitle,
+                                            athleteName: athGroup.athleteName,
+                                            registrationIds: athGroup.registrations.map(r => r.id),
+                                            registrations: athGroup.registrations
+                                          });
+                                        }}
                                       >
                                         <CreditCard className="w-3.5 h-3.5 mr-1.5" /> Сплатити онлайн ({athGrandTotal.toFixed(0)} UAH)
                                       </Button>
@@ -3760,10 +3771,19 @@ export default function CoachDashboardPage() {
                                 </TableCell>
                                 <TableCell className="text-sm">
                                   <span
-                                    className="font-medium text-indigo-400 hover:text-indigo-300 cursor-pointer hover:underline"
+                                    role="button"
+                                    tabIndex={0}
+                                    className="font-medium text-indigo-400 hover:text-indigo-300 cursor-pointer hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded"
                                     onClick={() => {
                                       const inv = invoices.find(i => i.id === tx.invoice);
                                       if (inv) handleOpenInvoiceModal(inv);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        const inv = invoices.find(i => i.id === tx.invoice);
+                                        if (inv) handleOpenInvoiceModal(inv);
+                                      }
                                     }}
                                   >
                                     {tx.payment_type_display}

@@ -180,7 +180,26 @@ export interface Registration {
   offline_refund_status?: "none" | "pending" | "confirmed";
   qr_token?: string;
   tournament_status?: string;
-  payment_invoice?: any;
+  payment_invoice?: Invoice;
+}
+
+export interface RegistrationDetail {
+  id: number;
+  athlete_name: string;
+  category_name: string;
+}
+
+export interface Invoice {
+  id: number;
+  invoice_id?: string;
+  payment_type: string;
+  payment_type_display?: string;
+  amount: number;
+  status: string;
+  status_display?: string;
+  payment_url?: string;
+  created_at: string;
+  registration_details?: RegistrationDetail[];
 }
 
 // ─── Матч ───────────────────────────────────────────────────────────────────
