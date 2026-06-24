@@ -52,6 +52,26 @@ class BaseRuleSet(ABC):
     sport_type: str
     judging_mode: JudgingMode
 
+    def get_default_state(self) -> dict:
+        return {}
+
+    def apply_ruleset_event(
+        self, state: dict, event_type: str, payload: dict
+    ) -> tuple[dict, bool, str | None, str | None]:
+        # Ensure default values are populated
+        default = self.get_default_state()
+        for k, v in default.items():
+            if k not in state:
+                state[k] = v
+
+        is_finished, winner, win_method = self._apply_ruleset_event_impl(state, event_type, payload)
+        return state, is_finished, winner, win_method
+
+    def _apply_ruleset_event_impl(
+        self, state: dict, event_type: str, payload: dict
+    ) -> tuple[bool, str | None, str | None]:
+        raise NotImplementedError()
+
     @abstractmethod
     def get_win_methods(self) -> Sequence[WinMethodSpec]: ...
 

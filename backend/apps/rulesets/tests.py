@@ -223,3 +223,232 @@ class KarateKataRuleSetTest(TestCase):
         state = MatchState()
         with self.assertRaises(ValueError):
             self.ruleset.apply_flags_decision(state, flags_aka=2, flags_ao=2, judges_count=5)
+
+
+class TaekwondoWTRuleSetTest(TestCase):
+    def setUp(self):
+        from apps.rulesets.taekwondo_wt import TaekwondoWTRuleSet
+
+        self.ruleset = TaekwondoWTRuleSet()
+
+    def test_default_state(self):
+        state = self.ruleset.get_default_state()
+        self.assertEqual(state["current_round"], 1)
+        self.assertEqual(state["scores"]["chung"], 0)
+        self.assertEqual(state["rounds_won"]["chung"], 0)
+
+    def test_add_sub_points(self):
+        state = self.ruleset.get_default_state()
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_POINTS", {"corner": "chung", "points": 3}
+        )
+        self.assertEqual(state["scores"]["chung"], 3)
+        self.assertFalse(is_finished)
+
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "SUB_POINTS", {"corner": "chung", "points": 1}
+        )
+        self.assertEqual(state["scores"]["chung"], 2)
+
+    def test_add_gam_jeom(self):
+        state = self.ruleset.get_default_state()
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_GAM_JEOM", {"corner": "chung"}
+        )
+        self.assertEqual(state["gam_jeoms"]["chung"], 1)
+        self.assertEqual(state["scores"]["hong"], 1)
+
+    def test_next_round_winner(self):
+        state = self.ruleset.get_default_state()
+        state["scores"]["chung"] = 5
+        state["scores"]["hong"] = 2
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "NEXT_ROUND", {}
+        )
+        self.assertEqual(state["rounds_won"]["chung"], 1)
+        self.assertEqual(state["scores"]["chung"], 0)
+        self.assertEqual(state["current_round"], 2)
+
+    def test_win_by_rounds(self):
+        state = self.ruleset.get_default_state()
+        state["rounds_won"]["chung"] = 1
+        state["scores"]["chung"] = 5
+        state["scores"]["hong"] = 2
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "NEXT_ROUND", {}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "chung")
+        self.assertEqual(method, "points")
+
+    def test_win_by_gam_jeoms(self):
+        state = self.ruleset.get_default_state()
+        state["gam_jeoms"]["chung"] = 9
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_GAM_JEOM", {"corner": "chung"}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "hong")
+        self.assertEqual(method, "pun")
+
+    def test_win_by_point_gap_round2(self):
+        state = self.ruleset.get_default_state()
+        state["current_round"] = 2
+        state["scores"]["chung"] = 16
+        state["scores"]["hong"] = 1
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "NEXT_ROUND", {}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "chung")
+        self.assertEqual(method, "ptg")
+
+    def test_auto_round_win_by_point_gap(self):
+        state = self.ruleset.get_default_state()
+        # Add 15 points to chung to trigger point gap (15-0)
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_POINTS", {"corner": "chung", "points": 15}
+        )
+        # Since it is round 1, triggering point gap should transition to round 2, not end the match
+        self.assertFalse(is_finished)
+        self.assertEqual(state["current_round"], 2)
+        self.assertEqual(state["rounds_won"]["chung"], 1)
+        self.assertEqual(len(state["round_history"]), 1)
+        self.assertEqual(state["round_history"][0]["winner"], "chung")
+        self.assertEqual(state["round_history"][0]["win_method"], "ptg")
+
+    def test_auto_round_win_by_five_gam_jeoms(self):
+        state = self.ruleset.get_default_state()
+        # Add 5 Gam-jeoms to chung. Each Gam-jeom gives opponent (hong) 1 point.
+        for _ in range(5):
+            state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+                state, "ADD_GAM_JEOM", {"corner": "chung"}
+            )
+        # 5 Gam-jeoms in a round should transition the round, awarding round win to hong
+        self.assertFalse(is_finished)
+        self.assertEqual(state["current_round"], 2)
+        self.assertEqual(state["rounds_won"]["hong"], 1)
+        self.assertEqual(state["round_history"][0]["winner"], "hong")
+        self.assertEqual(state["round_history"][0]["win_method"], "gam_jeom")
+
+    def test_match_win_by_cumulative_ten_gam_jeoms(self):
+        state = self.ruleset.get_default_state()
+        # Add 4 Gam-jeoms to chung in round 1, then transition round manually
+        for _ in range(4):
+            state, _, _, _ = self.ruleset.apply_ruleset_event(
+                state, "ADD_GAM_JEOM", {"corner": "chung"}
+            )
+        state, _, _, _ = self.ruleset.apply_ruleset_event(
+            state, "NEXT_ROUND", {"round_winner": "hong"}
+        )
+
+        # Add 5 Gam-jeoms to chung in round 2 (total 9)
+        for _ in range(5):
+            # The 5th Gam-jeom will transition round 2 to round 3
+            state, _, _, _ = self.ruleset.apply_ruleset_event(
+                state, "ADD_GAM_JEOM", {"corner": "chung"}
+            )
+
+        # Add 1 Gam-jeom in round 3 (reaches 10)
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_GAM_JEOM", {"corner": "chung"}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "hong")
+        self.assertEqual(method, "pun")
+
+    def test_double_gam_jeom_in_last_10_seconds(self):
+        state = self.ruleset.get_default_state()
+
+        # 1. Normal Gam-jeom (more than 10 seconds remaining, or not passive)
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_GAM_JEOM", {"corner": "chung", "is_passive": True, "remaining_seconds": 15}
+        )
+        self.assertEqual(state["gam_jeoms"]["chung"], 1)
+        self.assertEqual(state["scores"]["hong"], 1)
+
+        # 2. Passive Gam-jeom inside last 10 seconds
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_GAM_JEOM", {"corner": "chung", "is_passive": True, "remaining_seconds": 8}
+        )
+        self.assertEqual(state["gam_jeoms"]["chung"], 2)
+        self.assertEqual(state["scores"]["hong"], 3)  # Opponent gets +2 points (1 + 2 = 3)
+
+        # 3. Undo passive Gam-jeom inside last 10 seconds
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "SUB_GAM_JEOM", {"corner": "chung", "is_passive": True, "remaining_seconds": 8}
+        )
+        self.assertEqual(state["gam_jeoms"]["chung"], 1)
+        self.assertEqual(state["scores"]["hong"], 1)  # Opponent loses -2 points (3 - 2 = 1)
+
+
+class JudoIJFRuleSetTest(TestCase):
+    def setUp(self):
+        from apps.rulesets.judo_ijf import JudoIJFRuleSet
+
+        self.ruleset = JudoIJFRuleSet()
+
+    def test_default_state(self):
+        state = self.ruleset.get_default_state()
+        self.assertEqual(state["scores"]["shiro"]["waza_ari"], 0)
+        self.assertEqual(state["penalties"]["shiro"]["shido"], 0)
+        self.assertFalse(state["is_golden_score"])
+
+    def test_add_waza_ari_and_ippon(self):
+        state = self.ruleset.get_default_state()
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_WAZA_ARI", {"corner": "shiro"}
+        )
+        self.assertEqual(state["scores"]["shiro"]["waza_ari"], 1)
+        self.assertFalse(is_finished)
+
+        # 2nd Waza-ari turns to Ippon
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_WAZA_ARI", {"corner": "shiro"}
+        )
+        self.assertEqual(state["scores"]["shiro"]["waza_ari"], 0)
+        self.assertEqual(state["scores"]["shiro"]["ippon"], 1)
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "shiro")
+        self.assertEqual(method, "ippon")
+
+    def test_add_shido(self):
+        state = self.ruleset.get_default_state()
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_SHIDO", {"corner": "shiro"}
+        )
+        self.assertEqual(state["penalties"]["shiro"]["shido"], 1)
+        self.assertFalse(is_finished)
+
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_SHIDO", {"corner": "shiro"}
+        )
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_SHIDO", {"corner": "shiro"}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "ao")
+        self.assertEqual(method, "hansoku")
+
+    def test_golden_score_win(self):
+        state = self.ruleset.get_default_state()
+        state["is_golden_score"] = True
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_WAZA_ARI", {"corner": "ao"}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "ao")
+        self.assertEqual(method, "wazaari")
+
+    def test_osaekomi_state(self):
+        state = self.ruleset.get_default_state()
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "START_OSAEKOMI", {"corner": "shiro", "start_timestamp": 1234567890}
+        )
+        self.assertEqual(state["osaekomi"]["active_for"], "shiro")
+        self.assertEqual(state["osaekomi"]["start_timestamp"], 1234567890)
+
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "STOP_OSAEKOMI", {}
+        )
+        self.assertIsNone(state["osaekomi"]["active_for"])
