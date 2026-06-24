@@ -30,7 +30,6 @@ SECRET_KEY = os.environ.get(
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 
-# Guard: у production режимі стандартний insecure-ключ неприйнятний.
 if not DEBUG and SECRET_KEY.startswith("django-insecure-"):
     raise ImproperlyConfigured(
         "DJANGO_SECRET_KEY не встановлений або використовується небезпечне "
@@ -38,7 +37,6 @@ if not DEBUG and SECRET_KEY.startswith("django-insecure-"):
     )
 
 
-# Parse hosts from both DJANGO_ALLOWED_HOSTS (from docker-compose) and ALLOWED_HOSTS (from .env)
 def parse_env_list(var_name, default=""):
     value = os.environ.get(var_name, default) or ""
     return [item.strip() for item in value.replace(",", " ").split() if item.strip()]
@@ -49,8 +47,6 @@ _env_hosts = parse_env_list("ALLOWED_HOSTS")
 
 ALLOWED_HOSTS = list(set(_docker_hosts + _env_hosts))
 
-# Always ensure basic fallback hosts are present to prevent docker health check
-# or local access failures
 for fallback in ["localhost", "127.0.0.1", "backend", "0.0.0.0"]:
     if fallback not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(fallback)
@@ -60,6 +56,13 @@ for fallback in ["localhost", "127.0.0.1", "backend", "0.0.0.0"]:
 # ---------------------------------------------------------------------------
 
 INSTALLED_APPS = [
+    "apps.common",  # Has to be first to override templates
+    "unfold",
+    "unfold.contrib.filters",
+    "unfold.contrib.forms",
+    "unfold.contrib.inlines",
+    "unfold.contrib.import_export",
+    "import_export",
     "daphne",
     # Django вбудовані
     "django.contrib.admin",
@@ -84,7 +87,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # має бути першим
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -112,7 +115,6 @@ TEMPLATES = [
     },
 ]
 
-# ASGI — точка входу для HTTP + WebSocket (Channels)
 ASGI_APPLICATION = "config.asgi.application"
 WSGI_APPLICATION = "config.wsgi.application"
 
@@ -125,7 +127,7 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.environ.get("DB_NAME", "tournament_db"),
         "USER": os.environ.get("DB_USER", "tournament_user"),
-        "PASSWORD": os.environ.get("DB_PASSWORD", "tournament_pass"),  # NOSONAR
+        "PASSWORD": os.environ.get("DB_PASSWORD", "tournament_pass"),
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
         "CONN_MAX_AGE": 60,
@@ -136,8 +138,6 @@ DATABASES = {
 # Django Channels — Redis channel layer
 # ---------------------------------------------------------------------------
 
-# У тестовому середовищі (TEST=True або відсутній Redis) використовуємо InMemory.
-# Це дозволяє запускати pytest без запущеного Redis.
 _use_redis_channel_layer = os.environ.get("USE_REDIS_CHANNEL_LAYER", "True") == "True"
 
 if _use_redis_channel_layer:
@@ -159,7 +159,6 @@ if _use_redis_channel_layer:
         },
     }
 else:
-    # Fallback для тестів без Redis
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
@@ -184,16 +183,14 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # ---------------------------------------------------------------------------
-# DRF (Django REST Framework)
+# DRF
 # ---------------------------------------------------------------------------
 
 REST_FRAMEWORK = {
-    # Сесійна автентифікація + Basic для тестів через браузер
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.BasicAuthentication",
     ],
-    # За замовчуванням API доступний лише автентифікованим
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
@@ -216,7 +213,7 @@ REST_FRAMEWORK = {
 }
 
 # ---------------------------------------------------------------------------
-# CORS (фронтенд на порту 5173 — Vite dev server)
+# CORS
 # ---------------------------------------------------------------------------
 
 _cors_raw = os.environ.get(
@@ -227,67 +224,187 @@ CORS_ALLOWED_ORIGINS = [
     item.strip() for item in _cors_raw.replace(",", " ").split() if item.strip()
 ]
 
-CORS_ALLOW_CREDENTIALS = True  # необхідно для сесійних cookie
-
+CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS[:]
 
-# Automatically derive CORS/CSRF origins from ALLOWED_HOSTS for convenience (e.g. for ngrok)
 for host in ALLOWED_HOSTS:
-    if host not in ["localhost", "127.0.0.1", "backend", "0.0.0.0"] and not host.startswith(
-        "192.168."
-    ):
+    is_local = host in ["localhost", "127.0.0.1", "backend", "0.0.0.0"]
+    if not is_local and not host.startswith("192.168."):
         clean_host = host.lstrip(".")
         for proto in ["http", "https"]:
             origin = f"{proto}://{clean_host}"
             if origin not in CORS_ALLOWED_ORIGINS:
                 CORS_ALLOWED_ORIGINS.append(origin)
-
-            # For wildcard hosts (starting with a dot like .ngrok-free.app),
-            # add wildcard pattern to CSRF
             if host.startswith("."):
                 wildcard_origin = f"{proto}://*.{clean_host}"
                 if wildcard_origin not in CSRF_TRUSTED_ORIGINS:
                     CSRF_TRUSTED_ORIGINS.append(wildcard_origin)
 
 # ---------------------------------------------------------------------------
-# Сесії
+# Сесії та локалізація
 # ---------------------------------------------------------------------------
 
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
-SESSION_COOKIE_AGE = 86400 * 7  # 7 днів
+SESSION_COOKIE_AGE = 86400 * 7
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-
-# ---------------------------------------------------------------------------
-# Локалізація
-# ---------------------------------------------------------------------------
 
 LANGUAGE_CODE = "uk"
 TIME_ZONE = "Europe/Kyiv"
 USE_I18N = True
 USE_TZ = True
 
-# ---------------------------------------------------------------------------
-# Статичні файли
-# ---------------------------------------------------------------------------
-
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
-
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------------------------------------------------------------------
-# Електронна пошта (Email) для локальної розробки
+# Email
 # ---------------------------------------------------------------------------
+
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = "noreply@tournamentapp.local"
 
 # ---------------------------------------------------------------------------
 # Налаштування платіжного шлюзу Monobank
 # ---------------------------------------------------------------------------
+
 MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN", "")
 MONOBANK_USE_SANDBOX = os.environ.get("MONOBANK_USE_SANDBOX", "True") == "True"
 MONOBANK_MOCK_PAYMENTS = os.environ.get("MONOBANK_MOCK_PAYMENTS", "True") == "True"
+
+# ---------------------------------------------------------------------------
+# Налаштування теми Unfold
+# ---------------------------------------------------------------------------
+
+UNFOLD = {
+    "SITE_TITLE": "TournamentSystem Admin",
+    "SITE_HEADER": "TournamentSystem Admin",
+    "SITE_SYMBOL": "emoji_events",
+    "SHOW_HISTORY": True,
+    "DARK_MODE": True,
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "Управління доступом",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Користувачі",
+                        "link": "/admin/accounts/user/",
+                        "icon": "group",
+                    },
+                    {
+                        "title": "Заявки на ролі",
+                        "link": "/admin/accounts/rolerequest/",
+                        "icon": "rule_folder",
+                    },
+                    {
+                        "title": "Клуби",
+                        "link": "/admin/accounts/club/",
+                        "icon": "domain",
+                    },
+                    {
+                        "title": "Бани",
+                        "link": "/admin/accounts/user/?is_active=False",
+                        "icon": "block",
+                    },
+                ],
+            },
+            {
+                "title": "Спортсмени",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Профілі",
+                        "link": "/admin/athletes/athlete/",
+                        "icon": "badge",
+                    },
+                    {
+                        "title": "Команди",
+                        "link": "/admin/athletes/team/",
+                        "icon": "groups",
+                    },
+                    {
+                        "title": "Історія зважувань",
+                        "link": "/admin/athletes/athleteweightlog/",
+                        "icon": "fitness_center",
+                    },
+                ],
+            },
+            {
+                "title": "Турніри",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Турніри",
+                        "link": "/admin/tournaments/tournament/",
+                        "icon": "emoji_events",
+                    },
+                    {
+                        "title": "Категорії",
+                        "link": "/admin/tournaments/category/",
+                        "icon": "category",
+                    },
+                    {
+                        "title": "Реєстрації",
+                        "link": "/admin/tournaments/registration/",
+                        "icon": "assignment",
+                    },
+                ],
+            },
+            {
+                "title": "Проведення",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Татамі",
+                        "link": "/admin/tatamis/tatami/",
+                        "icon": "layers",
+                    },
+                    {
+                        "title": "Матчі",
+                        "link": "/admin/matches/match/",
+                        "icon": "sports_martial_arts",
+                    },
+                    {
+                        "title": "Події матчів",
+                        "link": "/admin/matches/matchevent/",
+                        "icon": "history",
+                    },
+                ],
+            },
+            {
+                "title": "Фінанси та Білінг",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Рахунки",
+                        "link": "/admin/billing/paymentinvoice/",
+                        "icon": "receipt_long",
+                    },
+                    {
+                        "title": "Транзакції",
+                        "link": "/admin/billing/transaction/",
+                        "icon": "payments",
+                    },
+                    {
+                        "title": "Виплати",
+                        "link": "/admin/billing/payoutrequest/",
+                        "icon": "account_balance",
+                    },
+                ],
+            },
+        ],
+    },
+    "DASHBOARD_CALLBACK": "apps.common.admin.dashboard_callback",
+}

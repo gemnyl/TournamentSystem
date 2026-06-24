@@ -139,6 +139,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         verbose_name="Кредитний ліміт комісії (UAH)",
         help_text="Максимальна сума боргу перед платформою",
     )
+    is_banned = models.BooleanField(default=False, verbose_name="Заблоковано")
+    ban_reason = models.TextField(blank=True, verbose_name="Причина блокування")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
