@@ -25,6 +25,7 @@ class Tournament(models.Model):
         verbose_name="Організатор",
     )
     title = models.CharField(max_length=255, verbose_name="Назва")
+    description = models.TextField(blank=True, default="", verbose_name="Опис турніру")
     sport_type = models.CharField(
         max_length=100,
         verbose_name="Вид спорту",
@@ -87,6 +88,20 @@ class Tournament(models.Model):
         blank=True,
         related_name="staff_tournaments",
         verbose_name="Робочий персонал",
+    )
+    chief_judge = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="chief_judge_tournaments",
+        verbose_name="Головний суддя",
+    )
+    judges = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="judge_tournaments",
+        verbose_name="Судді турніру",
     )
     use_check_in = models.BooleanField(
         default=False,

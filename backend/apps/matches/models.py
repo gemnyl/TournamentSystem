@@ -177,6 +177,11 @@ class Match(models.Model):
     is_bracket_reset = models.BooleanField(
         default=False, verbose_name="Супер-фінал (Bracket Reset)"
     )
+    match_state = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Стан поєдинку",
+    )
 
     class Meta:
         db_table = "match"
@@ -566,6 +571,7 @@ class MatchEvent(models.Model):
         TIMER_SET_DUR = "timer_set_dur", "Зміна тривалості"
         TIMER_TOGGLE = "timer_toggle", "Відображення таймера"
         JUDGES_COUNT_CHANGE = "judges_count_change", "Зміна кількості суддів"
+        RULESET_EVENT = "ruleset_event", "Подія правил"
 
     match = models.ForeignKey(
         Match,

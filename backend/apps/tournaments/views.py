@@ -49,7 +49,9 @@ class TournamentViewSet(viewsets.ModelViewSet):
             from django.db.models import Q
 
             qs = qs.filter(
-                Q(staff_members=self.request.user) | Q(organizer=self.request.user)
+                Q(staff_members=self.request.user)
+                | Q(organizer=self.request.user)
+                | Q(chief_judge=self.request.user)
             ).distinct()
         elif staff_member:
             qs = qs.filter(staff_members__id=staff_member)
@@ -62,16 +64,21 @@ class TournamentViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in (
-            "create",
+            "generate_all_brackets",
+            "auto_distribute_tatamis",
+            "import_categories",
             "update",
             "partial_update",
+        ):
+            from apps.accounts.permissions import IsTournamentChiefJudgeOrOrganizer
+
+            return [IsTournamentChiefJudgeOrOrganizer()]
+        if self.action in (
+            "create",
             "destroy",
             "open_registration",
             "start",
             "complete",
-            "generate_all_brackets",
-            "auto_distribute_tatamis",
-            "import_categories",
             "pay_platform_fee",
         ):
             return [IsOrganizer()]
@@ -635,11 +642,35 @@ def parse_category_name(name_str: str, sport_type: str) -> dict:
     elif w_over:
         min_weight = float(w_over.group(1))
 
-    # 4. Map default ruleset based on tournament's sport type
-    ruleset_key = "karate_wkf"
-    sport_lower = sport_type.lower() if sport_type else ""
-    if "ippon" in sport_lower or "shobu" in sport_lower:
-        ruleset_key = "shobu_ippon"
+    sport_lower = sport_type.strip().lower() if sport_type else ""
+
+    taekwondo_syns = ["taekwondo", "тхеквондо", "тхекводно", "тхэквондо", "тхэкванд"]
+    if any(x in sport_lower for x in taekwondo_syns):
+        ruleset_key = "taekwondo_wt"
+    elif any(x in sport_lower for x in ["judo", "дзюдо", "ijf"]):
+        ruleset_key = "judo_ijf"
+    elif any(x in sport_lower for x in ["karate", "карате"]):
+        if any(x in lower_name for x in ["kata", "ката"]):
+            ruleset_key = "karate_kata"
+        elif any(x in lower_name for x in ["ippon", "shobu", "іппон", "сьобу"]):
+            ruleset_key = "shobu_ippon"
+        else:
+            ruleset_key = "karate_wkf"
+    else:
+        # Fallback dynamic matching if sport_type is blank/unrecognized
+        if any(
+            x in sport_lower or x in lower_name
+            for x in ["taekwondo", "wt", "тхеквондо", "тхекводно", "тхэквондо", "тхэкванд"]
+        ):
+            ruleset_key = "taekwondo_wt"
+        elif any(x in sport_lower or x in lower_name for x in ["judo", "ijf", "дзюдо"]):
+            ruleset_key = "judo_ijf"
+        elif any(x in sport_lower or x in lower_name for x in ["kata", "ката"]):
+            ruleset_key = "karate_kata"
+        elif any(x in sport_lower or x in lower_name for x in ["ippon", "shobu", "іппон", "сьобу"]):
+            ruleset_key = "shobu_ippon"
+        else:
+            ruleset_key = "karate_wkf"
 
     # 5. Parse bracket format from name
     bracket_format = Category.BracketFormat.SINGLE_ELIMINATION
@@ -686,7 +717,9 @@ class CategoryViewSet(viewsets.ModelViewSet):
             "delete_bracket",
             "assign_tatami",
         ):
-            return [IsOrganizer()]
+            from apps.accounts.permissions import IsTournamentChiefJudgeOrOrganizer
+
+            return [IsTournamentChiefJudgeOrOrganizer()]
         if self.action in (
             "save_results",
             "unlock_results",
@@ -715,10 +748,14 @@ class CategoryViewSet(viewsets.ModelViewSet):
             from rest_framework.exceptions import PermissionDenied
 
             raise PermissionDenied("Турнір завершено. Створення категорії заборонене.")
-        if tournament.organizer != self.request.user and not self.request.user.is_staff:
+        if (
+            tournament.organizer != self.request.user
+            and tournament.chief_judge != self.request.user
+            and not self.request.user.is_staff
+        ):
             from rest_framework.exceptions import PermissionDenied
 
-            raise PermissionDenied("Ви не є організатором цього турніру.")
+            raise PermissionDenied("Ви не є організатором чи головним суддею цього турніру.")
         serializer.save()
 
     @action(detail=True, methods=["post"], url_path="generate_bracket")
@@ -853,6 +890,8 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
     def _verify_judge_permission(self, category, user):
         if user.is_authenticated and user.role == "judge":
+            if category.tournament.chief_judge_id == user.id:
+                return
             match = category.matches.first()
             if match and match.tatami:
                 if match.tatami.assigned_judge_id != user.id:
@@ -973,6 +1012,42 @@ class RegistrationViewSet(viewsets.ModelViewSet):
 
     pagination_class = OptionalPageNumberPagination
 
+    from django_filters.rest_framework import DjangoFilterBackend
+    from rest_framework.filters import OrderingFilter, SearchFilter
+
+    class RegistrationOrderingFilter(OrderingFilter):
+        def filter_queryset(self, request, queryset, view):
+            ordering = self.get_ordering(request, queryset, view)
+            if ordering:
+                new_ordering = []
+                for field in ordering:
+                    if field == "athlete__weight":
+                        new_ordering.append("athlete__base_weight")
+                    elif field == "-athlete__weight":
+                        new_ordering.append("-athlete__base_weight")
+                    else:
+                        new_ordering.append(field)
+                return queryset.order_by(*new_ordering)
+            return queryset
+
+    filter_backends = [DjangoFilterBackend, SearchFilter, RegistrationOrderingFilter]
+    filterset_fields = ["category", "athlete__club", "athlete__gender"]
+    search_fields = ["athlete__first_name", "athlete__last_name", "athlete__club__name"]
+    ordering_fields = [
+        "athlete__last_name",
+        "category__name",
+        "athlete__weight",
+        "athlete__base_weight",
+        "recorded_weight",
+    ]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            from apps.tournaments.serializers import RegistrationListSerializer
+
+            return RegistrationListSerializer
+        return self.serializer_class
+
     def get_queryset(self):
         user = self.request.user
         qs = Registration.objects.select_related("athlete", "athlete__club", "category", "team")
@@ -987,7 +1062,9 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         category_id = self.request.query_params.get("category")
         if category_id:
             qs = qs.filter(category_id=category_id)
-        tournament_id = self.request.query_params.get("tournament")
+        tournament_id = self.request.query_params.get(
+            "tournament"
+        ) or self.request.query_params.get("tournament_id")
         if tournament_id:
             qs = qs.filter(category__tournament_id=tournament_id)
         return qs

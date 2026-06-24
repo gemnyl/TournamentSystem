@@ -59,6 +59,10 @@ class MatchService:
     @transaction.atomic
     def apply_score(self, corner: str, action_key: str, judge=None, is_undo=False) -> Match:
         """Застосовує ігрову подію (бал або попередження) через активний рулсет або скасовує її."""
+        m = self.match
+        if m.status == Match.Status.COMPLETED and not is_undo:
+            raise ValueError("Поєдинок вже завершено.")
+
         if corner not in ("aka", "ao"):
             raise ValueError(f"Invalid corner: '{corner}'. Must be 'aka' or 'ao'.")
 
@@ -191,6 +195,116 @@ class MatchService:
         return m
 
     @transaction.atomic
+    def apply_ruleset_event(self, event_type: str, payload: dict, judge=None) -> Match:
+        m = self.match
+        if m.status == Match.Status.COMPLETED:
+            raise ValueError("Поєдинок вже завершено.")
+
+        if not hasattr(self.ruleset, "apply_ruleset_event"):
+            raise ValueError(f"Ruleset '{self.ruleset.key}' does not support custom events.")
+
+        state = m.match_state
+        if not state:
+            state = self.ruleset.get_default_state()
+
+        # Capture old values BEFORE mutation to avoid in-place dictionary mutation comparison issues
+        old_round = state.get("current_round", 1)
+        old_history_len = len(state.get("round_history", []))
+
+        new_state, is_finished, winner_key, win_method = self.ruleset.apply_ruleset_event(
+            state, event_type, payload
+        )
+
+        m.match_state = new_state
+
+        # Synchronize base fields to keep compatibility with existing list / tree views
+        if m.category.ruleset_key == "taekwondo_wt":
+            m.score_first = new_state["scores"]["chung"]
+            m.score_second = new_state["scores"]["hong"]
+            m.warnings_first = new_state["gam_jeoms"]["chung"]
+            m.warnings_second = new_state["gam_jeoms"]["hong"]
+        elif m.category.ruleset_key == "judo_ijf":
+            shiro_scores = new_state["scores"]["shiro"]
+            ao_scores = new_state["scores"]["ao"]
+            m.score_first = shiro_scores["ippon"] * 10 + shiro_scores["waza_ari"]
+            m.score_second = ao_scores["ippon"] * 10 + ao_scores["waza_ari"]
+            m.warnings_first = new_state["penalties"]["shiro"]["shido"]
+            m.warnings_second = new_state["penalties"]["ao"]["shido"]
+
+        update_fields = [
+            "match_state",
+            "score_first",
+            "score_second",
+            "warnings_first",
+            "warnings_second",
+        ]
+
+        new_round = new_state.get("current_round", 1)
+        new_history_len = len(new_state.get("round_history", []))
+
+        is_round_or_golden_change = (
+            new_round != old_round
+            or new_history_len != old_history_len
+            or event_type in ("RESET_ROUND", "UNDO_ROUND", "TOGGLE_GOLDEN_SCORE")
+        )
+        if is_round_or_golden_change:
+            m.timer_status = "not_started"
+            m.timer_elapsed_ms = 0
+            m.timer_started_at = None
+            update_fields += ["timer_status", "timer_elapsed_ms", "timer_started_at"]
+            # Trigger a broadcast of the reset timer state
+            _broadcast_timer(m)
+
+        if m.status == Match.Status.SCHEDULED:
+            m.status = Match.Status.ONGOING
+            update_fields.append("status")
+
+        if m.parent_team_match and m.parent_team_match.status == Match.Status.SCHEDULED:
+            m.parent_team_match.status = Match.Status.ONGOING
+            m.parent_team_match.save(update_fields=["status"])
+            from apps.common.broadcast import broadcast_match_update
+
+            broadcast_match_update(m.parent_team_match)
+
+        if is_finished:
+            if m.category.ruleset_key == "taekwondo_wt":
+                winner_reg = m.reg_first if winner_key == "chung" else m.reg_second
+            elif m.category.ruleset_key == "judo_ijf":
+                winner_reg = m.reg_first if winner_key == "shiro" else m.reg_second
+            else:
+                winner_reg = None
+
+            m.winner = winner_reg
+            m.win_method = win_method
+            m.status = Match.Status.COMPLETED
+            m.completed_at = timezone.now()
+
+            # Force pause timer on auto finish
+            m.timer_status = Match.TimerStatus.PAUSED
+            m.timer_started_at = None
+            update_fields += [
+                "winner",
+                "win_method",
+                "completed_at",
+                "timer_status",
+                "timer_started_at",
+                "status",
+            ]
+
+            m.save(update_fields=update_fields)
+            m.advance_participant()
+        else:
+            m.save(update_fields=update_fields)
+
+        self._write_event(
+            MatchEvent.EventType.RULESET_EVENT,
+            {"ruleset_event_type": event_type, "payload": payload},
+            judge,
+        )
+
+        return m
+
+    @transaction.atomic
     def set_senshu(self, value: str, judge=None) -> Match:
         """Встановлює senshu (перша атака) для 'aka', 'ao' або скидає на 'none'."""
         valid = {c[0] for c in Match.Senshu.choices}
@@ -207,6 +321,8 @@ class MatchService:
     @transaction.atomic
     def timer_start(self, judge=None) -> Match:
         m = self.match
+        if m.status == Match.Status.COMPLETED:
+            raise ValueError("Поєдинок вже завершено.")
         if m.timer_status != Match.TimerStatus.NOT_STARTED:
             raise ValueError("Таймер вже запущено або завершено.")
         m.timer_started_at = timezone.now()
@@ -235,6 +351,8 @@ class MatchService:
     @transaction.atomic
     def timer_pause(self, elapsed_ms=None, judge=None) -> Match:
         m = self.match
+        if m.status == Match.Status.COMPLETED:
+            raise ValueError("Поєдинок вже завершено.")
         if m.timer_status != Match.TimerStatus.RUNNING:
             raise ValueError("Таймер не запущено.")
 
@@ -264,6 +382,8 @@ class MatchService:
     @transaction.atomic
     def timer_resume(self, judge=None) -> Match:
         m = self.match
+        if m.status == Match.Status.COMPLETED:
+            raise ValueError("Поєдинок вже завершено.")
         if m.timer_status != Match.TimerStatus.PAUSED:
             raise ValueError("Таймер не на паузі.")
         m.timer_started_at = timezone.now()
@@ -292,6 +412,8 @@ class MatchService:
     @transaction.atomic
     def timer_reset(self, judge=None) -> Match:
         m = self.match
+        if m.status == Match.Status.COMPLETED:
+            raise ValueError("Поєдинок вже завершено.")
         m.timer_status = Match.TimerStatus.NOT_STARTED
         m.timer_elapsed_ms = 0
         m.timer_started_at = None
@@ -303,6 +425,8 @@ class MatchService:
     @transaction.atomic
     def timer_set_duration(self, duration_ms: int, judge=None) -> Match:
         m = self.match
+        if m.status == Match.Status.COMPLETED:
+            raise ValueError("Поєдинок вже завершено.")
         if m.timer_status == Match.TimerStatus.RUNNING:
             raise ValueError("Не можна змінювати тривалість під час бою.")
         m.timer_duration_ms = duration_ms
@@ -314,6 +438,8 @@ class MatchService:
     @transaction.atomic
     def timer_add_time(self, delta_ms: int, judge=None) -> Match:
         m = self.match
+        if m.status == Match.Status.COMPLETED:
+            raise ValueError("Поєдинок вже завершено.")
         if m.timer_status == Match.TimerStatus.RUNNING:
             raise ValueError("Не можна змінювати тривалість під час бою.")
         new_duration = m.timer_duration_ms + delta_ms
@@ -337,6 +463,39 @@ class MatchService:
             raise ValueError(f"No participant registered in corner '{corner}'.")
 
         m.set_winner(winner_reg, win_method)
+
+        # For Taekwondo WT, manual completion should transition/append the current
+        # round to round_history
+        if m.category.ruleset_key == "taekwondo_wt":
+            state = m.match_state or {}
+            curr_round = state.get("current_round", 1)
+            history = state.get("round_history", [])
+            existing_rounds = {h.get("round") for h in history}
+            if curr_round not in existing_rounds:
+                round_winner = "chung" if corner == "aka" else "hong"
+                s_chung = state.get("scores", {}).get("chung", 0)
+                s_hong = state.get("scores", {}).get("hong", 0)
+
+                if "round_history" not in state:
+                    state["round_history"] = []
+                state["round_history"].append(
+                    {
+                        "round": curr_round,
+                        "scores": {"chung": s_chung, "hong": s_hong},
+                        "gam_jeoms": {
+                            "chung": state.get("gam_jeoms", {}).get("chung", 0),
+                            "hong": state.get("gam_jeoms", {}).get("hong", 0),
+                        },
+                        "winner": round_winner,
+                        "win_method": win_method,
+                    }
+                )
+                if "rounds_won" not in state:
+                    state["rounds_won"] = {"chung": 0, "hong": 0}
+                state["rounds_won"][round_winner] = state["rounds_won"].get(round_winner, 0) + 1
+
+                m.match_state = state
+                m.save(update_fields=["match_state"])
 
         self._write_event(
             MatchEvent.EventType.FINISH,
@@ -444,6 +603,7 @@ class MatchService:
         m.started_at = None
         m.flags_aka = None
         m.flags_ao = None
+        m.match_state = {}
 
     def _reset_team_bouts(self, m: Match):
         from apps.common.broadcast import broadcast_match_update
