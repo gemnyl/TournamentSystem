@@ -56,3 +56,78 @@ def dashboard_callback(request, context):
     )
 
     return context
+
+
+class BaseTournamentAdminMixin:
+    """
+    Mixin class that provides common module-level and object-level permissions
+    for tournament-related ModelAdmins.
+    """
+
+    def has_module_permission(self, request):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        return request.user.is_superuser or request.user.role in (
+            User.Role.ADMIN,
+            User.Role.ORGANIZER,
+            User.Role.JUDGE,
+        )
+
+    def _resolve_tournament(self, obj):
+        if obj is None:
+            return None
+        # If obj is already a Tournament
+        if (
+            hasattr(obj, "organizer")
+            and hasattr(obj, "chief_judge")
+            and not hasattr(obj, "tournament")
+        ):
+            return obj
+        # Try different paths to tournament depending on object type
+        if hasattr(obj, "tournament"):
+            return obj.tournament
+        if hasattr(obj, "category") and hasattr(obj.category, "tournament"):
+            return obj.category.tournament
+        if (
+            hasattr(obj, "match")
+            and hasattr(obj.match, "category")
+            and hasattr(obj.match.category, "tournament")
+        ):
+            return obj.match.category.tournament
+        return None
+
+    def has_change_permission(self, request, obj=None):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser:
+            return True
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        if request.user.role == User.Role.ADMIN:
+            return True
+        if obj is None:
+            return request.user.role in (User.Role.ORGANIZER, User.Role.JUDGE)
+
+        tournament = self._resolve_tournament(obj)
+        if tournament is None:
+            return False
+        return tournament.organizer == request.user or tournament.chief_judge == request.user
+
+    def has_delete_permission(self, request, obj=None):
+        return self.has_change_permission(request, obj)
+
+    def has_add_permission(self, request):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        return request.user.is_superuser or request.user.role in (
+            User.Role.ADMIN,
+            User.Role.ORGANIZER,
+            User.Role.JUDGE,
+        )

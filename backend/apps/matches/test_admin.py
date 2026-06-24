@@ -127,7 +127,10 @@ class MatchesAdminTest(BaseAdminTest):
         admin = MatchEventAdmin(MatchEvent, self.site)
         self.assertEqual(admin.get_tournament(self.event), self.t1.title)
         self.assertEqual(admin.get_category(self.event), self.cat.name)
-        self.assertEqual(admin.timestamp(self.event), self.event.created_at)
+        from django.utils.timezone import localtime
+
+        expected_time = localtime(self.event.created_at).strftime("%d.%m.%Y %H:%M:%S")
+        self.assertEqual(admin.timestamp(self.event), expected_time)
 
     def test_match_event_admin_permissions(self):
         admin = MatchEventAdmin(MatchEvent, self.site)
