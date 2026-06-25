@@ -871,27 +871,6 @@ export default function CategoryDetailPage() {
                                 </Button>
                               )}
 
-                              {/* Підтвердження оплати для організатора/персоналу */}
-                              {isStaffOrOrg && !isCompleted && reg.payment_status === "unpaid" && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 text-xs text-green-500 hover:text-green-400 hover:bg-green-500/10"
-                                  onClick={async () => {
-                                    try {
-                                      await api.post("/registrations/bulk_pay/", {
-                                        registration_ids: [reg.id],
-                                      });
-                                      toast({ title: "Оплату підтверджено!" });
-                                      fetchAll();
-                                    } catch {
-                                      // handled by interceptor
-                                    }
-                                  }}
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5 mr-1" /> Сплачено
-                                </Button>
-                              )}
 
                               {/* Кнопка видалення/вилучення */}
                               {canDeleteReg && (
