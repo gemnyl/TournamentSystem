@@ -24,6 +24,7 @@ import ConfirmEmailPage from "@/pages/ConfirmEmailPage";
 import ProfilePage from "@/pages/ProfilePage";
 import PrivacyPolicyPage from "@/pages/PrivacyPolicyPage";
 import MockPayPage from "@/pages/MockPayPage";
+import PasswordResetPage from "@/pages/PasswordResetPage";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
 export default function App() {
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/confirm-email" element={<ConfirmEmailPage />} />
+          <Route path="/password-reset" element={<PasswordResetPage />} />
           <Route path="/verify/:type/:token" element={<VerificationPage />} />
           <Route path="/billing/mock-pay" element={<MockPayPage />} />
           <Route
