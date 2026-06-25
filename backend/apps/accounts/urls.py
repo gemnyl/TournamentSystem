@@ -7,11 +7,13 @@ from apps.accounts.views import (
     ChangePasswordView,
     ClubViewSet,
     ConfirmEmailView,
+    ConfirmPasswordResetView,
     GoogleLoginView,
     LoginView,
     LogoutView,
     MeView,
     RegisterView,
+    RequestPasswordResetView,
     ResendConfirmationView,
     RoleRequestViewSet,
     UserViewSet,
@@ -34,6 +36,16 @@ urlpatterns = [
     path("change-password/", ChangePasswordView.as_view(), name="auth-change-password"),
     path("google-login/", GoogleLoginView.as_view(), name="auth-google-login"),
     path("verify-pass/", VerifyPassView.as_view(), name="verify-pass"),
+    path(
+        "password-reset-request/",
+        RequestPasswordResetView.as_view(),
+        name="auth-password-reset-request",
+    ),
+    path(
+        "password-reset-confirm/",
+        ConfirmPasswordResetView.as_view(),
+        name="auth-password-reset-confirm",
+    ),
     # Router-маршрути (clubs/, users/, role-requests/) монтуються у config/urls.py через /api/
     # Включаємо тут щоб router.urls діставалися через цей include
     path("", include(router.urls)),

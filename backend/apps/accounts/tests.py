@@ -661,3 +661,135 @@ class TournamentPermissionsTest(TestCase):
 
         req_obj.user = self.coach
         self.assertFalse(perm.has_object_permission(req_obj, None, self.match))
+
+
+class PasswordResetTest(TestCase):
+    def setUp(self):
+        from apps.accounts.views import (
+            ConfirmPasswordResetView,
+            LoginView,
+            RequestPasswordResetView,
+        )
+
+        RequestPasswordResetView.throttle_classes = []
+        ConfirmPasswordResetView.throttle_classes = []
+        LoginView.throttle_classes = []
+
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="reset@test.local",
+            password="oldpassword123",  # NOSONAR
+            first_name="Reset",
+            last_name="User",
+            role=User.Role.COACH,
+        )
+
+    def test_request_password_reset_success(self):
+        from apps.accounts.models import PasswordResetCode
+
+        url = reverse("auth-password-reset-request")
+        response = self.client.post(url, {"email": "reset@test.local"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(PasswordResetCode.objects.filter(user=self.user).exists())
+        code_obj = PasswordResetCode.objects.get(user=self.user)
+        self.assertEqual(len(code_obj.code), 6)
+        self.assertTrue(code_obj.code.isdigit())
+
+    def test_request_password_reset_nonexistent_email(self):
+        from apps.accounts.models import PasswordResetCode
+
+        url = reverse("auth-password-reset-request")
+        response = self.client.post(url, {"email": "nonexistent@test.local"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(
+            PasswordResetCode.objects.filter(user__email="nonexistent@test.local").exists()
+        )
+
+    def test_confirm_password_reset_success(self):
+        from apps.accounts.models import PasswordResetCode
+
+        # First request the code
+        request_url = reverse("auth-password-reset-request")
+        self.client.post(request_url, {"email": "reset@test.local"})
+        code_obj = PasswordResetCode.objects.get(user=self.user)
+
+        # Confirm the reset
+        confirm_url = reverse("auth-password-reset-confirm")
+        response = self.client.post(
+            confirm_url,
+            {
+                "email": "reset@test.local",
+                "code": code_obj.code,
+                "new_password": "newpassword123",  # NOSONAR
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(PasswordResetCode.objects.filter(user=self.user).exists())
+
+        # Verify password is changed by logging in
+        login_url = reverse("auth-login")
+        login_response = self.client.post(
+            login_url,
+            {
+                "email": "reset@test.local",
+                "password": "newpassword123",  # NOSONAR
+            },
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+    def test_confirm_password_reset_invalid_code(self):
+        request_url = reverse("auth-password-reset-request")
+        self.client.post(request_url, {"email": "reset@test.local"})
+
+        confirm_url = reverse("auth-password-reset-confirm")
+        response = self.client.post(
+            confirm_url,
+            {
+                "email": "reset@test.local",
+                "code": "000000",
+                "new_password": "newpassword123",  # NOSONAR
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Невірний код підтвердження.", response.data["detail"])
+
+    def test_confirm_password_reset_expired_code(self):
+        from apps.accounts.models import PasswordResetCode
+
+        request_url = reverse("auth-password-reset-request")
+        self.client.post(request_url, {"email": "reset@test.local"})
+        code_obj = PasswordResetCode.objects.get(user=self.user)
+        # Force code expiration
+        code_obj.expires_at = timezone.now() - timedelta(minutes=1)
+        code_obj.save()
+
+        confirm_url = reverse("auth-password-reset-confirm")
+        response = self.client.post(
+            confirm_url,
+            {
+                "email": "reset@test.local",
+                "code": code_obj.code,
+                "new_password": "newpassword123",  # NOSONAR
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Термін дії коду закінчився.", response.data["detail"])
+
+    def test_confirm_password_reset_same_password(self):
+        from apps.accounts.models import PasswordResetCode
+
+        request_url = reverse("auth-password-reset-request")
+        self.client.post(request_url, {"email": "reset@test.local"})
+        code_obj = PasswordResetCode.objects.get(user=self.user)
+
+        confirm_url = reverse("auth-password-reset-confirm")
+        response = self.client.post(
+            confirm_url,
+            {
+                "email": "reset@test.local",
+                "code": code_obj.code,
+                "new_password": "oldpassword123",  # Same as current
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Новий пароль не може збігатися з поточним.", response.data["detail"])

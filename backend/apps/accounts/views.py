@@ -24,7 +24,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.models import Club, EmailConfirmationCode, RoleRequest, User
+from apps.accounts.models import Club, EmailConfirmationCode, PasswordResetCode, RoleRequest, User
 from apps.accounts.permissions import IsJudgeOrOrganizer
 from apps.accounts.serializers import (
     ChangePasswordSerializer,
@@ -581,4 +581,118 @@ class RoleRequestViewSet(viewsets.ModelViewSet):
         return Response(RoleRequestSerializer(role_request).data, status=status.HTTP_200_OK)
 
 
-# Create your views here.
+class RequestPasswordResetView(APIView):
+    """POST /api/auth/password-reset-request/ — запит коду для відновлення пароля."""
+
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    def post(self, request):
+        email = request.data.get("email")
+        if not email:
+            return Response({"detail": "Email є обов'язковим."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            # Для безпеки повертаємо успішну відповідь
+            return Response(
+                {"detail": "Код для відновлення пароля надіслано на вашу пошту."},
+                status=status.HTTP_200_OK,
+            )
+
+        # Видаляємо старі коди цього користувача
+        PasswordResetCode.objects.filter(user=user).delete()
+
+        # Генеруємо новий 6-значний код
+        code = f"{secrets.randbelow(900000) + 100000}"
+        expires_at = timezone.now() + timedelta(minutes=15)
+
+        PasswordResetCode.objects.create(user=user, code=code, expires_at=expires_at)
+
+        # Відправляємо email
+        subject = "Скидання пароля - TournamentApp"
+        message = (
+            f"Привіт, {user.first_name}!\n\n"
+            f"Ваш код для відновлення пароля: {code}\n\n"
+            "Код дійсний протягом 15 хвилин."
+        )
+        send_mail(
+            subject,
+            message,
+            settings.DEFAULT_FROM_EMAIL,
+            [user.email],
+            fail_silently=False,
+        )
+
+        return Response(
+            {"detail": "Код для відновлення пароля надіслано на вашу пошту."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ConfirmPasswordResetView(APIView):
+    """POST /api/auth/password-reset-confirm/ — скидання пароля за кодом підтвердження."""
+
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    def post(self, request):
+        email = request.data.get("email")
+        code = request.data.get("code")
+        new_password = request.data.get("new_password")
+
+        if not email or not code or not new_password:
+            return Response(
+                {"detail": "Email, код та новий пароль є обов'язковими."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 6:
+            return Response(
+                {"detail": "Пароль має містити щонайменше 6 символів."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": "Користувача з цим email не знайдено."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if user.check_password(new_password):
+            return Response(
+                {"detail": "Новий пароль не може збігатися з поточним."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            reset_code = PasswordResetCode.objects.get(user=user)
+        except PasswordResetCode.DoesNotExist:
+            return Response(
+                {"detail": "Код не знайдено або термін його дії закінчився."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if reset_code.expires_at < timezone.now():
+            reset_code.delete()
+            return Response(
+                {"detail": "Термін дії коду закінчився. Будь ласка, запитайте новий код."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if reset_code.code != code:
+            return Response(
+                {"detail": "Невірний код підтвердження."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Змінюємо пароль
+        user.set_password(new_password)
+        user.save()
+
+        # Видаляємо використаний код
+        reset_code.delete()
+
+        return Response({"detail": "Пароль успішно змінено."}, status=status.HTTP_200_OK)
