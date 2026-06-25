@@ -25,7 +25,7 @@ import {
   Layers,
   ChevronDown,
 } from "lucide-react";
-import api from "@/lib/api";
+import api, { formatAxiosError, AxiosError, ErrorDetail } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useTournamentSocket } from "@/hooks/useTournamentSocket";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
@@ -454,14 +454,18 @@ export default function CoachDashboardPage() {
       await api.post(`/athletes/${selectedAthleteProfile.id}/log_weight/`, {
         weight: Number(newLogWeight),
         notes: newLogNotes
-      });
+      }, { skipGlobalToast: true });
       toast({ title: "Замір ваги додано успішно!" });
       setNewLogWeight("");
       setNewLogNotes("");
       fetchWeightHistory(selectedAthleteProfile.id);
       fetchRoster(true); // refresh athletes list to update base weight on cards
-    } catch (e) {
-      // handled by interceptor
+    } catch (e: any) {
+      toast({
+        title: "Помилка додавання ваги",
+        description: formatAxiosError(e),
+        variant: "destructive",
+      });
     } finally {
       setIsSavingWeightLog(false);
     }
@@ -476,7 +480,8 @@ export default function CoachDashboardPage() {
     formData.append("file", importFile);
     try {
       const { data } = await api.post<{ detail: string; imported_count: number }>("/athletes/import_athletes/", formData, {
-        headers: { "Content-Type": "multipart/form-data" }
+        headers: { "Content-Type": "multipart/form-data" },
+        skipGlobalToast: true
       });
       toast({ title: "Імпорт завершено!", description: data.detail });
       setIsImportDialogOpen(false);
@@ -486,11 +491,11 @@ export default function CoachDashboardPage() {
       if (err.response?.data?.errors) {
         setImportErrors(err.response.data.errors);
       } else {
-        const isNetworkError = !err.response;
-        const msg = isNetworkError
-          ? "Файл був змінений на диску після вибору або виникла помилка мережі. Будь ласка, оберіть файл заново."
-          : (err.response?.data?.detail || "Щось пішло не так");
-        toast({ title: "Помилка імпорту", description: msg, variant: "destructive" });
+        toast({
+          title: "Помилка імпорту",
+          description: formatAxiosError(err),
+          variant: "destructive"
+        });
       }
       setImportFile(null);
       setImportInputKey((prev) => prev + 1);
@@ -655,12 +660,16 @@ export default function CoachDashboardPage() {
     if (!athleteToDelete) return;
     setIsDeletingAthlete(true);
     try {
-      await api.delete(`/athletes/${athleteToDelete.id}/`);
+      await api.delete(`/athletes/${athleteToDelete.id}/`, { skipGlobalToast: true });
       toast({ title: "Спортсмена успішно видалено з реєстру!" });
       setAthleteToDelete(null);
       fetchRoster(true);
-    } catch {
-      // handled by api interceptor
+    } catch (err: any) {
+      toast({
+        title: "Помилка видалення",
+        description: formatAxiosError(err),
+        variant: "destructive",
+      });
     } finally {
       setIsDeletingAthlete(false);
     }
@@ -1444,7 +1453,7 @@ export default function CoachDashboardPage() {
   const handleSyncInvoice = async (invoiceId: number) => {
     setIsSyncingInvoiceId(invoiceId);
     try {
-      const { data } = await api.post(`/billing/invoices/${invoiceId}/sync/`);
+      const { data } = await api.post(`/billing/invoices/${invoiceId}/sync/`, {}, { skipGlobalToast: true });
       toast({
         title: "Синхронізація успішна",
         description: data.detail || "Статус рахунку успішно оновлено.",
@@ -1456,7 +1465,7 @@ export default function CoachDashboardPage() {
     } catch (e: any) {
       toast({
         title: "Помилка синхронізації",
-        description: e.response?.data?.detail || "Не вдалося синхронізувати статус рахунку.",
+        description: formatAxiosError(e),
         variant: "destructive",
       });
     } finally {
@@ -1631,13 +1640,13 @@ export default function CoachDashboardPage() {
           teamPayload.club_id = user.club.id;
         }
 
-        const teamRes = await api.post<Team>("/teams/", teamPayload);
+        const teamRes = await api.post<Team>("/teams/", teamPayload, { skipGlobalToast: true });
 
         // 2. Register team for category
         await api.post("/registrations/", {
           category: Number(selectedCategoryId),
           team_id: teamRes.data.id,
-        });
+        }, { skipGlobalToast: true });
 
         toast({ title: `Команду "${teamRes.data.name}" успішно зареєстровано!` });
         setSelectedCategoryId("");
@@ -1662,7 +1671,7 @@ export default function CoachDashboardPage() {
             api.post("/registrations/", {
               category: entry.categoryId,
               athlete_id: entry.athleteId,
-            })
+            }, { skipGlobalToast: true })
           )
         );
         toast({ title: `Успішно зареєстровано ${registerList.length} заявок!` });
@@ -1671,8 +1680,12 @@ export default function CoachDashboardPage() {
       setLiabilityWaiver(false);
       fetchBilling();
       fetchActiveRegistrations();
-    } catch (e) {
-      // handled by interceptor
+    } catch (e: any) {
+      toast({
+        title: "Помилка реєстрації",
+        description: formatAxiosError(e),
+        variant: "destructive",
+      });
     } finally {
       setIsSubmittingReg(false);
     }
@@ -1718,7 +1731,7 @@ export default function CoachDashboardPage() {
         payment_type: "registrations",
         registration_ids: regIds,
         redirect_url: redirectUrl,
-      });
+      }, { skipGlobalToast: true });
 
       toast({ title: "Платіж ініційовано!", description: `Перенаправлення на платіжну систему Monobank...` });
       setShowPayModal(null);
@@ -1732,7 +1745,7 @@ export default function CoachDashboardPage() {
     } catch (e: any) {
       toast({
         title: "Помилка оплати",
-        description: e.response?.data?.detail || "Не вдалося ініціювати платіж.",
+        description: formatAxiosError(e),
         variant: "destructive"
       });
     } finally {
@@ -1748,7 +1761,7 @@ export default function CoachDashboardPage() {
 
       await api.post("/registrations/bulk_withdraw/", {
         registration_ids: idsToWithdraw
-      });
+      }, { skipGlobalToast: true });
 
       toast({ title: idsToWithdraw.length > 1 ? "Заявки відкликано!" : "Заявку відкликано!" });
       fetchActiveRegistrations();
@@ -1759,7 +1772,7 @@ export default function CoachDashboardPage() {
       console.error(e);
       toast({
         title: "Помилка при скасуванні",
-        description: e.response?.data?.detail || "Не вдалося скасувати деякі заявки.",
+        description: formatAxiosError(e),
         variant: "destructive",
       });
     } finally {
@@ -1772,14 +1785,14 @@ export default function CoachDashboardPage() {
     try {
       await api.post("/registrations/bulk_confirm_offline_refund_received/", {
         registration_ids: [regId],
-      });
+      }, { skipGlobalToast: true });
       toast({ title: "Отримання коштів підтверджено успішно!" });
       fetchActiveRegistrations();
     } catch (e: any) {
       console.error(e);
       toast({
         title: "Помилка підтвердження",
-        description: e.response?.data?.detail || "Не вдалося підтвердити отримання коштів.",
+        description: formatAxiosError(e),
         variant: "destructive"
       });
     } finally {
