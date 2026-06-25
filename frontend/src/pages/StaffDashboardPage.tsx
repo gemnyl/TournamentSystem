@@ -1,8 +1,8 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { Search, Loader2, Check, Award, Calendar, MapPin, RefreshCw, Trophy, AlertTriangle, Lock as LockIcon, History as HistoryIcon, Info, Wallet, CreditCard, CheckCircle } from "lucide-react";
-import api from "@/lib/api";
+import api, { formatAxiosError, AxiosError, ErrorDetail } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useTournamentSocket } from "@/hooks/useTournamentSocket";
 import { toast } from "@/hooks/use-toast";
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,7 +19,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { BracketView } from "@/components/bracket/BracketView";
 import { MatchCard } from "@/components/bracket/MatchCard";
-import type { Tournament, Registration, Category, Match, BracketResponse, RoleRequest } from "@/types/api";
+import type { Tournament, Registration, Category, Match, BracketResponse, RoleRequest, Invoice } from "@/types/api";
+import { InvoiceDetailsDialog } from "@/components/tournament/InvoiceDetailsDialog";
 
 const ROLE_LABELS: Record<string, string> = {
   organizer: "Організатор",
@@ -182,6 +183,15 @@ export default function StaffDashboardPage() {
   const [paymentDetailsSearch, setPaymentDetailsSearch] = useState("");
   const [paymentDetailsStatusFilter, setPaymentDetailsStatusFilter] = useState("all");
 
+  // Invoice Details Modal
+  const [selectedInvoiceForModal, setSelectedInvoiceForModal] = useState<Invoice | null>(null);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+
+  const handleOpenInvoiceModal = (invoice: Invoice) => {
+    setSelectedInvoiceForModal(invoice);
+    setIsInvoiceModalOpen(true);
+  };
+
   // Admin limits management states
   const [adminOrganizers, setAdminOrganizers] = useState<AdminOrganizer[]>([]);
   const [isLoadingAdminOrganizers, setIsLoadingAdminOrganizers] = useState(false);
@@ -248,7 +258,7 @@ export default function StaffDashboardPage() {
       try {
         setLoadingTournaments(true);
         // GET /api/tournaments/?staff_member=me
-        const res = await api.get<Tournament[] | { results: Tournament[] }>("/tournaments/?staff_member=me");
+        const res = await api.get<Tournament[] | { results: Tournament[] }>("/tournaments/?staff_member=me&page_size=1000");
         const list = Array.isArray(res.data) ? res.data : (res.data.results || []);
         setTournaments(list);
         if (list.length > 0) {
@@ -411,7 +421,7 @@ export default function StaffDashboardPage() {
         recipient_name: payoutRecipientName.trim(),
         recipient_code: payoutRecipientCode.trim(),
         purpose: payoutPurpose.trim(),
-      });
+      }, { skipGlobalToast: true });
       toast({
         title: "Запит створено",
         description: `Запит на виплату ${amountNum} UAH успішно надіслано адміністратору.`,
@@ -425,10 +435,9 @@ export default function StaffDashboardPage() {
       fetchPayoutRequests(selectedTournament.id);
     } catch (err) {
       console.error("handleRequestPayout error:", err);
-      const error = err as { response?: { data?: { detail?: string } } };
       toast({
-        title: "Помилка запиту",
-        description: error.response?.data?.detail || "Не вдалося надіслати запит.",
+        title: "Помилка запиту виплати",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
         variant: "destructive",
       });
     } finally {
@@ -445,7 +454,7 @@ export default function StaffDashboardPage() {
         payment_type: "platform_fee",
         tournament_ids: selectedUnpaidTournaments,
         redirect_url: redirectUrl,
-      });
+      }, { skipGlobalToast: true });
 
       toast({
         title: "Оплату ініційовано",
@@ -460,10 +469,9 @@ export default function StaffDashboardPage() {
       window.location.href = paymentUrl;
     } catch (err) {
       console.error("handlePayBulkPlatformFee error:", err);
-      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка ініціалізації оплати",
-        description: error.response?.data?.detail || "Не вдалося ініціювати платіж.",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
         variant: "destructive",
       });
     } finally {
@@ -506,7 +514,7 @@ export default function StaffDashboardPage() {
       await api.post(`/auth/role-requests/${reqId}/review/`, {
         status,
         review_notes: reviewNotes,
-      });
+      }, { skipGlobalToast: true });
       toast({
         title: status === "approved" ? "Запит схвалено" : "Запит відхилено",
         description: `Запит успішно ${status === "approved" ? "схвалено" : "відхилено"}.`,
@@ -518,8 +526,8 @@ export default function StaffDashboardPage() {
       console.error("Error reviewing role request", err);
       toast({
         variant: "destructive",
-        title: "Помилка",
-        description: "Не вдалося зберегти рішення щодо запиту.",
+        title: "Помилка перевірки запиту",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
       });
     }
   };
@@ -888,12 +896,17 @@ export default function StaffDashboardPage() {
   // Toggle check-in
   const handleCheckInToggle = async (reg: Registration) => {
     try {
-      const res = await api.post<Registration>(`/registrations/${reg.id}/check_in/`);
+      const res = await api.post<Registration>(`/registrations/${reg.id}/check_in/`, {}, { skipGlobalToast: true });
       setRegistrations((prev) =>
         prev.map((r) => (r.id === reg.id ? res.data : r))
       );
     } catch (err) {
       console.error("Failed to toggle check-in:", err);
+      toast({
+        title: "Помилка відмітки прибуття",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
+        variant: "destructive",
+      });
     }
   };
 
@@ -923,7 +936,7 @@ export default function StaffDashboardPage() {
       setSubmittingWeighIn(true);
       const res = await api.post<Registration>(`/registrations/${weighInReg.id}/confirm_weigh_in/`, {
         weight: weightVal,
-      });
+      }, { skipGlobalToast: true });
       setRegistrations((prev) =>
         prev.map((r) => (r.id === weighInReg.id ? res.data : r))
       );
@@ -938,6 +951,11 @@ export default function StaffDashboardPage() {
       setWeighInReg(null);
     } catch (err) {
       console.error("Failed to submit weigh-in:", err);
+      toast({
+        title: "Помилка зважування",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
+        variant: "destructive",
+      });
     } finally {
       setSubmittingWeighIn(false);
     }
@@ -951,7 +969,7 @@ export default function StaffDashboardPage() {
       await api.post("/registrations/bulk_update_secretary/", {
         registration_ids: registrationIds,
         checked_in: newCheckedIn,
-      });
+      }, { skipGlobalToast: true });
       setRegistrations((prev) =>
         prev.map((r) =>
           registrationIds.includes(r.id) ? { ...r, checked_in: newCheckedIn } : r
@@ -963,6 +981,11 @@ export default function StaffDashboardPage() {
       });
     } catch (err) {
       console.error("Failed to toggle athlete check-in:", err);
+      toast({
+        title: "Помилка відмітки прибуття",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
+        variant: "destructive",
+      });
     }
   };
 
@@ -995,7 +1018,7 @@ export default function StaffDashboardPage() {
         team_id: weighInGroup.teamId,
         tournament_id: selectedTournament.id,
         weight: weightVal,
-      });
+      }, { skipGlobalToast: true });
 
       // Update local state
       setRegistrations((prev) =>
@@ -1018,11 +1041,9 @@ export default function StaffDashboardPage() {
       setWeighInGroup(null);
     } catch (err) {
       console.error("Failed to submit weigh-in:", err);
-      const error = err as { response?: { data?: { detail?: string } } };
-      const errMsg = error.response?.data?.detail || "Помилка при зважуванні.";
       toast({
         title: "Помилка зважування",
-        description: errMsg,
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
         variant: "destructive",
       });
     } finally {
@@ -1033,7 +1054,7 @@ export default function StaffDashboardPage() {
   // Quick status update (PATCH registrations)
   const handleStatusChange = async (regId: number, newStatus: string) => {
     try {
-      const res = await api.patch<Registration>(`/registrations/${regId}/`, { status: newStatus });
+      const res = await api.patch<Registration>(`/registrations/${regId}/`, { status: newStatus }, { skipGlobalToast: true });
       setRegistrations((prev) =>
         prev.map((r) => (r.id === regId ? res.data : r))
       );
@@ -1043,6 +1064,11 @@ export default function StaffDashboardPage() {
       });
     } catch (err) {
       console.error("Failed to change registration status:", err);
+      toast({
+        title: "Помилка зміни статусу",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
+        variant: "destructive",
+      });
     }
   };
 
@@ -1052,7 +1078,7 @@ export default function StaffDashboardPage() {
       const res = await api.patch<Registration>(`/registrations/${regId}/`, {
         payment_status: newPaymentStatus,
         payment_method: "offline",
-      });
+      }, { skipGlobalToast: true });
       setRegistrations((prev) =>
         prev.map((r) => (r.id === regId ? res.data : r))
       );
@@ -1062,6 +1088,11 @@ export default function StaffDashboardPage() {
       });
     } catch (err) {
       console.error("Failed to change payment status:", err);
+      toast({
+        title: "Помилка оновлення оплати",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
+        variant: "destructive",
+      });
     }
   };
 
@@ -1077,7 +1108,7 @@ export default function StaffDashboardPage() {
       const { data } = await api.post("/registrations/bulk_update_secretary/", {
         registration_ids: selectedRegIds,
         ...params,
-      });
+      }, { skipGlobalToast: true });
       toast({
         title: "Групове оновлення успішне",
         description: data.detail || `Оновлено ${selectedRegIds.length} заявок.`,
@@ -1091,14 +1122,64 @@ export default function StaffDashboardPage() {
       }
     } catch (err) {
       console.error("handleBulkUpdateSecretary error:", err);
-      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка групового оновлення",
-        description: error.response?.data?.detail || "Не вдалося виконати групове оновлення.",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
         variant: "destructive",
       });
     } finally {
       setIsBulkUpdating(false);
+    }
+  };
+
+  const [isBulkRefunding, setIsBulkRefunding] = useState(false);
+
+  const handleRowMarkOfflineRefunded = async (regId: number) => {
+    try {
+      const { data } = await api.post("/registrations/bulk_mark_offline_refunded/", {
+        registration_ids: [regId],
+      }, { skipGlobalToast: true });
+      toast({
+        title: "Повернення зафіксовано",
+        description: data.detail || "Позначено як повернуто (очікує підтвердження від тренера).",
+      });
+      if (selectedTournament) {
+        fetchData(selectedTournament.id);
+      }
+    } catch (err) {
+      console.error("Failed to mark offline refunded:", err);
+      toast({
+        title: "Помилка відмітки повернення",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleBulkMarkOfflineRefunded = async () => {
+    if (selectedRegIds.length === 0) return;
+    setIsBulkRefunding(true);
+    try {
+      const { data } = await api.post("/registrations/bulk_mark_offline_refunded/", {
+        registration_ids: selectedRegIds,
+      }, { skipGlobalToast: true });
+      toast({
+        title: "Повернення зафіксовано",
+        description: data.detail || `Позначено як повернуті ${selectedRegIds.length} заявок (очікує підтвердження від тренера).`,
+      });
+      setSelectedRegIds([]);
+      if (selectedTournament) {
+        fetchData(selectedTournament.id);
+      }
+    } catch (err) {
+      console.error("handleBulkMarkOfflineRefunded error:", err);
+      toast({
+        title: "Помилка відмітки повернення",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
+        variant: "destructive",
+      });
+    } finally {
+      setIsBulkRefunding(false);
     }
   };
 
@@ -1112,7 +1193,7 @@ export default function StaffDashboardPage() {
         payment_type: "platform_fee",
         tournament_id: selectedTournament.id,
         redirect_url: redirectUrl,
-      });
+      }, { skipGlobalToast: true });
 
       toast({
         title: "Оплату ініційовано",
@@ -1127,10 +1208,9 @@ export default function StaffDashboardPage() {
       window.location.href = paymentUrl;
     } catch (err) {
       console.error("handlePayPlatformFee error:", err);
-      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка ініціалізації оплати",
-        description: error.response?.data?.detail || "Не вдалося ініціювати платіж.",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
         variant: "destructive",
       });
     } finally {
@@ -1172,7 +1252,7 @@ export default function StaffDashboardPage() {
     try {
       await api.post(`/users/${editingOrganizerLimit.id}/update_credit_limit/`, {
         credit_limit: Number(newLimitValue),
-      });
+      }, { skipGlobalToast: true });
       toast({
         title: "Ліміт оновлено",
         description: `Кредитний ліміт для ${editingOrganizerLimit.first_name} ${editingOrganizerLimit.last_name} успішно встановлено.`,
@@ -1181,10 +1261,9 @@ export default function StaffDashboardPage() {
       fetchAdminOrganizers(adminOrganizersSearch);
     } catch (err) {
       console.error("handleUpdateOrganizerLimit error:", err);
-      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка оновлення ліміту",
-        description: error.response?.data?.detail || "Не вдалося оновити кредитний ліміт.",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
         variant: "destructive",
       });
     } finally {
@@ -1377,6 +1456,26 @@ export default function StaffDashboardPage() {
               <Badge className="bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-semibold py-0.5 px-2 rounded-xl mx-auto flex items-center justify-center gap-1 w-[90px]">
                 🔒 Онлайн
               </Badge>
+            ) : reg.status === "withdrawn" && reg.payment_method === "offline" ? (
+              <div className="flex flex-col items-center gap-1">
+                {reg.offline_refund_status === "none" ? (
+                  <Button
+                    size="sm"
+                    className="h-7 text-[10px] bg-amber-600 hover:bg-amber-700 text-white font-medium rounded px-2"
+                    onClick={() => handleRowMarkOfflineRefunded(reg.id)}
+                  >
+                    Повернути готівку
+                  </Button>
+                ) : reg.offline_refund_status === "pending" ? (
+                  <Badge className="bg-yellow-500/15 text-yellow-400 border border-yellow-500/20 text-[9px] py-0.5 px-1.5">
+                    Очікує тренера
+                  </Badge>
+                ) : (
+                  <Badge className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[9px] py-0.5 px-1.5">
+                    Повернено
+                  </Badge>
+                )}
+              </div>
             ) : (
               <Select
                 value={reg.payment_status}
@@ -1459,10 +1558,11 @@ export default function StaffDashboardPage() {
 
   const renderAthleteCentricTableBody = () => {
     if (!selectedTournament) return null;
+    const colSpanCount = 4 + (selectedTournament.use_check_in ? 1 : 0) + (selectedTournament.weigh_in_required ? 1 : 0) + 1;
     if (loadingData) {
       return (
         <TableRow>
-          <TableCell colSpan={6} className="h-40 text-center">
+          <TableCell colSpan={colSpanCount} className="h-40 text-center">
             <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-500" />
             <p className="mt-2 text-sm text-slate-400">Завантаження реєстрацій...</p>
           </TableCell>
@@ -1472,7 +1572,7 @@ export default function StaffDashboardPage() {
     if (groupedAthletes.length === 0) {
       return (
         <TableRow>
-          <TableCell colSpan={6} className="h-32 text-center text-slate-500">
+          <TableCell colSpan={colSpanCount} className="h-32 text-center text-slate-500">
             Не знайдено спортсменів за вказаними фільтрами.
           </TableCell>
         </TableRow>
@@ -1482,6 +1582,32 @@ export default function StaffDashboardPage() {
     return groupedAthletes.map((group) => {
       return (
         <TableRow key={group.id} className="hover:bg-slate-900/40 border-b border-slate-800/80 transition-colors">
+          <TableCell className="w-[40px] text-center">
+            <input
+              type="checkbox"
+              className="rounded border-slate-800 bg-slate-950 text-indigo-650 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+              checked={
+                group.registrations.length > 0 &&
+                group.registrations.every((r) => selectedRegIds.includes(r.id))
+              }
+              onChange={(e) => {
+                const regIds = group.registrations.map((r) => r.id);
+                if (e.target.checked) {
+                  setSelectedRegIds((prev) => {
+                    const next = [...prev];
+                    regIds.forEach((id) => {
+                      if (!next.includes(id)) {
+                        next.push(id);
+                      }
+                    });
+                    return next;
+                  });
+                } else {
+                  setSelectedRegIds((prev) => prev.filter((id) => !regIds.includes(id)));
+                }
+              }}
+            />
+          </TableCell>
           {/* Athlete Info */}
           <TableCell className="font-medium py-4">
             <div>
@@ -1524,6 +1650,24 @@ export default function StaffDashboardPage() {
                     <span className="text-[9px] bg-indigo-500/10 text-indigo-400 px-1 py-0.2 rounded border border-indigo-500/20">
                       🔒 Онлайн
                     </span>
+                  ) : reg.status === "withdrawn" && reg.payment_method === "offline" ? (
+                    reg.offline_refund_status === "none" ? (
+                      <button
+                        type="button"
+                        className="text-[9px] bg-amber-600/80 hover:bg-amber-600 text-white px-1 py-0.2 rounded border border-amber-500/20"
+                        onClick={() => handleRowMarkOfflineRefunded(reg.id)}
+                      >
+                        Повернути готівку
+                      </button>
+                    ) : reg.offline_refund_status === "pending" ? (
+                      <span className="text-[9px] bg-yellow-500/10 text-yellow-400 px-1 py-0.2 rounded border border-yellow-500/20">
+                        Очікує тренера
+                      </span>
+                    ) : (
+                      <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/20">
+                        Повернено
+                      </span>
+                    )
                   ) : reg.payment_status === "paid" ? (
                     <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/20">
                       Готівка
@@ -1644,13 +1788,16 @@ export default function StaffDashboardPage() {
             <div className="flex items-center gap-3">
               <span className="text-sm text-slate-400 whitespace-nowrap">Оберіть турнір:</span>
               <SearchableSelect
-                options={tournaments.map((t) => ({ value: t.id.toString(), label: t.title }))}
+                options={tournaments.map((t) => ({
+                  value: t.id.toString(),
+                  label: t.title,
+                }))}
                 value={selectedTournament?.id.toString() || ""}
                 onValueChange={(val) => {
                   const found = tournaments.find((t) => t.id.toString() === val);
                   if (found) handleSelectTournament(found);
                 }}
-                placeholder="Немає призначених турнірів"
+                placeholder="Оберіть турнір..."
                 searchPlaceholder="Пошук турніру..."
                 className="w-[280px]"
               />
@@ -1856,6 +2003,33 @@ export default function StaffDashboardPage() {
                     <Table>
                       <TableHeader className="bg-slate-900/70 border-b border-slate-800">
                         <TableRow className="hover:bg-slate-900/40 border-b border-slate-800">
+                          <TableHead className="w-[40px] text-center">
+                            <input
+                              type="checkbox"
+                              className="rounded border-slate-800 bg-slate-950 text-indigo-650 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                              checked={
+                                groupedAthletes.length > 0 &&
+                                groupedAthletes.every((group) =>
+                                  group.registrations.every((r) => selectedRegIds.includes(r.id))
+                                )
+                              }
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  const allIds: number[] = [];
+                                  groupedAthletes.forEach((group) => {
+                                    group.registrations.forEach((r) => {
+                                      if (!allIds.includes(r.id)) {
+                                        allIds.push(r.id);
+                                      }
+                                    });
+                                  });
+                                  setSelectedRegIds(allIds);
+                                } else {
+                                  setSelectedRegIds([]);
+                                }
+                              }}
+                            />
+                          </TableHead>
                           <TableHead className="text-slate-400">Спортсмен</TableHead>
                           <TableHead className="text-slate-400">Клуб</TableHead>
                           <TableHead className="text-slate-400">Тренер</TableHead>
@@ -1892,12 +2066,21 @@ export default function StaffDashboardPage() {
                       </Button>
                       <Button
                         size="sm"
-                        className="bg-indigo-650 hover:bg-indigo-750 text-white font-medium text-xs rounded-xl px-4 py-2 flex items-center gap-1.5"
+                        className="bg-indigo-655 hover:bg-indigo-750 text-white font-medium text-xs rounded-xl px-4 py-2 flex items-center gap-1.5"
                         onClick={() => handleBulkUpdateSecretary({ payment_status: 'paid' })}
                         disabled={isBulkUpdating}
                       >
                         {isBulkUpdating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                         Сплачено (Готівка)
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs rounded-xl px-4 py-2 flex items-center gap-1.5"
+                        onClick={handleBulkMarkOfflineRefunded}
+                        disabled={isBulkUpdating || isBulkRefunding}
+                      >
+                        {isBulkRefunding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                        Повернути готівку
                       </Button>
                       <Button
                         size="sm"
@@ -1930,42 +2113,51 @@ export default function StaffDashboardPage() {
               <TabsContent value="categories" className="outline-none">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {categories.map((cat) => (
-                    <Card key={cat.id} className="border-slate-800 bg-slate-900/40">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-md font-bold text-slate-200 truncate">{cat.name}</CardTitle>
-                        <CardDescription className="text-xs text-slate-500">
-                          {cat.bracket_format_display}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="text-sm space-y-2 text-slate-400">
-                        <div className="flex justify-between">
-                          <span>Всього учасників:</span>
-                          <span className="text-slate-200 font-semibold">{cat.confirmed_registrations_count}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Статус:</span>
-                          <Badge className="bg-slate-800 text-slate-300 hover:bg-slate-800/80">
-                            {getCategoryStatusLabel(cat.status)}
-                          </Badge>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Сітка:</span>
-                          <Badge
-                            className={cn(
-                              cat.has_bracket
-                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-pointer hover:bg-emerald-500/20 transition-all"
-                                : "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
-                            )}
-                            onClick={() => {
-                              if (cat.has_bracket) {
-                                setSelectedBracketCategoryId(cat.id);
-                              }
-                            }}
-                          >
-                            {cat.has_bracket ? "Сформована" : "Немає сітки"}
-                          </Badge>
-                        </div>
-                      </CardContent>
+                    <Card key={cat.id} className="border-slate-800 bg-slate-900/40 hover:border-indigo-500/50 transition-all flex flex-col justify-between">
+                      <div>
+                        <CardHeader className="pb-3">
+                          <Link to={`/categories/${cat.id}`} className="hover:text-indigo-400 transition-colors">
+                            <CardTitle className="text-md font-bold text-slate-200 truncate">{cat.name}</CardTitle>
+                          </Link>
+                          <CardDescription className="text-xs text-slate-500">
+                            {cat.bracket_format_display}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="text-sm space-y-2 text-slate-400">
+                          <div className="flex justify-between">
+                            <span>Всього учасників:</span>
+                            <span className="text-slate-200 font-semibold">{cat.confirmed_registrations_count}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Статус:</span>
+                            <Badge className="bg-slate-800 text-slate-300 hover:bg-slate-800/80">
+                              {getCategoryStatusLabel(cat.status)}
+                            </Badge>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Сітка:</span>
+                            <Badge
+                              className={cn(
+                                cat.has_bracket
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-pointer hover:bg-emerald-500/20 transition-all"
+                                  : "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
+                              )}
+                              onClick={() => {
+                                if (cat.has_bracket) {
+                                  setSelectedBracketCategoryId(cat.id);
+                                }
+                              }}
+                            >
+                              {cat.has_bracket ? "Сформована" : "Немає сітки"}
+                            </Badge>
+                          </div>
+                        </CardContent>
+                      </div>
+                      <CardFooter className="pt-2 pb-4 border-t border-slate-850 flex justify-between items-center text-xs">
+                        <Link to={`/categories/${cat.id}`} className="text-indigo-450 hover:text-indigo-300 font-medium transition-colors">
+                          Деталі категорії →
+                        </Link>
+                      </CardFooter>
                     </Card>
                   ))}
                 </div>
@@ -2307,9 +2499,26 @@ export default function StaffDashboardPage() {
                                     </TableCell>
                                     <TableCell className="py-3 text-xs text-slate-400">
                                       {reg.payment_method === "online" ? (
-                                        <span className="flex items-center gap-1 text-indigo-400 font-medium">
-                                          <CreditCard className="w-3 h-3" /> Онлайн
-                                        </span>
+                                        reg.payment_invoice ? (
+                                          <span
+                                            role="button"
+                                            tabIndex={0}
+                                            className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                                            onClick={() => handleOpenInvoiceModal(reg.payment_invoice!)}
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter" || e.key === " ") {
+                                                e.preventDefault();
+                                                handleOpenInvoiceModal(reg.payment_invoice!);
+                                              }
+                                            }}
+                                          >
+                                            <CreditCard className="w-3 h-3" /> Онлайн
+                                          </span>
+                                        ) : (
+                                          <span className="flex items-center gap-1 text-indigo-400 font-medium">
+                                            <CreditCard className="w-3 h-3" /> Онлайн
+                                          </span>
+                                        )
                                       ) : reg.payment_method === "offline" ? (
                                         <span className="flex items-center gap-1 text-amber-500 font-medium">
                                           <Wallet className="w-3 h-3" /> Готівка
@@ -2405,6 +2614,16 @@ export default function StaffDashboardPage() {
                               📥 Створити запит на виплату
                             </h3>
                             <form onSubmit={handleRequestPayout} className="space-y-4">
+                              {selectedTournament?.status !== "completed" && (
+                                <div className="p-3 border border-rose-500/20 bg-rose-500/5 text-rose-400 text-xs rounded-xl flex gap-2.5 items-start">
+                                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+                                  <div>
+                                    <strong className="font-bold block mb-1">Виведення коштів обмежено</strong>
+                                    Виведення коштів доступне лише для завершених турнірів. Поточний статус турніру: <span className="font-semibold">{selectedTournament?.status_display || selectedTournament?.status || "—"}</span>.
+                                  </div>
+                                </div>
+                              )}
+
                               <div className="space-y-1.5">
                                 <label className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">Сума виплати (UAH)</label>
                                 <Input
@@ -2416,6 +2635,7 @@ export default function StaffDashboardPage() {
                                   min="1"
                                   max={financeReport.available_balance}
                                   required
+                                  disabled={selectedTournament?.status !== "completed"}
                                 />
                               </div>
 
@@ -2428,6 +2648,7 @@ export default function StaffDashboardPage() {
                                   className="h-9 bg-slate-950 border-slate-800 text-slate-200 rounded-xl text-xs font-mono"
                                   maxLength={34}
                                   required
+                                  disabled={selectedTournament?.status !== "completed"}
                                 />
                               </div>
 
@@ -2440,6 +2661,7 @@ export default function StaffDashboardPage() {
                                   className="h-9 bg-slate-950 border-slate-800 text-slate-200 rounded-xl text-xs"
                                   maxLength={255}
                                   required
+                                  disabled={selectedTournament?.status !== "completed"}
                                 />
                               </div>
 
@@ -2452,6 +2674,7 @@ export default function StaffDashboardPage() {
                                   className="h-9 bg-slate-950 border-slate-800 text-slate-200 rounded-xl text-xs font-mono"
                                   maxLength={20}
                                   required
+                                  disabled={selectedTournament?.status !== "completed"}
                                 />
                               </div>
 
@@ -2463,13 +2686,14 @@ export default function StaffDashboardPage() {
                                   onChange={(e) => setPayoutPurpose(e.target.value)}
                                   className="h-9 bg-slate-950 border-slate-800 text-slate-200 rounded-xl text-xs"
                                   maxLength={255}
+                                  disabled={selectedTournament?.status !== "completed"}
                                 />
                               </div>
 
                               <Button
                                 type="submit"
                                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl py-2 flex items-center justify-center gap-1.5 border-none"
-                                disabled={financeReport.available_balance <= 0 || isSubmittingPayout}
+                                disabled={financeReport.available_balance <= 0 || isSubmittingPayout || selectedTournament?.status !== "completed"}
                               >
                                 {isSubmittingPayout ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                                 Замовити виплату
@@ -2795,6 +3019,15 @@ export default function StaffDashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <InvoiceDetailsDialog
+        invoice={selectedInvoiceForModal}
+        isOpen={isInvoiceModalOpen}
+        onClose={() => {
+          setIsInvoiceModalOpen(false);
+          setSelectedInvoiceForModal(null);
+        }}
+      />
     </div>
   );
 }

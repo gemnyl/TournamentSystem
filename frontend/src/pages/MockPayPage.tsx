@@ -1,6 +1,6 @@
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import api from "@/lib/api";
+import api, { formatAxiosError, AxiosError, ErrorDetail } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
@@ -24,13 +24,13 @@ export default function MockPayPage() {
     try {
       if (success) {
         // Trigger manual synchronization endpoint which queries status
-        await api.post(`/billing/invoices/${dbInvoiceId}/sync/`);
+        await api.post(`/billing/invoices/${dbInvoiceId}/sync/`, {}, { skipGlobalToast: true });
         toast({
           title: "Симуляція успішна!",
           description: "Платіж успішно проведено через Monobank Sandbox.",
         });
         // Redirect back to coach dashboard
-        navigate("/coach/dashboard?tab=finance");
+        navigate("/coach/dashboard?tab=billing");
       } else {
         toast({
           title: "Симуляція скасування",
@@ -40,10 +40,9 @@ export default function MockPayPage() {
         navigate("/coach/dashboard");
       }
     } catch (err) {
-      const error = err as { response?: { data?: { detail?: string } } };
       toast({
         title: "Помилка симуляції",
-        description: error.response?.data?.detail || "Не вдалося синхронізувати платіж.",
+        description: formatAxiosError(err as AxiosError<ErrorDetail>),
         variant: "destructive"
       });
     } finally {

@@ -286,8 +286,10 @@ class RegistrationAdminTest(BaseAdminTest):
 
         # Test tournament display and badges
         self.assertEqual(admin.tournament_display(self.reg), self.t1.title)
-        self.assertEqual(admin.status_badge(self.reg), self.reg.status)
-        self.assertEqual(admin.payment_status_badge(self.reg), self.reg.payment_status)
+        self.assertEqual(admin.status_badge(self.reg), self.reg.get_status_display())
+        self.assertEqual(
+            admin.payment_status_badge(self.reg), self.reg.get_payment_status_display()
+        )
 
     def test_registration_admin_actions(self):
         admin = RegistrationAdmin(Registration, self.site)

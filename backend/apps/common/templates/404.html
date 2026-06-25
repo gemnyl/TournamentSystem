@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сторінку не знайдено (404) | TournamentApp</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Plus+Jakarta+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #020617; /* slate-950 */
+            --card-bg: #0f172a; /* slate-900 */
+            --text-main: #f8fafc; /* slate-50 */
+            --text-muted: #94a3b8; /* slate-400 */
+            --amber-500: #f59e0b;
+            --amber-600: #d97706;
+            --border-color: rgba(245, 158, 11, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Decorative Background Elements */
+        .decor-1 {
+            position: absolute;
+            top: 10%;
+            right: 10%;
+            width: 25rem;
+            height: 25rem;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(245, 158, 11, 0.05) 0%, transparent 70%);
+            filter: blur(50px);
+            z-index: 1;
+        }
+
+        .decor-2 {
+            position: absolute;
+            bottom: 10%;
+            left: 10%;
+            width: 20rem;
+            height: 20rem;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(245, 158, 11, 0.03) 0%, transparent 70%);
+            filter: blur(40px);
+            z-index: 1;
+        }
+
+        .container {
+            max-width: 28rem;
+            width: 100%;
+            background-color: var(--card-bg);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            position: relative;
+            z-index: 10;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .logo-icon {
+            width: 2rem;
+            height: 2rem;
+            background-color: var(--amber-500);
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);
+        }
+
+        .logo-icon svg {
+            width: 1rem;
+            height: 1rem;
+            fill: #020617;
+        }
+
+        .logo-text {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 1.25rem;
+            letter-spacing: -0.025em;
+        }
+
+        .logo-text span {
+            color: var(--amber-500);
+        }
+
+        .error-code {
+            font-family: 'Outfit', sans-serif;
+            font-size: 6rem;
+            font-weight: 800;
+            line-height: 1;
+            background: linear-gradient(135deg, #ffffff 30%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+            letter-spacing: -0.05em;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+            letter-spacing: -0.025em;
+        }
+
+        p {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            line-height: 1.6;
+            margin-bottom: 2rem;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            background-color: var(--amber-500);
+            color: #020617;
+            font-weight: 700;
+            font-size: 0.875rem;
+            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.2);
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            background-color: var(--amber-600);
+            transform: translateY(-1px);
+            box-shadow: 0 10px 20px -3px rgba(245, 158, 11, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <div class="decor-1"></div>
+    <div class="decor-2"></div>
+
+    <div class="container">
+        <div class="logo-section">
+            <div class="logo-icon">
+                <!-- Trophy Icon SVG -->
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M18 2H6a2 2 0 0 0-2 2v3c0 2.21 1.79 4 4 4h1v3.09C9 16.59 7 19.06 7 22h10c0-2.94-2-5.41-2-5.91V11h1c2.21 0 4-1.79 4-4V4a2 2 0 0 0-2-2m-8 5H8a2 2 0 0 1-2-2V4h4zm8-2v2a2 2 0 0 1-2 2h-2V4h4z"/>
+                </svg>
+            </div>
+            <span class="logo-text">TOURNAMENT<span>APP</span></span>
+        </div>
+
+        <div class="error-code">404</div>
+
+        <h2>Сторінку не знайдено</h2>
+        <p>На жаль, запитувана сторінка відсутня, або вона була перенесена за іншою адресою. Будь ласка, перевірте правильність URL-адреси.</p>
+
+        <a href="/" class="btn">На головну сторінку</a>
+    </div>
+</body>
+</html>
