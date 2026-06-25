@@ -1041,16 +1041,18 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         "recorded_weight",
     ]
 
-    def get_serializer_class(self):
-        if self.action == "list":
-            from apps.tournaments.serializers import RegistrationListSerializer
-
-            return RegistrationListSerializer
-        return self.serializer_class
-
     def get_queryset(self):
         user = self.request.user
-        qs = Registration.objects.select_related("athlete", "athlete__club", "category", "team")
+        qs = Registration.objects.select_related(
+            "athlete",
+            "athlete__club",
+            "athlete__coach",
+            "category",
+            "category__tournament",
+            "team",
+            "team__club",
+            "team__coach",
+        ).prefetch_related("payment_invoices", "payment_invoices__registrations")
         if user.is_authenticated and user.role == "coach" and self.action == "list":
             from django.db.models import Q
 

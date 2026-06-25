@@ -311,6 +311,7 @@ class RegistrationAdmin(BaseTournamentAdminMixin, UnfoldModelAdmin, ImportExport
         "id",
         "participant_display",
         "category",
+        "coach_display",
         "tournament_display",
         "seed_number",
         "recorded_weight",
@@ -340,6 +341,14 @@ class RegistrationAdmin(BaseTournamentAdminMixin, UnfoldModelAdmin, ImportExport
             return f"Команда: {obj.team.name}"
         return "TBD"
 
+    @display(description="Тренер")
+    def coach_display(self, obj):
+        if obj.athlete and obj.athlete.coach:
+            return obj.athlete.coach.get_full_name()
+        if obj.team and obj.team.coach:
+            return obj.team.coach.get_full_name()
+        return "—"
+
     @display(description="Турнір")
     def tournament_display(self, obj):
         return obj.category.tournament.title
@@ -347,24 +356,24 @@ class RegistrationAdmin(BaseTournamentAdminMixin, UnfoldModelAdmin, ImportExport
     @display(
         description="Статус заявки",
         label={
-            "pending": "warning",
-            "confirmed": "success",
-            "rejected": "danger",
-            "withdrawn": "info",
+            "Очікує підтвердження": "warning",
+            "Підтверджено": "success",
+            "Відхилено": "danger",
+            "Знято": "info",
         },
     )
     def status_badge(self, obj):
-        return obj.status
+        return obj.get_status_display()
 
     @display(
         description="Статус оплати",
         label={
-            "paid": "success",
-            "unpaid": "danger",
+            "Сплачено": "success",
+            "Не сплачено": "danger",
         },
     )
     def payment_status_badge(self, obj):
-        return obj.payment_status
+        return obj.get_payment_status_display()
 
     @action(description="Підтвердити оплату для вибраних заявок", icon="credit_card")
     def mass_confirm_payment(self, request, queryset):

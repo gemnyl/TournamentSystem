@@ -290,7 +290,15 @@ class RegistrationSerializer(serializers.ModelSerializer):
         return signer.sign(f"reg:{obj.id}")
 
     def get_payment_invoice(self, obj):
-        invoice = obj.payment_invoices.filter(status="paid").first()
+        if (
+            hasattr(obj, "_prefetched_objects_cache")
+            and "payment_invoices" in obj._prefetched_objects_cache
+        ):
+            invoices = [inv for inv in obj.payment_invoices.all() if inv.status == "paid"]
+            invoice = invoices[0] if invoices else None
+        else:
+            invoice = obj.payment_invoices.filter(status="paid").first()
+
         if invoice:
             return {
                 "id": invoice.id,
