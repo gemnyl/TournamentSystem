@@ -151,33 +151,10 @@ function CategoryResultRow({
     </TableRow>
   );
 }
-import type { Category, Registration, Athlete, PaginatedResponse, Tournament, Tatami, Match } from "@/types/api";
+import type { Category, Registration, Athlete, PaginatedResponse, Tournament, Tatami, Match, CategoryResult } from "@/types/api";
 
 const weighInSchema = z.object({ weight: z.coerce.number().min(20).max(300) });
 type WeighInForm = z.infer<typeof weighInSchema>;
-
-interface CategoryResult {
-  place: number | null;
-  wins: number;
-  draws: number;
-  losses: number;
-  points: number;
-  scores_scored: number;
-  scores_conceded: number;
-  registration: {
-    id: number;
-    place?: number | null;
-    athlete?: {
-      full_name: string;
-      club?: { name?: string; region?: string } | null;
-    } | null;
-    team?: {
-      name: string;
-      club?: { name?: string; region?: string } | null;
-      athletes?: { last_name: string }[] | null;
-    } | null;
-  };
-}
 
 interface RulesetOption {
   key: string;

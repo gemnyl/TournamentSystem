@@ -1491,3 +1491,19 @@ class TestMatchSequencingAndRollback(MatchAPITestCase):
         # Перевіряємо, що татамі знову показує відкочений матч m
         self.tatami.refresh_from_db()
         self.assertEqual(self.tatami.current_match_id, m.id)
+
+
+class TestMatchViewSetCompletedTournament(MatchAPITestCase):
+    def test_completed_tournament_raises_permission_denied(self):
+        self._login(self.judge)
+
+        # Mark tournament as completed
+        self.tournament.status = "completed"
+        self.tournament.save()
+
+        # Try updating score
+        url = f"/api/matches/{self.first_round_match.pk}/update_score/"
+        payload = {"corner": "aka", "action_key": "yuko"}
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("Турнір завершено", response.data["detail"])

@@ -139,3 +139,174 @@ class MatchesAdminTest(BaseAdminTest):
         self.assertFalse(admin.has_add_permission(req))
         self.assertFalse(admin.has_change_permission(req, self.event))
         self.assertFalse(admin.has_delete_permission(req, self.event))
+
+    def test_get_event_description_all_types(self):
+        from apps.matches.admin import _get_event_description
+
+        # Test SCORE
+        self.event.event_type = MatchEvent.EventType.SCORE
+        self.event.payload = {"corner": "aka", "action_key": "yuko"}
+        self.cat.ruleset_key = "karate_wkf"
+        self.cat.save()
+        desc = _get_event_description(self.event)
+        self.assertIsNotNone(desc)
+
+        # Test WARNING
+        self.event.event_type = MatchEvent.EventType.WARNING
+        self.event.payload = {"corner": "ao", "action_key": "c1", "is_undo": True}
+        desc = _get_event_description(self.event)
+        self.assertIsNotNone(desc)
+
+        # Test SENSHU
+        self.event.event_type = MatchEvent.EventType.SENSHU
+        self.event.payload = {"corner": "aka", "value": True}
+        desc = _get_event_description(self.event)
+        self.assertIn("Сенсю", desc)
+
+        # Test FLAGS_DECISION
+        self.event.event_type = MatchEvent.EventType.FLAGS_DECISION
+        self.event.payload = {"flags_aka": 3, "flags_ao": 2}
+        desc = _get_event_description(self.event)
+        self.assertIn("Рішення прапорами", desc)
+
+        # Test START, FINISH, RESET
+        self.event.event_type = MatchEvent.EventType.START
+        desc = _get_event_description(self.event)
+        self.assertIn("Початок поєдинку", desc)
+
+        self.event.event_type = MatchEvent.EventType.FINISH
+        self.event.payload = {"win_method": "ippon", "corner": "aka"}
+        desc = _get_event_description(self.event)
+        self.assertIn("Завершення поєдинку", desc)
+
+        self.event.event_type = MatchEvent.EventType.RESET
+        desc = _get_event_description(self.event)
+        self.assertIn("Скидання стану поєдинку", desc)
+
+        # Test TIMER_START, TIMER_PAUSE, TIMER_RESUME, TIMER_RESET
+        self.event.event_type = MatchEvent.EventType.TIMER_START
+        desc = _get_event_description(self.event)
+        self.assertIn("Старт таймера", desc)
+
+        self.event.event_type = MatchEvent.EventType.TIMER_PAUSE
+        desc = _get_event_description(self.event)
+        self.assertIn("Пауза таймера", desc)
+
+        self.event.event_type = MatchEvent.EventType.TIMER_RESUME
+        desc = _get_event_description(self.event)
+        self.assertIn("Продовження таймера", desc)
+
+        self.event.event_type = MatchEvent.EventType.TIMER_RESET
+        desc = _get_event_description(self.event)
+        self.assertIn("Скидання таймера", desc)
+
+        # Test TIMER_SET_DUR
+        self.event.event_type = MatchEvent.EventType.TIMER_SET_DUR
+        self.event.payload = {"duration_ms": 60000}
+        desc = _get_event_description(self.event)
+        self.assertIn("Встановлено час таймера", desc)
+
+        self.event.payload = {"delta_ms": 10000}
+        desc = _get_event_description(self.event)
+        self.assertIn("Зміна часу таймера", desc)
+
+        # Test TIMER_TOGGLE, JUDGES_COUNT_CHANGE
+        self.event.event_type = MatchEvent.EventType.TIMER_TOGGLE
+        desc = _get_event_description(self.event)
+        self.assertIn("Відображення таймера змінено", desc)
+
+        self.event.event_type = MatchEvent.EventType.JUDGES_COUNT_CHANGE
+        self.event.payload = {"judges_count": 3}
+        desc = _get_event_description(self.event)
+        self.assertIn("Зміна кількості суддів", desc)
+
+        # Test RULESET_EVENT (taekwondo_wt / judo_ijf)
+        self.event.event_type = MatchEvent.EventType.RULESET_EVENT
+
+        self.cat.ruleset_key = "taekwondo_wt"
+        self.cat.save()
+        self.event.payload = {
+            "ruleset_event_type": "ADD_POINTS",
+            "payload": {"corner": "chung", "points": 3},
+        }
+        desc = _get_event_description(self.event)
+        self.assertIn("Нарахування балів", desc)
+
+        self.event.payload = {
+            "ruleset_event_type": "SUB_POINTS",
+            "payload": {"corner": "hong", "points": 1},
+        }
+        desc = _get_event_description(self.event)
+        self.assertIn("Скасування балів", desc)
+
+        self.event.payload = {
+            "ruleset_event_type": "ADD_GAM_JEOM",
+            "payload": {"corner": "chung", "is_passive": True, "remaining_seconds": 5},
+        }
+        desc = _get_event_description(self.event)
+        self.assertIn("Gam-jeom", desc)
+
+        self.event.payload = {"ruleset_event_type": "SUB_GAM_JEOM", "payload": {"corner": "hong"}}
+        desc = _get_event_description(self.event)
+        self.assertIn("Скасування Gam-jeom", desc)
+
+        self.event.payload = {
+            "ruleset_event_type": "NEXT_ROUND",
+            "payload": {"round_winner": "chung"},
+        }
+        desc = _get_event_description(self.event)
+        self.assertIn("Перехід до наступного раунду", desc)
+
+        self.event.payload = {"ruleset_event_type": "RESET_ROUND"}
+        desc = _get_event_description(self.event)
+        self.assertIn("Скидання раунду", desc)
+
+        self.event.payload = {"ruleset_event_type": "UNDO_ROUND"}
+        desc = _get_event_description(self.event)
+        self.assertIn("Назад (раунд)", desc)
+
+        # Judo events
+        self.cat.ruleset_key = "judo_ijf"
+        self.cat.save()
+        self.event.payload = {"ruleset_event_type": "ADD_WAZA_ARI", "payload": {"corner": "shiro"}}
+        desc = _get_event_description(self.event)
+        self.assertIn("Ваза-арі", desc)
+
+        self.event.payload = {"ruleset_event_type": "SUB_WAZA_ARI", "payload": {"corner": "ao"}}
+        desc = _get_event_description(self.event)
+        self.assertIn("Скасування Ваза-арі", desc)
+
+        self.event.payload = {"ruleset_event_type": "ADD_IPPON", "payload": {"corner": "shiro"}}
+        desc = _get_event_description(self.event)
+        self.assertIn("Іппон", desc)
+
+        self.event.payload = {"ruleset_event_type": "SUB_IPPON", "payload": {"corner": "ao"}}
+        desc = _get_event_description(self.event)
+        self.assertIn("Скасування Іппон", desc)
+
+        self.event.payload = {"ruleset_event_type": "ADD_SHIDO", "payload": {"corner": "shiro"}}
+        desc = _get_event_description(self.event)
+        self.assertIn("Шідо", desc)
+
+        self.event.payload = {"ruleset_event_type": "SUB_SHIDO", "payload": {"corner": "ao"}}
+        desc = _get_event_description(self.event)
+        self.assertIn("Скасування Шідо", desc)
+
+        self.event.payload = {
+            "ruleset_event_type": "START_OSAEKOMI",
+            "payload": {"corner": "shiro"},
+        }
+        desc = _get_event_description(self.event)
+        self.assertIn("Початок утримання", desc)
+
+        self.event.payload = {"ruleset_event_type": "STOP_OSAEKOMI"}
+        desc = _get_event_description(self.event)
+        self.assertIn("Зупинка утримання", desc)
+
+    def test_match_event_inline_formatted(self):
+        inline = MatchEventInline(Match, self.site)
+        desc = inline.event_description(self.event)
+        self.assertIsNotNone(desc)
+
+        self.event.created_at = None
+        self.assertEqual(inline.created_at_formatted(self.event), "-")

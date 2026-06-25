@@ -127,11 +127,13 @@ class BaseRuleSet(ABC):
         if not reg_first_id or not reg_second_id:
             return False, None, ""
 
-        # Підрахунок виграних боїв
-        wins_first, wins_second = self._calculate_wins(completed_bouts, reg_first_id, reg_second_id)
-
         # Математична перемога (більшість із запланованих боїв)
         total_slots = getattr(team_match.category, "team_size", 3)
+        regular_bouts = [b for b in completed_bouts if getattr(b, "bout_index", 0) <= total_slots]
+
+        # Підрахунок виграних боїв (лише регулярних)
+        wins_first, wins_second = self._calculate_wins(regular_bouts, reg_first_id, reg_second_id)
+
         needed_wins = (total_slots // 2) + 1
 
         if wins_first >= needed_wins:
@@ -140,7 +142,6 @@ class BaseRuleSet(ABC):
             return True, reg_second_id, "points"
 
         # Якщо всі регулярні бої завершено
-        regular_bouts = [b for b in completed_bouts if getattr(b, "bout_index", 0) <= total_slots]
         if len(regular_bouts) == total_slots:
             return self._determine_winner_from_regular_bouts(
                 team_match, regular_bouts, wins_first, wins_second, total_slots

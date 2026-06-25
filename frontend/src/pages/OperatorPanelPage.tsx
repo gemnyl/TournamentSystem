@@ -25,31 +25,7 @@ import TaekwondoOperatorPanel from "@/components/operator/TaekwondoOperatorPanel
 import JudoOperatorPanel from "@/components/operator/JudoOperatorPanel";
 import { BracketView } from "@/components/bracket/BracketView";
 import { RoundRobinTable } from "@/components/bracket/RoundRobinTable";
-import type { Match, RulesetInfo, Tatami, Tournament, BracketResponse, Category, Athlete } from "@/types/api";
-
-interface CategoryResult {
-  place: number | null;
-  wins: number;
-  draws: number;
-  losses: number;
-  points: number;
-  scores_scored: number;
-  scores_conceded: number;
-  name?: string;
-  club?: string;
-  registration: {
-    id: number;
-    place?: number | null;
-    athlete?: {
-      full_name: string;
-      club?: { name?: string } | null;
-    } | null;
-    team?: {
-      name: string;
-      club?: { name?: string } | null;
-    } | null;
-  };
-}
+import type { Match, RulesetInfo, Tatami, Tournament, BracketResponse, Category, Athlete, CategoryResult } from "@/types/api";
 
 function matchToTimerState(m: Match): TimerState {
   return {

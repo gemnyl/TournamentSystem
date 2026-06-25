@@ -180,3 +180,30 @@ export function parseTaekwondoMatchState(rawState: any): TaekwondoMatchState {
     round_history: rawState.round_history ?? [],
   };
 }
+
+export function getFighterName(
+  match: Match | null | undefined,
+  corner: "shiro" | "ao" | "chung" | "hong" | "first" | "second"
+): string {
+  if (!match) return "";
+  const isFirst = corner === "shiro" || corner === "chung" || corner === "first";
+  const reg = isFirst ? match.reg_first : match.reg_second;
+  const athlete = isFirst ? match.athlete_first : match.athlete_second;
+  if (athlete) return formatAthleteName(athlete);
+  if (reg) return formatRegistrationName(reg);
+  return "TBD";
+}
+
+export function getFighterClub(
+  match: Match | null | undefined,
+  corner: "shiro" | "ao" | "chung" | "hong" | "first" | "second"
+): string {
+  if (!match) return "";
+  const isFirst = corner === "shiro" || corner === "chung" || corner === "first";
+  const reg = isFirst ? match.reg_first : match.reg_second;
+  const athlete = isFirst ? match.athlete_first : match.athlete_second;
+  if (athlete) {
+    return reg?.team?.name ?? "";
+  }
+  return reg?.athlete?.club?.name ?? reg?.team?.club?.name ?? "";
+}

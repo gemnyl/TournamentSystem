@@ -1,15 +1,16 @@
-import { cn, formatRegistrationName, formatAthleteName, parseTaekwondoMatchState } from "@/lib/utils";
-import type { Match, TaekwondoMatchState } from "@/types/api";
+import { cn, parseTaekwondoMatchState, getFighterName, getFighterClub } from "@/lib/utils";
+import type { Match, TaekwondoMatchState, CategoryResult } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
 import { formatTimer } from "@/hooks/useTimer";
 import { Link } from "react-router-dom";
+import ScoreboardStandings from "./ScoreboardStandings";
 
 interface TaekwondoScoreboardProps {
   match: Match | null;
   timerState: TimerState;
   remainingMs: number;
   tatamiNumber: string;
-  categoryResults?: any[];
+  categoryResults?: CategoryResult[];
   resultsCategoryName?: string;
 }
 
@@ -31,94 +32,15 @@ export default function TaekwondoScoreboard({
   const tidFromUrl = typeof globalThis.window !== 'undefined' ? globalThis.window.location.pathname.split('/')[3] : '1';
   const backUrl = `/tournaments/${tidFromUrl}/day`;
 
-  const finalStandings = categoryResults
-    .filter((r): r is typeof r & { place: number } => r.place != null && r.place > 0)
-    .sort((a, b) => a.place - b.place);
 
-  const getFighterName = (corner: "chung" | "hong") => {
-    if (!match) return "";
-    const reg = corner === "chung" ? match.reg_first : match.reg_second;
-    const athlete = corner === "chung" ? match.athlete_first : match.athlete_second;
-    if (athlete) return formatAthleteName(athlete);
-    if (reg) return formatRegistrationName(reg);
-    return "TBD";
-  };
 
-  const getFighterClub = (corner: "chung" | "hong") => {
-    if (!match) return "";
-    const reg = corner === "chung" ? match.reg_first : match.reg_second;
-    const athlete = corner === "chung" ? match.athlete_first : match.athlete_second;
-    const hasAthlete = !!athlete;
-    if (hasAthlete) {
-      return reg?.team?.name ?? "";
-    }
-    return reg?.athlete?.club?.name ?? reg?.team?.club?.name ?? "";
-  };
-
-  const renderStandings = () => {
-    return (
-      <div className="col-span-3 h-full w-full bg-[#0a0d13] flex flex-col items-center justify-center p-10 md:p-12 z-50 select-none">
-        <div className="text-center space-y-3 mb-8 w-full max-w-4xl">
-          <h2 className="text-white font-extrabold tracking-tighter text-5xl uppercase font-scoreboard">
-            {resultsCategoryName}
-          </h2>
-          <div className="text-amber-500 font-semibold tracking-[0.22em] uppercase text-sm font-scoreboard">
-            ПІДСУМКОВИЙ ЗАЛІК ЗМАГАНЬ
-          </div>
-          <div className="w-28 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-2" />
-        </div>
-
-        <div className="w-full max-w-3xl bg-zinc-950/70 border border-zinc-800/50 rounded-2xl p-6 shadow-2xl backdrop-blur-sm space-y-3">
-          {finalStandings.map((result) => {
-            const currentPlace = result.place;
-            const displayName = formatRegistrationName(result.registration) || result.name || "—";
-            const competitorClub = result.registration?.athlete?.club?.name ?? result.registration?.team?.club?.name ?? result.club ?? "Без клубу";
-            const clubRegion = result.registration?.athlete?.club?.region ?? result.registration?.team?.club?.region;
-
-            return (
-              <div
-                key={result.registration?.id || result.id}
-                className={cn(
-                  "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
-                  currentPlace === 1 && "bg-yellow-500/5 border-yellow-500/20",
-                  currentPlace === 2 && "bg-slate-300/5 border-slate-300/10",
-                  currentPlace === 3 && "bg-amber-700/5 border-amber-700/10",
-                  currentPlace > 3 && "bg-zinc-900/40 border-zinc-800/50"
-                )}
-              >
-                <div className="flex items-center gap-5">
-                  <div className={cn(
-                    "w-10 h-10 rounded-lg flex items-center justify-center text-xl uppercase tracking-wider font-bold shrink-0",
-                    currentPlace === 1 && "bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-600 text-black font-black shadow-[0_0_20px_rgba(234,179,8,0.25)]",
-                    currentPlace === 2 && "bg-gradient-to-r from-slate-300 via-zinc-200 to-slate-400 text-black font-black shadow-[0_0_20px_rgba(203,213,225,0.2)]",
-                    currentPlace === 3 && "bg-gradient-to-r from-amber-700 via-amber-600 to-amber-800 text-white font-black shadow-[0_0_15px_rgba(180,83,9,0.25)]",
-                    currentPlace > 3 && "bg-zinc-800 text-zinc-400"
-                  )}>
-                    {currentPlace}
-                  </div>
-
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-bold tracking-wide uppercase text-white">
-                      {displayName}
-                    </span>
-                    <span className="text-sm text-zinc-400 font-medium uppercase tracking-wider">
-                      {competitorClub}{clubRegion ? ` (${clubRegion})` : ""}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-2xl select-none">
-                  {currentPlace === 1 && "🥇"}
-                  {currentPlace === 2 && "🥈"}
-                  {currentPlace === 3 && "🥉"}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
+  const renderStandings = () => (
+    <ScoreboardStandings
+      categoryResults={categoryResults}
+      resultsCategoryName={resultsCategoryName}
+      sportAccentClass="bg-[#0a0d13]"
+    />
+  );
 
   const renderActiveMatch = () => {
     if (!match) return null;
@@ -133,11 +55,11 @@ export default function TaekwondoScoreboard({
           <div className="bg-black/20 p-6 rounded-lg border-b border-black/10 flex flex-col gap-1 z-10">
             <div className="flex items-center gap-4 flex-wrap">
               <span className="text-5xl font-extrabold uppercase text-white tracking-wide">
-                {getFighterName("hong")}
+                {getFighterName(match, "hong")}
               </span>
             </div>
             <span className="text-lg text-white/70 uppercase tracking-widest mt-1">
-              {getFighterClub("hong") || "Без клубу"}
+              {getFighterClub(match, "hong") || "Без клубу"}
             </span>
             {/* Rounds won circles */}
             <div className="flex gap-2.5 mt-3">
@@ -181,11 +103,11 @@ export default function TaekwondoScoreboard({
           <div className="bg-black/20 p-6 rounded-lg border-b border-black/10 flex flex-col gap-1 z-10">
             <div className="flex items-center gap-4 flex-wrap">
               <span className="text-5xl font-extrabold uppercase text-white tracking-wide">
-                {getFighterName("chung")}
+                {getFighterName(match, "chung")}
               </span>
             </div>
             <span className="text-lg text-white/70 uppercase tracking-widest mt-1">
-              {getFighterClub("chung") || "Без клубу"}
+              {getFighterClub(match, "chung") || "Без клубу"}
             </span>
             {/* Rounds won circles */}
             <div className="flex gap-2.5 mt-3">

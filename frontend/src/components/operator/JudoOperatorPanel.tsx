@@ -134,7 +134,7 @@ export default function JudoOperatorPanel({
       }
       toast({ title: "Переможця успішно оголошено!" });
       setWinnerDialog(null);
-    } catch (err: unknown) {
+    } catch {
       toast({ title: "Помилка при оголошенні переможця", variant: "destructive" });
     } finally {
       setBusy(false);
@@ -150,7 +150,7 @@ export default function JudoOperatorPanel({
       if (response.data) {
         onMatchUpdate(response.data);
       }
-    } catch (err: unknown) {
+    } catch {
       toast({ title: "Не вдалося скинути поєдинок", variant: "destructive" });
     } finally {
       setBusy(false);
@@ -167,7 +167,7 @@ export default function JudoOperatorPanel({
       if (response.data) {
         onMatchUpdate(response.data);
       }
-    } catch (err: unknown) {
+    } catch {
       toast({ title: "Помилка керування таймером", variant: "destructive" });
     } finally {
       setBusy(false);

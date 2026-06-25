@@ -255,6 +255,7 @@ export interface Match {
   tournament_title?: string;
   is_bracket_reset?: boolean;
   redirect_to_match_id?: number | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   match_state?: TaekwondoMatchState | JudoMatchState | any;
 }
 
@@ -410,8 +411,34 @@ export interface MatchEvent {
   match: number;
   sequence: number;
   event_type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: Record<string, any>;
   judge: number | null;
   judge_name: string | null;
   created_at: string;
+}
+
+export interface CategoryResult {
+  place: number | null;
+  wins: number;
+  draws: number;
+  losses: number;
+  points: number;
+  scores_scored: number;
+  scores_conceded: number;
+  name?: string;
+  club?: string;
+  registration: {
+    id: number;
+    place?: number | null;
+    athlete?: {
+      full_name: string;
+      club?: { name?: string; region?: string } | null;
+    } | null;
+    team?: {
+      name: string;
+      club?: { name?: string; region?: string } | null;
+      athletes?: { last_name: string }[] | null;
+    } | null;
+  };
 }

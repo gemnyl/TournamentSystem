@@ -1,15 +1,16 @@
-import { cn, formatRegistrationName, formatAthleteName, parseJudoMatchState } from "@/lib/utils";
-import type { Match, JudoMatchState } from "@/types/api";
+import { cn, parseJudoMatchState, getFighterName, getFighterClub } from "@/lib/utils";
+import type { Match, JudoMatchState, CategoryResult } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
+import ScoreboardStandings from "./ScoreboardStandings";
 
 interface JudoScoreboardProps {
   match: Match | null;
   timerState: TimerState;
   remainingMs: number;
   tatamiNumber: string;
-  categoryResults?: any[];
+  categoryResults?: CategoryResult[];
   resultsCategoryName?: string;
   serverTimeOffset?: number;
 }
@@ -54,91 +55,15 @@ export default function JudoScoreboard({
   const tidFromUrl = typeof globalThis.window !== 'undefined' ? globalThis.window.location.pathname.split('/')[3] : '1';
   const backUrl = `/tournaments/${tidFromUrl}/day`;
 
-  const finalStandings = categoryResults
-    .filter((r): r is typeof r & { place: number } => r.place != null && r.place > 0)
-    .sort((a, b) => a.place - b.place);
 
-  const getFighterName = (corner: "shiro" | "ao") => {
-    if (!match) return "";
-    const reg = corner === "shiro" ? match.reg_first : match.reg_second;
-    const athlete = corner === "shiro" ? match.athlete_first : match.athlete_second;
-    if (athlete) return formatAthleteName(athlete);
-    if (reg) return formatRegistrationName(reg);
-    return "TBD";
-  };
 
-  const getFighterClub = (corner: "shiro" | "ao") => {
-    if (!match) return "";
-    const reg = corner === "shiro" ? match.reg_first : match.reg_second;
-    const athlete = corner === "shiro" ? match.athlete_first : match.athlete_second;
-    if (athlete) return reg?.team?.name ?? "";
-    return reg?.athlete?.club?.name ?? reg?.team?.club?.name ?? "";
-  };
-
-  const renderStandings = () => {
-    return (
-      <div className="col-span-3 h-full w-full bg-[#0b0f15] flex flex-col items-center justify-center p-12 z-50 select-none">
-        <div className="text-center space-y-3 mb-10 w-full max-w-4xl">
-          <h1 className="text-white font-extrabold tracking-tight text-5xl uppercase font-scoreboard">
-            {resultsCategoryName}
-          </h1>
-          <div className="text-amber-500 font-bold tracking-[0.2em] uppercase text-sm font-scoreboard">
-            ПІДСУМКОВИЙ ЗАЛІК ЗМАГАНЬ
-          </div>
-          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-2" />
-        </div>
-
-        <div className="w-full max-w-3xl bg-zinc-950/60 border border-zinc-800/60 rounded-2xl p-6 shadow-2xl backdrop-blur-md space-y-3">
-          {finalStandings.map((res) => {
-            const place = res.place;
-            const name = formatRegistrationName(res.registration) || res.name || "—";
-            const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
-            const region = res.registration?.athlete?.club?.region ?? res.registration?.team?.club?.region;
-
-            return (
-              <div
-                key={res.registration?.id || res.id}
-                className={cn(
-                  "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
-                  place === 1 && "bg-yellow-500/5 border-yellow-500/20",
-                  place === 2 && "bg-slate-300/5 border-slate-300/10",
-                  place === 3 && "bg-amber-700/5 border-amber-700/10",
-                  place > 3 && "bg-zinc-900/40 border-zinc-800/50"
-                )}
-              >
-                <div className="flex items-center gap-5">
-                  <div className={cn(
-                    "w-10 h-10 rounded-lg flex items-center justify-center text-xl uppercase tracking-wider font-bold shrink-0",
-                    place === 1 && "bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-600 text-black font-black shadow-[0_0_20px_rgba(234,179,8,0.25)]",
-                    place === 2 && "bg-gradient-to-r from-slate-300 via-zinc-200 to-slate-400 text-black font-black shadow-[0_0_20px_rgba(203,213,225,0.2)]",
-                    place === 3 && "bg-gradient-to-r from-amber-700 via-amber-600 to-amber-800 text-white font-black shadow-[0_0_15px_rgba(180,83,9,0.25)]",
-                    place > 3 && "bg-zinc-800 text-zinc-400"
-                  )}>
-                    {place}
-                  </div>
-
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-bold tracking-wide uppercase text-white">
-                      {name}
-                    </span>
-                    <span className="text-sm text-zinc-400 font-medium uppercase tracking-wider">
-                      {club}{region ? ` (${region})` : ""}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-2xl select-none">
-                  {place === 1 && "🥇"}
-                  {place === 2 && "🥈"}
-                  {place === 3 && "🥉"}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
+  const renderStandings = () => (
+    <ScoreboardStandings
+      categoryResults={categoryResults}
+      resultsCategoryName={resultsCategoryName}
+      sportAccentClass="bg-[#0b0f15]"
+    />
+  );
 
   const formatJudoTimer = (ms: number, isGoldenScore: boolean): string => {
     const totalSeconds = isGoldenScore ? Math.floor(ms / 1000) : Math.ceil(ms / 1000);
@@ -171,10 +96,10 @@ export default function JudoScoreboard({
           {/* Athlete Info */}
           <div className="bg-black/20 p-6 rounded-lg border border-black/10 flex flex-col gap-1 z-10">
             <span className="text-5xl font-extrabold uppercase text-white tracking-wide truncate">
-              {getFighterName("ao")}
+              {getFighterName(match, "ao")}
             </span>
             <span className="text-lg text-white/70 uppercase tracking-widest mt-1">
-              {getFighterClub("ao") || "Без клубу"}
+              {getFighterClub(match, "ao") || "Без клубу"}
             </span>
             {/* Shido cards under name */}
             <div className="flex gap-2 mt-3">
@@ -261,10 +186,10 @@ export default function JudoScoreboard({
           {/* Athlete Info */}
           <div className="bg-zinc-800/10 p-6 rounded-lg border border-zinc-700/50 flex flex-col gap-1 z-10">
             <span className="text-5xl font-extrabold uppercase text-white tracking-wide truncate">
-              {getFighterName("shiro")}
+              {getFighterName(match, "shiro")}
             </span>
             <span className="text-lg text-zinc-400 uppercase tracking-widest mt-1">
-              {getFighterClub("shiro") || "Без клубу"}
+              {getFighterClub(match, "shiro") || "Без клубу"}
             </span>
             {/* Shido cards under name */}
             <div className="flex gap-2 mt-3">

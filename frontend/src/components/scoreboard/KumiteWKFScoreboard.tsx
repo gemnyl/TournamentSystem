@@ -1,8 +1,9 @@
 import { cn, formatRegistrationName, formatAthleteName } from "@/lib/utils";
 import { formatTimer } from "@/hooks/useTimer";
-import type { Match } from "@/types/api";
+import type { Match, CategoryResult } from "@/types/api";
 import type { TimerState } from "@/hooks/useTimer";
 import { Link } from "react-router-dom";
+import ScoreboardStandings from "./ScoreboardStandings";
 
 interface AthleteColumnProps {
   side: "aka" | "ao";
@@ -71,29 +72,8 @@ interface KumiteWKFScoreboardProps {
   timerState: TimerState;
   remainingMs: number;
   tatamiNumber: string;
-  categoryResults?: { place?: number | null; id?: number; name?: string; club?: string; registration?: { id?: number; athlete?: { full_name?: string; club?: { name?: string; region?: string } } | null; team?: { name?: string; club?: { name?: string; region?: string } } | null } }[];
+  categoryResults?: CategoryResult[];
   resultsCategoryName?: string;
-}
-
-function getStandingRowClass(place: number): string {
-  if (place === 1) return "bg-yellow-500/5 border-yellow-500/20";
-  if (place === 2) return "bg-slate-300/5 border-slate-300/10";
-  if (place === 3) return "bg-amber-700/5 border-amber-700/10";
-  return "bg-zinc-900/40 border-zinc-800/50";
-}
-
-function getStandingBadgeClass(place: number): string {
-  if (place === 1) return "bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-600 text-black font-black shadow-[0_0_20px_rgba(234,179,8,0.25)]";
-  if (place === 2) return "bg-gradient-to-r from-slate-300 via-zinc-200 to-slate-400 text-black font-black shadow-[0_0_20px_rgba(203,213,225,0.2)]";
-  if (place === 3) return "bg-gradient-to-r from-amber-700 via-amber-600 to-amber-800 text-white font-black shadow-[0_0_15px_rgba(180,83,9,0.25)]";
-  return "bg-zinc-800 text-zinc-400";
-}
-
-function getStandingMedal(place: number): string {
-  if (place === 1) return "🥇";
-  if (place === 2) return "🥈";
-  if (place === 3) return "🥉";
-  return "";
 }
 
 function getCompetitorName(match: Match, side: "aka" | "ao") {
@@ -142,71 +122,13 @@ export default function KumiteWKFScoreboard({
   const tidFromUrl = typeof globalThis.window !== 'undefined' ? globalThis.window.location.pathname.split('/')[3] : '1';
   const backUrl = `/tournaments/${tidFromUrl}/day`;
 
-  const finalStandings = categoryResults
-    .filter((r): r is typeof r & { place: number } => r.place != null && r.place > 0)
-    .sort((a, b) => a.place - b.place);
-
-  const renderStandings = () => {
-    return (
-      <div className="col-span-3 h-full w-full bg-[#0a0e14] flex flex-col items-center justify-center p-10 md:p-12 z-50 select-none">
-        <div className="text-center space-y-3 mb-9 w-full max-w-4xl">
-          <h2 className="text-white font-extrabold tracking-tighter text-5xl uppercase font-scoreboard">
-            {resultsCategoryName}
-          </h2>
-          <div className="text-amber-500 font-semibold tracking-[0.21em] uppercase text-sm font-scoreboard">
-            ПІДСУМКОВИЙ ЗАЛІК ЗМАГАНЬ
-          </div>
-          <div className="w-28 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-2" />
-        </div>
-
-        {/* Standings List */}
-        <div className="w-full max-w-3xl bg-zinc-950/60 border border-zinc-800/60 rounded-2xl p-6 shadow-2xl backdrop-blur-md space-y-3">
-          {finalStandings.map((res) => {
-            const place = res.place;
-            const name = formatRegistrationName(res.registration) || res.name || "—";
-            const club = res.registration?.athlete?.club?.name ?? res.registration?.team?.club?.name ?? res.club ?? "Без клубу";
-            const region = res.registration?.athlete?.club?.region ?? res.registration?.team?.club?.region;
-
-            const badgeClass = getStandingBadgeClass(place);
-            const rowClass = getStandingRowClass(place);
-            const medal = getStandingMedal(place);
-
-            return (
-              <div
-                key={res.registration?.id || res.id}
-                className={cn(
-                  "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
-                  rowClass
-                )}
-              >
-                <div className="flex items-center gap-5">
-                  {/* Place Number */}
-                  <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center text-xl uppercase tracking-wider font-bold shrink-0", badgeClass)}>
-                    {place}
-                  </div>
-
-                  {/* Name and Club */}
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-bold tracking-wide uppercase text-white">
-                      {name}
-                    </span>
-                    <span className="text-sm text-zinc-400 font-medium uppercase tracking-wider">
-                      {club}{region ? ` (${region})` : ""}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Medals/Icons if desired, or just clean layout */}
-                <div className="text-2xl select-none">
-                  {medal}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
+  const renderStandings = () => (
+    <ScoreboardStandings
+      categoryResults={categoryResults}
+      resultsCategoryName={resultsCategoryName}
+      sportAccentClass="bg-[#0a0e14]"
+    />
+  );
 
   const renderActiveMatch = () => {
     if (!match) return null;
@@ -254,7 +176,7 @@ export default function KumiteWKFScoreboard({
       return renderActiveMatch();
     }
 
-    if (categoryResults && finalStandings.length > 0) {
+    if (categoryResults && categoryResults.length > 0) {
       return renderStandings();
     }
 

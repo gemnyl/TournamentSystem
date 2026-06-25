@@ -4,7 +4,7 @@ import api from "@/lib/api";
 import { useTatamiSocket } from "@/hooks/useTatamiSocket";
 import { useTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
-import type { Match, Tatami } from "@/types/api";
+import type { Match, Tatami, CategoryResult } from "@/types/api";
 import KumiteWKFScoreboard from "@/components/scoreboard/KumiteWKFScoreboard";
 import TaekwondoScoreboard from "@/components/scoreboard/TaekwondoScoreboard";
 import JudoScoreboard from "@/components/scoreboard/JudoScoreboard";
@@ -31,7 +31,7 @@ export default function ScoreboardPage() {
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
-  const [categoryResults, setCategoryResults] = useState<Record<string, unknown>[]>([]);
+  const [categoryResults, setCategoryResults] = useState<CategoryResult[]>([]);
   const [resultsCategoryName, setResultsCategoryName] = useState<string>("");
   const [tatami, setTatami] = useState<Tatami | null>(null);
 
@@ -57,7 +57,7 @@ export default function ScoreboardPage() {
       }
       lastFetchedCatIdRef.current = activeResultsCatId;
       try {
-        const res = await api.get<Record<string, unknown>[]>(`/categories/${activeResultsCatId}/results/`);
+        const res = await api.get<CategoryResult[]>(`/categories/${activeResultsCatId}/results/`);
         setCategoryResults(res.data);
         const nameVal = activeResultsCatName ?? (await api.get<{ name: string }>(`/categories/${activeResultsCatId}/`)).data.name;
         setResultsCategoryName(nameVal ?? "");

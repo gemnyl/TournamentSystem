@@ -452,3 +452,191 @@ class JudoIJFRuleSetTest(TestCase):
             state, "STOP_OSAEKOMI", {}
         )
         self.assertIsNone(state["osaekomi"]["active_for"])
+
+    def test_judo_sub_actions_and_direct_hansoku(self):
+        state = self.ruleset.get_default_state()
+
+        # Test ADD_HANSOKU_MAKE
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_HANSOKU_MAKE", {"corner": "shiro"}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "ao")
+        self.assertEqual(method, "hansoku")
+
+        # Test SUB_HANSOKU_MAKE
+        state, is_finished, _, _ = self.ruleset.apply_ruleset_event(
+            state, "SUB_HANSOKU_MAKE", {"corner": "shiro"}
+        )
+        self.assertFalse(state["penalties"]["shiro"]["hansoku_make"])
+
+        # Test SUB_WAZA_ARI
+        state["scores"]["shiro"]["waza_ari"] = 1
+        state, _, _, _ = self.ruleset.apply_ruleset_event(
+            state, "SUB_WAZA_ARI", {"corner": "shiro"}
+        )
+        self.assertEqual(state["scores"]["shiro"]["waza_ari"], 0)
+
+        # Test SUB_IPPON
+        state["scores"]["shiro"]["ippon"] = 1
+        state, _, _, _ = self.ruleset.apply_ruleset_event(state, "SUB_IPPON", {"corner": "shiro"})
+        self.assertEqual(state["scores"]["shiro"]["ippon"], 0)
+
+        # Test SUB_SHIDO
+        state["penalties"]["shiro"]["shido"] = 1
+        state, _, _, _ = self.ruleset.apply_ruleset_event(state, "SUB_SHIDO", {"corner": "shiro"})
+        self.assertEqual(state["penalties"]["shiro"]["shido"], 0)
+
+    def test_judo_golden_score_win_ao(self):
+        state = self.ruleset.get_default_state()
+        state["is_golden_score"] = True
+        state, is_finished, winner, method = self.ruleset.apply_ruleset_event(
+            state, "ADD_IPPON", {"corner": "ao"}
+        )
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, "ao")
+        self.assertEqual(method, "ippon")
+
+
+class TaekwondoWTExtraTest(TestCase):
+    def setUp(self):
+        from apps.rulesets.taekwondo_wt import TaekwondoWTRuleSet
+
+        self.ruleset = TaekwondoWTRuleSet()
+
+    def test_reset_round(self):
+        state = self.ruleset.get_default_state()
+        state["scores"] = {"chung": 5, "hong": 3}
+        state["gam_jeoms"] = {"chung": 2, "hong": 1}
+
+        state, _, _, _ = self.ruleset.apply_ruleset_event(state, "RESET_ROUND", {})
+        self.assertEqual(state["scores"]["chung"], 0)
+        self.assertEqual(state["gam_jeoms"]["chung"], 0)
+
+    def test_undo_round(self):
+        state = self.ruleset.get_default_state()
+
+        # Advance to round 2
+        state["scores"] = {"chung": 5, "hong": 2}
+        state, _, _, _ = self.ruleset.apply_ruleset_event(state, "NEXT_ROUND", {})
+        self.assertEqual(state["current_round"], 2)
+
+        # Undo round
+        state, _, _, _ = self.ruleset.apply_ruleset_event(state, "UNDO_ROUND", {})
+        self.assertEqual(state["current_round"], 1)
+        self.assertEqual(state["scores"]["chung"], 5)
+        self.assertEqual(state["scores"]["hong"], 2)
+
+
+class MockBout:
+    def __init__(
+        self,
+        status,
+        winner_id=None,
+        score_first=0,
+        score_second=0,
+        bout_index=1,
+        win_method="points",
+    ):
+        self.status = status
+        self.winner_id = winner_id
+        self.score_first = score_first
+        self.score_second = score_second
+        self.bout_index = bout_index
+        self.win_method = win_method
+
+
+class MockCategory:
+    def __init__(self, team_size=3):
+        self.team_size = team_size
+
+
+class MockTeamMatch:
+    def __init__(self, reg_first_id, reg_second_id, bouts, team_size=3):
+        self.reg_first_id = reg_first_id
+        self.reg_second_id = reg_second_id
+
+        class BoutsManager:
+            def __init__(self, list_bouts):
+                self.list_bouts = list_bouts
+
+            def all(self):
+                return self.list_bouts
+
+        self.team_bouts = BoutsManager(bouts)
+        self.category = MockCategory(team_size)
+
+
+class BaseRuleSetTeamWinnerTest(TestCase):
+    def setUp(self):
+        from apps.rulesets.judo_ijf import JudoIJFRuleSet
+
+        self.ruleset = JudoIJFRuleSet()
+
+    def test_missing_registrations(self):
+        match = MockTeamMatch(None, 2, [])
+        is_finished, winner, method = self.ruleset.determine_team_winner(match)
+        self.assertFalse(is_finished)
+
+    def test_mathematical_win(self):
+        bouts = [
+            MockBout("completed", winner_id=1),
+            MockBout("completed", winner_id=1),
+        ]
+        match = MockTeamMatch(1, 2, bouts, team_size=3)
+        is_finished, winner, method = self.ruleset.determine_team_winner(match)
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, 1)
+
+    def test_all_regular_bouts_completed_win_by_wins(self):
+        bouts = [
+            MockBout("completed", winner_id=1, score_first=2, score_second=0, bout_index=1),
+            MockBout("completed", winner_id=2, score_first=0, score_second=2, bout_index=2),
+            MockBout("completed", winner_id=1, score_first=2, score_second=0, bout_index=3),
+        ]
+        match = MockTeamMatch(1, 2, bouts, team_size=3)
+        is_finished, winner, method = self.ruleset.determine_team_winner(match)
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, 1)
+
+    def test_win_by_points(self):
+        bouts = [
+            MockBout("completed", winner_id=1, score_first=10, score_second=0, bout_index=1),
+            MockBout("completed", winner_id=2, score_first=0, score_second=5, bout_index=2),
+            MockBout("completed", winner_id=None, score_first=0, score_second=0, bout_index=3),
+        ]
+        match = MockTeamMatch(1, 2, bouts, team_size=3)
+        is_finished, winner, method = self.ruleset.determine_team_winner(match)
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, 1)
+
+    def test_absolute_draw_no_extra_bout(self):
+        bouts = [
+            MockBout("completed", winner_id=1, score_first=5, score_second=0, bout_index=1),
+            MockBout("completed", winner_id=2, score_first=0, score_second=5, bout_index=2),
+            MockBout("completed", winner_id=None, score_first=0, score_second=0, bout_index=3),
+        ]
+        match = MockTeamMatch(1, 2, bouts, team_size=3)
+        is_finished, winner, method = self.ruleset.determine_team_winner(match)
+        self.assertFalse(is_finished)
+        self.assertIsNone(winner)
+
+    def test_absolute_draw_with_extra_bout(self):
+        bouts = [
+            MockBout("completed", winner_id=1, score_first=5, score_second=0, bout_index=1),
+            MockBout("completed", winner_id=2, score_first=0, score_second=5, bout_index=2),
+            MockBout("completed", winner_id=None, score_first=0, score_second=0, bout_index=3),
+            MockBout(
+                "completed",
+                winner_id=2,
+                score_first=1,
+                score_second=0,
+                bout_index=4,
+                win_method="ippon",
+            ),
+        ]
+        match = MockTeamMatch(1, 2, bouts, team_size=3)
+        is_finished, winner, method = self.ruleset.determine_team_winner(match)
+        self.assertTrue(is_finished)
+        self.assertEqual(winner, 2)
+        self.assertEqual(method, "ippon")
