@@ -2504,11 +2504,11 @@ export default function StaffDashboardPage() {
                                             role="button"
                                             tabIndex={0}
                                             className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded"
-                                            onClick={() => handleOpenInvoiceModal(reg.payment_invoice)}
+                                            onClick={() => handleOpenInvoiceModal(reg.payment_invoice!)}
                                             onKeyDown={(e) => {
                                               if (e.key === "Enter" || e.key === " ") {
                                                 e.preventDefault();
-                                                handleOpenInvoiceModal(reg.payment_invoice);
+                                                handleOpenInvoiceModal(reg.payment_invoice!);
                                               }
                                             }}
                                           >

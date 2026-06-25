@@ -1,4 +1,5 @@
 import axios, { InternalAxiosRequestConfig, AxiosError } from "axios";
+export { AxiosError };
 import { getCsrfToken } from "./csrf";
 import { toast } from "@/hooks/use-toast";
 
@@ -72,7 +73,7 @@ export function formatAxiosError(error: AxiosError<ErrorDetail>): string {
   }
 
   const status = response.status;
-  const data = response.data;
+  const data = response.data as unknown;
 
   // 1. Handle HTML responses (502 Bad Gateway, 500 Server Error pages)
   if (typeof data === "string" && data.trim().startsWith("<!DOCTYPE html>")) {
@@ -83,15 +84,16 @@ export function formatAxiosError(error: AxiosError<ErrorDetail>): string {
 
   // 2. Handle structured JSON error responses
   if (data && typeof data === "object") {
+    const dataObj = data as Record<string, unknown>;
     let rawMsg = "";
-    if (data.detail) {
-      rawMsg = data.detail;
-    } else if (data.non_field_errors && Array.isArray(data.non_field_errors)) {
-      rawMsg = data.non_field_errors.join(", ");
+    if (typeof dataObj.detail === "string") {
+      rawMsg = dataObj.detail;
+    } else if (Array.isArray(dataObj.non_field_errors)) {
+      rawMsg = (dataObj.non_field_errors as unknown[]).join(", ");
     } else {
       // Collect field validation errors
       const fieldErrors: string[] = [];
-      for (const [key, value] of Object.entries(data)) {
+      for (const [key, value] of Object.entries(dataObj)) {
         if (key === "detail" || key === "non_field_errors") continue;
 
         const fieldLabel = FIELD_TRANSLATIONS[key] || (key.charAt(0).toUpperCase() + key.slice(1));

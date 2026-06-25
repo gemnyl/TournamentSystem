@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useEffect, useState, useMemo } from "react";
 import type { FormEvent } from "react";
 import {
@@ -25,7 +25,7 @@ import {
   Layers,
   ChevronDown,
 } from "lucide-react";
-import api, { formatAxiosError, AxiosError, ErrorDetail } from "@/lib/api";
+import api, { formatAxiosError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useTournamentSocket } from "@/hooks/useTournamentSocket";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
