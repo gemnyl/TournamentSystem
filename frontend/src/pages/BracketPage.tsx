@@ -10,7 +10,7 @@ import { MatchCard } from "@/components/bracket/MatchCard";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import type { BracketResponse, Category, Match } from "@/types/api";
+import type { BracketResponse, Category, Match, MatchEvent } from "@/types/api";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 
@@ -76,6 +76,27 @@ export default function BracketPage() {
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [matchBouts, setMatchBouts] = useState<Match[]>([]);
   const [loadingBouts, setLoadingBouts] = useState(false);
+  const [matchEvents, setMatchEvents] = useState<MatchEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+
+  useEffect(() => {
+    if (!selectedMatch) {
+      setMatchEvents([]);
+      return;
+    }
+    const fetchEvents = async () => {
+      setLoadingEvents(true);
+      try {
+        const res = await api.get<MatchEvent[]>(`/matches/${selectedMatch.id}/events/`);
+        setMatchEvents(res.data);
+      } catch (err) {
+        console.error("Failed to fetch match events", err);
+      } finally {
+        setLoadingEvents(false);
+      }
+    };
+    fetchEvents();
+  }, [selectedMatch]);
 
   const [generatingNextRound, setGeneratingNextRound] = useState(false);
   const [tatamis, setTatamis] = useState<any[]>([]);
@@ -602,6 +623,199 @@ export default function BracketPage() {
                     {renderBoutsSection()}
                   </div>
                 )}
+
+                {/* Хронологія поєдинку */}
+                <div className="space-y-3 pt-3 border-t border-zinc-800/80">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-zinc-400">
+                    Хронологія подій поєдинку
+                  </h4>
+
+                  {loadingEvents ? (
+                    <div className="flex justify-center py-6">
+                      <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
+                    </div>
+                  ) : matchEvents.length === 0 ? (
+                    <div className="text-zinc-500 text-xs italic py-2">
+                      Подій у цьому поєдинку ще не зафіксовано.
+                    </div>
+                  ) : (
+                    <div className="max-h-56 overflow-y-auto pr-1 space-y-2.5">
+                      {matchEvents.map((ev) => {
+                        const formatEventDescription = (eVal: MatchEvent) => {
+                          const t = eVal.event_type;
+                          const p = eVal.payload;
+                          const cornerText = p.corner ? (p.corner === "aka" ? "AKA (Червоний)" : "AO (Синій)") : "";
+                          const isUndo = p.is_undo === true;
+
+                          switch (t) {
+                            case "score":
+                              return isUndo
+                                ? `Скасування балів: ${p.action_key?.toUpperCase()} для ${cornerText}`
+                                : `Нарахування балів: ${p.action_key?.toUpperCase()} для ${cornerText}`;
+                            case "warning":
+                              return isUndo
+                                ? `Скасування попередження: ${p.action_key?.toUpperCase()} для ${cornerText}`
+                                : `Попередження: ${p.action_key?.toUpperCase()} для ${cornerText}`;
+                            case "senshu":
+                              return `Сенсю (перший бал): ${p.value ? "Призначено" : "Скасовано"} для ${cornerText}`;
+                            case "start":
+                              return "Початок поєдинку";
+                            case "finish":
+                              return "Завершення поєдинку";
+                            case "reset":
+                              return "Скидання стану поєдинку";
+                            case "timer_start":
+                              return "Старт таймера";
+                            case "timer_pause":
+                              return "Пауза таймера";
+                            case "timer_resume":
+                              return "Продовження таймера";
+                            case "timer_reset":
+                              return "Скидання таймера";
+                            case "timer_set_dur":
+                              if (p.duration_ms !== undefined) {
+                                return `Встановлено тривалість таймера: ${p.duration_ms / 1000} сек`;
+                              }
+                              if (p.delta_ms !== undefined) {
+                                return `Зміна часу таймера на: ${p.delta_ms / 1000} сек`;
+                              }
+                              return "Зміна тривалості таймера";
+                            case "timer_toggle":
+                              return "Відображення таймера змінено";
+                            case "flags_decision":
+                              return `Рішення суддів (Kata): AKA ${p.flags_aka ?? 0} vs AO ${p.flags_ao ?? 0}`;
+                            case "judges_count_change":
+                              return `Зміна кількості суддів на татамі: ${p.judges_count ?? 0}`;
+                            case "ruleset_event": {
+                              const reType = p.ruleset_event_type;
+                              const rePayload = p.payload || {};
+                              const reCorner = rePayload.corner;
+
+                              const getReCornerText = (c: string) => {
+                                if (!c) return "";
+                                const isWT = selectedMatch.ruleset_key === "taekwondo_wt";
+                                const isJudo = selectedMatch.ruleset_key === "judo_ijf";
+                                if (isWT) {
+                                  return c === "chung" ? "Chung (Синій)" : "Hong (Червоний)";
+                                } else if (isJudo) {
+                                  return c === "shiro" ? "Shiro (Білий)" : "Ao (Синій)";
+                                } else {
+                                  return c === "aka" ? "AKA (Червоний)" : "AO (Синій)";
+                                }
+                              };
+
+                              const reCornerText = getReCornerText(reCorner);
+
+                              switch (reType) {
+                                case "ADD_POINTS":
+                                  return `Нарахування балів: +${rePayload.points} для ${reCornerText}`;
+                                case "SUB_POINTS":
+                                  return `Скасування балів: -${rePayload.points} для ${reCornerText}`;
+                                case "ADD_GAM_JEOM": {
+                                  const isPassive = rePayload.is_passive === true;
+                                  const remSecs = rePayload.remaining_seconds ?? 999;
+                                  const passiveText = (isPassive && remSecs <= 10) ? " (пасивна дія в останні 10 сек)" : "";
+                                  return `Gam-jeom для ${reCornerText}${passiveText}`;
+                                }
+                                case "SUB_GAM_JEOM":
+                                  return `Скасування Gam-jeom для ${reCornerText}`;
+                                case "NEXT_ROUND": {
+                                  const rw = rePayload.round_winner;
+                                  return rw
+                                    ? `Перехід до наступного раунду (Переможець раунду: ${getReCornerText(rw)})`
+                                    : "Перехід до наступного раунду";
+                                }
+                                case "RESET_ROUND":
+                                  return "Скидання раунду";
+                                case "UNDO_ROUND":
+                                  return "Назад (раунд)";
+                                case "ADD_WAZA_ARI":
+                                   return `Ваза-арі для ${reCornerText}`;
+                                case "SUB_WAZA_ARI":
+                                   return `Скасування Ваза-арі для ${reCornerText}`;
+                                case "ADD_IPPON":
+                                   return `Іппон для ${reCornerText}`;
+                                case "SUB_IPPON":
+                                   return `Скасування Іппон для ${reCornerText}`;
+                                case "ADD_SHIDO":
+                                   return `Шідо для ${reCornerText}`;
+                                case "SUB_SHIDO":
+                                   return `Скасування Шідо для ${reCornerText}`;
+                                case "START_OSAEKOMI":
+                                   return `Початок утримання (Осаєкомі) для ${reCornerText}`;
+                                case "STOP_OSAEKOMI":
+                                   return "Зупинка утримання (Осаєкомі)";
+                                default:
+                                  return reType || "Подія правил";
+                              }
+                            }
+                            default:
+                              return t;
+                          }
+                        };
+
+                        const getEventBadgeStyles = (t: string, isUndo: boolean) => {
+                          if (isUndo) {
+                            return "bg-zinc-800/80 text-zinc-450 border-zinc-700/50";
+                          }
+                          switch (t) {
+                            case "score":
+                              return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                            case "warning":
+                              return "bg-red-500/10 text-red-500 border-red-500/20";
+                            case "start":
+                            case "finish":
+                              return "bg-amber-500/10 text-amber-500 border-amber-500/20";
+                            case "senshu":
+                              return "bg-purple-500/10 text-purple-500 border-purple-500/20";
+                            case "timer_start":
+                            case "timer_resume":
+                              return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+                            case "timer_pause":
+                              return "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
+                            default:
+                              return "bg-zinc-800 text-zinc-300 border-zinc-700/50";
+                          }
+                        };
+
+                        const formatEventTime = (isoString: string) => {
+                          try {
+                            const d = new Date(isoString);
+                            return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                          } catch {
+                            return "";
+                          }
+                        };
+
+                        return (
+                          <div key={ev.id} className="flex items-start gap-3 text-xs bg-zinc-950/20 p-2.5 rounded-lg border border-zinc-800/40 hover:bg-zinc-950/45 transition-colors">
+                            <span className="font-mono text-[10px] text-zinc-500 pt-0.5 select-none shrink-0">
+                              {formatEventTime(ev.created_at)}
+                            </span>
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={cn(
+                                  "text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase border select-none",
+                                  getEventBadgeStyles(ev.event_type, ev.payload.is_undo === true)
+                                )}>
+                                  {ev.event_type} {ev.payload.is_undo === true ? "(UNDO)" : ""}
+                                </span>
+                                <span className="font-semibold text-zinc-200">
+                                  {formatEventDescription(ev)}
+                                </span>
+                              </div>
+                              {ev.judge_name && (
+                                <div className="text-[10px] text-zinc-500">
+                                  Оператор / Суддя: <span className="text-zinc-400 font-medium">{ev.judge_name}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })()}

@@ -17,7 +17,6 @@ import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -29,8 +28,11 @@ import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/tournament/StatusBadge";
 import { CategoryCard } from "@/components/tournament/CategoryCard";
 import TournamentStatistics from "@/components/tournament/TournamentStatistics";
+import TournamentInfoTab from "@/components/tournament/TournamentInfoTab";
+import TournamentParticipantsTab from "@/components/tournament/TournamentParticipantsTab";
 import type { Tournament, Category, PaginatedResponse, RulesetInfo, Tatami, Match } from "@/types/api";
-import { formatSportType, cn } from "@/lib/utils";
+import { formatSportType, cn, normalizeSportType } from "@/lib/utils";
+import { UserMultiSelect } from "@/components/tournament/UserMultiSelect";
 import { estimateSchedule } from "@/lib/scheduler";
 
 const categorySchema = z.object({
@@ -73,8 +75,10 @@ const editTournamentSchema = z.object({
   base_team_registration_fee: z.union([z.coerce.number().min(0), z.literal("")]).optional().nullable(),
   commission_payer:           z.enum(["buyer", "organizer"]).default("buyer"),
   staff_members:              z.array(z.number()).default([]),
+  judges:                     z.array(z.number()).default([]),
   ruleset_prices:             z.record(z.coerce.number()).default({}),
   ruleset_team_prices:        z.record(z.coerce.number()).default({}),
+  chief_judge:                z.union([z.number(), z.null()]).optional().nullable(),
 }).refine((data) => {
   const start = new Date(data.start_date).getTime();
   const end = new Date(data.end_date).getTime();
@@ -142,6 +146,7 @@ export default function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isOrganizer, user } = useAuth();
   const isCoach = user?.role === "coach";
+  const isOrgOrAdmin = isOrganizer || user?.role === "admin";
 
   const [searchParams, setSearchParams] = useSearchParams();
   const catSearch = searchParams.get("catSearch") ?? "";
@@ -231,13 +236,14 @@ export default function TournamentDetailPage() {
   };
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
+  const isChiefJudge = tournament?.chief_judge === user?.id;
   const [categories, setCategories] = useState<Category[]>([]);
   const [tatamis, setTatamis] = useState<Tatami[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const detailTab = (searchParams.get("tab") as "categories" | "statistics") || "categories";
-  const setDetailTab = (tab: "categories" | "statistics") => {
+  const detailTab = (searchParams.get("tab") as "info" | "categories" | "participants" | "results") || "info";
+  const setDetailTab = (tab: "info" | "categories" | "participants" | "results") => {
     updateSearchParams((params) => {
       params.set("tab", tab);
     });
@@ -295,32 +301,9 @@ export default function TournamentDetailPage() {
     return Object.keys(groupedCategories).filter((key) => groupedCategories[key].length > 0);
   }, [groupedCategories]);
   const [selectedRuleset, setSelectedRuleset] = useState<RulesetInfo | null>(null);
-  const [staffSearch, setStaffSearch] = useState("");
   const [assignedStaffList, setAssignedStaffList] = useState<any[]>([]);
-  const [staffSearchResults, setStaffSearchResults] = useState<any[]>([]);
-  const [searchingStaff, setSearchingStaff] = useState(false);
 
-
-  useEffect(() => {
-    if (!staffSearch.trim()) {
-      setStaffSearchResults([]);
-      return;
-    }
-    const delayDebounce = setTimeout(async () => {
-      setSearchingStaff(true);
-      try {
-        const res = await api.get(`/auth/users/?role=staff&search=${encodeURIComponent(staffSearch)}`);
-        const list = Array.isArray(res.data) ? res.data : res.data?.results || [];
-        setStaffSearchResults(list);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setSearchingStaff(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(delayDebounce);
-  }, [staffSearch]);
+  const [assignedJudgesList, setAssignedJudgesList] = useState<any[]>([]);
 
   // Edit / Delete tournament states
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -467,8 +450,7 @@ export default function TournamentDetailPage() {
   const handleOpenEditDialog = async () => {
     if (!tournament) return;
     setAssignedStaffList([]);
-    setStaffSearch("");
-    setStaffSearchResults([]);
+    setAssignedJudgesList([]);
 
     const staffIds = tournament.staff_members || [];
     if (staffIds.length > 0) {
@@ -480,6 +462,19 @@ export default function TournamentDetailPage() {
         console.error("Failed to fetch assigned staff profiles", e);
       }
     }
+
+    const judgeIds = tournament.judges || [];
+    if (judgeIds.length > 0) {
+      try {
+        const res = await api.get(`/auth/users/?ids=${judgeIds.join(",")}`);
+        const list = Array.isArray(res.data) ? res.data : res.data?.results || [];
+        setAssignedJudgesList(list);
+      } catch (e) {
+        console.error("Failed to fetch assigned judges profiles", e);
+      }
+    }
+
+    // Set form fields
 
     editTournamentForm.reset({
       title: tournament.title,
@@ -496,19 +491,15 @@ export default function TournamentDetailPage() {
       base_team_registration_fee: tournament.base_team_registration_fee ?? "",
       commission_payer: tournament.commission_payer || "buyer",
       staff_members: tournament.staff_members || [],
+      judges: tournament.judges || [],
+      chief_judge: tournament.chief_judge || null,
       ruleset_prices: tournament.ruleset_prices || {},
       ruleset_team_prices: tournament.ruleset_team_prices || {},
     });
     setEditDialogOpen(true);
   };
 
-  const handleRemoveStaff = (sid: number) => {
-    const currentStaff = editTournamentForm.getValues("staff_members") || [];
-    editTournamentForm.setValue(
-      "staff_members",
-      currentStaff.filter((id: number) => id !== sid)
-    );
-  };
+  // (handleRemoveStaff and handleRemoveJudge removed, handled by UserMultiSelect onChange)
 
   const onEditTournamentSubmit = async (data: EditTournamentForm) => {
     setIsEditing(true);
@@ -692,7 +683,7 @@ export default function TournamentDetailPage() {
       const { data } = await api.get<RulesetInfo[]>("/rulesets/");
       setRulesets(data);
       if (data.length > 0) {
-        const filtered = data.filter(r => r.sport_type === tournament?.sport_type);
+        const filtered = data.filter(r => normalizeSportType(r.sport_type) === normalizeSportType(tournament?.sport_type));
         const defaultRuleset = filtered.length > 0 ? filtered[0] : data[0];
         setValue("ruleset_key", defaultRuleset.key);
         setSelectedRuleset(defaultRuleset);
@@ -764,8 +755,48 @@ export default function TournamentDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="container py-8 flex justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+      <div className="container py-8 space-y-6 animate-pulse relative overflow-hidden">
+        {/* Subtle background glow for skeleton */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80%] h-[300px] bg-gradient-to-b from-amber-500/5 to-transparent blur-[120px] pointer-events-none rounded-full" />
+
+        {/* Breadcrumb skeleton */}
+        <div className="h-4 w-24 bg-zinc-800 rounded" />
+
+        {/* Header skeleton */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-64 bg-zinc-800 rounded-xl" />
+              <div className="h-6 w-20 bg-zinc-800 rounded-full" />
+            </div>
+            <div className="h-4 w-48 bg-zinc-800 rounded" />
+            <div className="h-4 w-32 bg-zinc-800 rounded" />
+          </div>
+          <div className="flex gap-2">
+            <div className="h-9 w-28 bg-zinc-800 rounded-lg" />
+            <div className="h-9 w-28 bg-zinc-800 rounded-lg" />
+          </div>
+        </div>
+
+        <div className="h-px bg-zinc-800/60 my-6" />
+
+        {/* Tabs skeleton */}
+        <div className="flex gap-2 max-w-md bg-zinc-950 p-1 rounded-xl border border-zinc-800/40">
+          <div className="flex-1 h-8 bg-zinc-900 rounded-lg" />
+          <div className="flex-1 h-8 bg-zinc-900 rounded-lg" />
+          <div className="flex-1 h-8 bg-zinc-900 rounded-lg" />
+          <div className="flex-1 h-8 bg-zinc-900 rounded-lg" />
+        </div>
+
+        {/* Content area skeleton */}
+        <div className="space-y-4 rounded-xl border border-zinc-800/80 bg-zinc-900/10 p-6 backdrop-blur-md">
+          <div className="h-6 w-48 bg-zinc-800 rounded mb-4" />
+          <div className="space-y-2">
+            <div className="h-4 w-full bg-zinc-800 rounded" />
+            <div className="h-4 w-full bg-zinc-800 rounded" />
+            <div className="h-4 w-3/4 bg-zinc-800 rounded" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -980,7 +1011,10 @@ export default function TournamentDetailPage() {
   };
 
   return (
-    <div className="container py-8 space-y-6">
+    <div className="container py-8 space-y-6 relative overflow-hidden">
+      {/* Subtle background glow */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80%] h-[300px] bg-gradient-to-b from-amber-500/5 to-transparent blur-[120px] pointer-events-none rounded-full" />
+
       {/* Назад */}
       <Link to="/tournaments" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
         <ArrowLeft className="w-4 h-4" /> Всі турніри
@@ -999,7 +1033,7 @@ export default function TournamentDetailPage() {
           {tournament.sport_type && (
             <p className="text-sm text-muted-foreground/80 max-w-2xl">{formatSportType(tournament.sport_type)}</p>
           )}
-          {isOrganizer || isCoach ? (
+          {isOrgOrAdmin || isCoach ? (
             <div className={cn("mt-2 inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold", getRegInfoClass(regInfo.status))}>
               {regInfo.label}
             </div>
@@ -1022,7 +1056,7 @@ export default function TournamentDetailPage() {
             </Button>
           )}
 
-          {isOrganizer && (
+          {isOrgOrAdmin && (
             <>
               {canOpenReg && (
                 <Button
@@ -1054,10 +1088,15 @@ export default function TournamentDetailPage() {
                   Завершити
                 </Button>
               )}
+            </>
+          )}
+
+          {(isOrgOrAdmin || isChiefJudge) && (
+            <>
               <Button variant="outline" size="sm" asChild>
                 <Link to={`/tournaments/${id}/tatamis`}>Керування татамі</Link>
               </Button>
-              {tournament.status === "active" && (
+              {tournament.status !== "completed" && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1078,16 +1117,17 @@ export default function TournamentDetailPage() {
                   Згенерувати всі сітки
                 </Button>
               )}
-              {tournament.status !== "completed" && (
-                <>
-                  <Button variant="outline" size="sm" onClick={handleOpenEditDialog}>
-                    Редагувати
-                  </Button>
-                  <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)}>
-                    Вилучити турнір
-                  </Button>
-                </>
-              )}
+            </>
+          )}
+
+          {isOrgOrAdmin && tournament.status !== "completed" && (
+            <>
+              <Button variant="outline" size="sm" onClick={handleOpenEditDialog}>
+                Редагувати
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+                Вилучити турнір
+              </Button>
             </>
           )}
         </div>
@@ -1096,7 +1136,17 @@ export default function TournamentDetailPage() {
       <Separator />
 
       {/* Перемикач вкладок сторінки турніру */}
-      <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800/60 max-w-xs">
+      <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800/60 max-w-md">
+        <button
+          onClick={() => setDetailTab("info")}
+          className={`flex-1 py-1.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+            detailTab === "info"
+              ? "bg-zinc-800 text-amber-500 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          Інформація
+        </button>
         <button
           onClick={() => setDetailTab("categories")}
           className={`flex-1 py-1.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
@@ -1108,27 +1158,47 @@ export default function TournamentDetailPage() {
           Категорії
         </button>
         <button
-          onClick={() => setDetailTab("statistics")}
+          onClick={() => setDetailTab("participants")}
           className={`flex-1 py-1.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
-            detailTab === "statistics"
+            detailTab === "participants"
               ? "bg-zinc-800 text-amber-500 shadow-sm"
               : "text-zinc-400 hover:text-zinc-200"
           }`}
         >
-          Статистика
+          Учасники
+        </button>
+        <button
+          onClick={() => setDetailTab("results")}
+          className={`flex-1 py-1.5 px-3 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+            detailTab === "results"
+              ? "bg-zinc-800 text-amber-500 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          Результати
         </button>
       </div>
 
-      {detailTab === "statistics" ? (
+      {detailTab === "info" && (
+        <TournamentInfoTab tournament={tournament} onUpdate={fetchAll} />
+      )}
+
+      {detailTab === "participants" && (
+        <TournamentParticipantsTab tournament={tournament} categories={categories} />
+      )}
+
+      {detailTab === "results" && (
         <TournamentStatistics tournamentId={Number(id)} />
-      ) : (
+      )}
+
+      {detailTab === "categories" && (
         <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-2xl font-semibold">
             Категорії
             <span className="ml-2 text-base font-normal text-muted-foreground">({categories.length})</span>
           </h2>
-          {isOrganizer && tournament?.status !== "completed" && (
+          {isOrgOrAdmin && tournament?.status !== "completed" && (
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
                 Імпорт категорій
@@ -1144,7 +1214,7 @@ export default function TournamentDetailPage() {
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center border border-dashed border-border rounded-xl">
             <GitBranch className="w-8 h-8 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">Категорій поки немає</p>
-            {isOrganizer && tournament?.status !== "completed" && (
+            {isOrgOrAdmin && tournament?.status !== "completed" && (
               <Button variant="outline" size="sm" onClick={() => setCatDialogOpen(true)}>
                 <Plus className="w-4 h-4" /> Додати першу категорію
               </Button>
@@ -1295,11 +1365,19 @@ export default function TournamentDetailPage() {
                   <SelectValue placeholder="Оберіть правила..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {rulesets.filter(r => r.sport_type === tournament.sport_type || !tournament.sport_type).map((r) => (
-                    <SelectItem key={r.key} value={r.key}>
-                      {r.name} ({formatSportType(r.sport_type)})
-                    </SelectItem>
-                  ))}
+                  {rulesets
+                    .filter((ruleset) => {
+                      const tSport = normalizeSportType(tournament?.sport_type);
+                      const rSport = normalizeSportType(ruleset.sport_type);
+                      return tSport ? rSport === tSport : true;
+                    })
+                    .map((ruleset) => {
+                      return (
+                        <SelectItem key={ruleset.key} value={ruleset.key}>
+                          {ruleset.name} ({formatSportType(ruleset.sport_type)})
+                        </SelectItem>
+                      );
+                    })}
                 </SelectContent>
               </Select>
               {errors.ruleset_key && <p className="text-xs text-destructive">{errors.ruleset_key.message}</p>}
@@ -1541,11 +1619,11 @@ export default function TournamentDetailPage() {
             </div>
 
             {/* Ціни за рулсети */}
-            {rulesets.some(r => r.sport_type === editTournamentForm.watch("sport_type")) && (
+            {rulesets.some(r => normalizeSportType(r.sport_type) === normalizeSportType(editTournamentForm.watch("sport_type"))) && (
               <div className="border-t border-border pt-4 space-y-3">
                 <h4 className="text-sm font-semibold text-foreground">Вартість внесків за правилами (рулсетами)</h4>
                 <div className="space-y-3 p-3 bg-muted/40 border border-border/50 rounded-lg">
-                  {rulesets.filter(r => r.sport_type === editTournamentForm.watch("sport_type")).map((r) => (
+                  {rulesets.filter(r => normalizeSportType(r.sport_type) === normalizeSportType(editTournamentForm.watch("sport_type"))).map((r) => (
                     <div key={r.key} className="grid grid-cols-2 gap-4 border-b border-border/20 last:border-0 pb-3 last:pb-0">
                       <div className="col-span-2">
                         <Label className="text-xs font-bold text-amber-500">{r.name}</Label>
@@ -1572,99 +1650,80 @@ export default function TournamentDetailPage() {
               </div>
             )}
 
+            {/* Призначення суддів турніру */}
+            <div className="border-t border-border pt-4 space-y-3">
+              <h4 className="text-sm font-semibold text-foreground">Судді турніру</h4>
+              <UserMultiSelect
+                selectedIds={editTournamentForm.watch("judges") || []}
+                onChange={(ids) => {
+                  editTournamentForm.setValue("judges", ids);
+                  const currentCj = editTournamentForm.getValues("chief_judge");
+                  if (currentCj && !ids.includes(currentCj)) {
+                    editTournamentForm.setValue("chief_judge", null);
+                  }
+                }}
+                selectedProfiles={assignedJudgesList}
+                onAddProfile={(u) => {
+                  if (!assignedJudgesList.some(p => p.id === u.id)) {
+                    setAssignedJudgesList(prev => [...prev, u]);
+                  }
+                }}
+                role="judge"
+                searchLabel="Додати суддю (пошук за іменем чи email)"
+                placeholder="Введіть ім'я, прізвище або email судді..."
+                emptyLabel="Суддів не призначено"
+              />
+            </div>
+
+            {/* Головний суддя турніру */}
+            <div className="border-t border-border pt-4 pb-1 space-y-2">
+              <h4 className="text-sm font-semibold text-foreground tracking-tight">Головний суддя змагання</h4>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Призначте головного суддю зі списку доданих суддів:</Label>
+                <select
+                  id="chief_judge"
+                  value={editTournamentForm.watch("chief_judge") || ""}
+                  onChange={(evt) => {
+                    const parsedVal = evt.target.value ? Number(evt.target.value) : null;
+                    editTournamentForm.setValue("chief_judge", parsedVal);
+                  }}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-foreground"
+                >
+                  <option value="">-- Не призначено --</option>
+                  {(editTournamentForm.watch("judges") || []).map((jid: number) => {
+                    const profile = assignedJudgesList.find(u => u.id === jid);
+                    const label = profile
+                      ? `${profile.last_name} ${profile.first_name} (${profile.email})`
+                      : `Користувач #${jid}`;
+                    return (
+                      <option key={jid} value={jid}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+
             {/* Призначення робочого персоналу */}
             <div className="border-t border-border pt-4 space-y-3">
               <h4 className="text-sm font-semibold text-foreground">Робочий персонал турніру</h4>
-
-              {/* Selected Staff Badges */}
-              <div className="flex flex-wrap gap-1.5 min-h-[2rem] p-2 border border-border/30 rounded-xl bg-background/30">
-                {(() => {
-                  const staffIds = editTournamentForm.watch("staff_members") || [];
-                  if (staffIds.length === 0) {
-                    return <span className="text-xs text-muted-foreground self-center">Персонал не призначено</span>;
+              <UserMultiSelect
+                selectedIds={editTournamentForm.watch("staff_members") || []}
+                onChange={(ids) => {
+                  editTournamentForm.setValue("staff_members", ids);
+                }}
+                selectedProfiles={assignedStaffList}
+                onAddProfile={(u) => {
+                  if (!assignedStaffList.some(p => p.id === u.id)) {
+                    setAssignedStaffList(prev => [...prev, u]);
                   }
-                  return staffIds.map((sid: number) => {
-                    const profile = assignedStaffList.find(u => u.id === sid);
-                    const label = profile
-                      ? `${profile.last_name} ${profile.first_name[0]}. (${profile.email})`
-                      : `Користувач #${sid}`;
-                    return (
-                      <Badge key={sid} variant="secondary" className="gap-1 px-2.5 py-1 text-xs rounded-lg border border-border/60">
-                        {label}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveStaff(sid)}
-                          className="hover:text-destructive text-muted-foreground font-bold shrink-0 ml-0.5"
-                        >
-                          ✕
-                        </button>
-                      </Badge>
-                    );
-                  });
-                })()}
-              </div>
-
-              {/* Staff Search Dropdown */}
-              <div className="relative space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Додати персонал (пошук за іменем чи email)</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="Введіть ім'я, прізвище або email..."
-                    className="pl-9 text-xs"
-                    value={staffSearch}
-                    onChange={(e) => setStaffSearch(e.target.value)}
-                  />
-                  {searchingStaff && (
-                    <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
-                  )}
-                </div>
-
-                {staffSearch.trim() && (
-                  <div className="absolute z-50 w-full mt-1 border border-border bg-card shadow-lg rounded-xl max-h-48 overflow-y-auto divide-y divide-border/30">
-                    {staffSearchResults.length === 0 ? (
-                      <p className="text-xs text-muted-foreground p-3 text-center">Нічого не знайдено</p>
-                    ) : (
-                      staffSearchResults.map((u) => {
-                        const staffList = editTournamentForm.watch("staff_members") || [];
-                        const isAlreadySelected = staffList.includes(u.id);
-                        return (
-                          <button
-                            key={u.id}
-                            type="button"
-                            disabled={isAlreadySelected}
-                            onClick={() => {
-                              // Add to staff list
-                              editTournamentForm.setValue("staff_members", [...staffList, u.id]);
-                              // Add to assigned staff profiles list to ensure we have the name
-                              if (!assignedStaffList.some(p => p.id === u.id)) {
-                                setAssignedStaffList(prev => [...prev, u]);
-                              }
-                              // Clear search
-                              setStaffSearch("");
-                            }}
-                            className={cn(
-                              "w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-muted/50 transition-colors",
-                              isAlreadySelected && "opacity-50 cursor-default bg-muted/20"
-                            )}
-                          >
-                            <div>
-                              <span className="font-bold text-foreground">{u.last_name} {u.first_name} {u.patronymic || ""}</span>
-                              <span className="text-[10px] text-muted-foreground block">{u.email}</span>
-                            </div>
-                            {isAlreadySelected ? (
-                              <span className="text-[10px] text-amber-500 font-semibold">Вже додано</span>
-                            ) : (
-                              <span className="text-[10px] text-muted-foreground font-semibold hover:text-amber-500">+ Додати</span>
-                            )}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
+                }}
+                role="staff,judge"
+                searchLabel="Додати персонал (пошук за іменем чи email)"
+                placeholder="Введіть ім'я, прізвище або email..."
+                emptyLabel="Персонал не призначено"
+              />
             </div>
 
 
@@ -2093,27 +2152,79 @@ export default function TournamentDetailPage() {
             <p className="text-xs text-muted-foreground">
               Введіть назви категорій (кожна з нового рядка). Наша система автоматично визначить стать, вік та вагові межі на основі тексту!
             </p>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-[10px] h-7"
-                onClick={() => setImportText(
-                  "12-13 років, хлопці, до 40 кг\n12-13 років, дівчата, до 45 кг\n14-15 років, хлопці, понад 60 кг\n16-17 років, хлопці, 55-60 кг"
-                )}
-              >
-                Шаблон WKF (Хлопці / Дівчата)
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-[10px] h-7"
-                onClick={() => setImportText(
-                  "U10, -30kg, Male\nU12, -35kg, Female\nU14, +45kg, Mixed"
-                )}
-              >
-                Шаблон English (U10 / U12)
-              </Button>
+            <div className="flex flex-wrap gap-2">
+              {(!tournament || normalizeSportType(tournament.sport_type) === "karate" || !["karate", "judo", "taekwondo"].includes(normalizeSportType(tournament.sport_type))) && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] h-7"
+                    onClick={() => setImportText(
+                      "12-13 років, хлопці, до 40 кг\n12-13 років, дівчата, до 45 кг\n14-15 років, хлопці, понад 60 кг\n16-17 років, хлопці, 55-60 кг"
+                    )}
+                  >
+                    Шаблон WKF (Хлопці / Дівчата)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] h-7"
+                    onClick={() => setImportText(
+                      "U10, -30kg, Male\nU12, -35kg, Female\nU14, +45kg, Mixed"
+                    )}
+                  >
+                    Шаблон English (U10 / U12)
+                  </Button>
+                </>
+              )}
+              {tournament && normalizeSportType(tournament.sport_type) === "judo" && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] h-7"
+                    onClick={() => setImportText(
+                      "U15, хлопці, -38 кг\nU15, дівчата, -40 кг\nU18, хлопці, -50 кг\nU18, дівчата, -44 кг\nЧоловіки, -73 кг\nЖінки, -52 кг"
+                    )}
+                  >
+                    Шаблон Дзюдо (U15 / U18 / Чоловіки / Жінки)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] h-7"
+                    onClick={() => setImportText(
+                      "U15, Male, -38kg\nU15, Female, -40kg\nU18, Male, -50kg\nU18, Female, -44kg\nSeniors, Male, -73kg\nSeniors, Female, -52kg"
+                    )}
+                  >
+                    Шаблон Judo English (U15 / U18)
+                  </Button>
+                </>
+              )}
+              {tournament && normalizeSportType(tournament.sport_type) === "taekwondo" && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] h-7"
+                    onClick={() => setImportText(
+                      "Молодші юнаки (2015-2016), хлопці, -26 кг\nЮнаки (2013-2014), хлопці, -33 кг\nКадети (2010-2012), хлопці, -45 кг\nЮніори (2007-2009), дівчата, -49 кг"
+                    )}
+                  >
+                    Шаблон Тхеквондо (Кадети / Юніори)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] h-7"
+                    onClick={() => setImportText(
+                      "Cadets (2010-2012), Male, -45kg\nJuniors (2007-2009), Female, -49kg\nSeniors, Male, -58kg\nSeniors, Female, -46kg"
+                    )}
+                  >
+                    Шаблон Taekwondo English
+                  </Button>
+                </>
+              )}
             </div>
             <textarea
               value={importText}

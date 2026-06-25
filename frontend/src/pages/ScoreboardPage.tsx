@@ -6,6 +6,8 @@ import { useTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
 import type { Match, Tatami } from "@/types/api";
 import KumiteWKFScoreboard from "@/components/scoreboard/KumiteWKFScoreboard";
+import TaekwondoScoreboard from "@/components/scoreboard/TaekwondoScoreboard";
+import JudoScoreboard from "@/components/scoreboard/JudoScoreboard";
 
 function matchToTimerState(m: Match): TimerState {
   return {
@@ -157,8 +159,33 @@ export default function ScoreboardPage() {
     },
   });
 
-  // Default to Kumite WKF Scoreboard.
-  // If we add another ruleset in the future (e.g., Judo), we can switch components here.
+  if (currentMatch?.ruleset_key === "taekwondo_wt") {
+    return (
+      <TaekwondoScoreboard
+        match={currentMatch}
+        timerState={timerState}
+        remainingMs={remainingMs}
+        tatamiNumber={n || ""}
+        categoryResults={categoryResults}
+        resultsCategoryName={resultsCategoryName}
+      />
+    );
+  }
+
+  if (currentMatch?.ruleset_key === "judo_ijf") {
+    return (
+      <JudoScoreboard
+        match={currentMatch}
+        timerState={timerState}
+        remainingMs={remainingMs}
+        tatamiNumber={n || ""}
+        categoryResults={categoryResults}
+        resultsCategoryName={resultsCategoryName}
+        serverTimeOffset={serverTimeOffset}
+      />
+    );
+  }
+
   return (
     <KumiteWKFScoreboard
       match={currentMatch}

@@ -12,7 +12,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { toast } from "@/hooks/use-toast";
-import { cn, formatSportType, formatRegistrationName, formatRegistrationClub, getAgeAsOf } from "@/lib/utils";
+import { cn, formatSportType, formatRegistrationName, formatRegistrationClub, getAgeAsOf, normalizeSportType } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -274,7 +274,8 @@ export default function CategoryDetailPage() {
     ? tatamis.find((t: Tatami) => t.id === firstMatchWithTatami.tatami)
     : undefined;
   const isCompleted = tournament?.status === "completed";
-  const canFinalizeOrUnlock = !isCompleted && (isOrganizer || (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id));
+  const isChiefJudge = tournament?.chief_judge === user?.id;
+  const canFinalizeOrUnlock = !isCompleted && (isOrganizer || isChiefJudge || (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id));
 
   // Delete registration state
   const [deleteRegDialog, setDeleteRegDialog] = useState<Registration | null>(null);
@@ -642,8 +643,8 @@ export default function CategoryDetailPage() {
   }
   if (!category) return null;
 
-  const canGenerateBracket = !isCompleted && isOrganizer && category.status !== "completed" && registrations.some(r => r.status === "confirmed");
-  const canRegister = !isCompleted && (isOrganizer || isCoach) && category.status === "registration";
+  const canGenerateBracket = !isCompleted && (isOrganizer || isChiefJudge) && category.status !== "completed" && registrations.some(r => r.status === "confirmed");
+  const canRegister = !isCompleted && (isOrganizer || isChiefJudge || isCoach) && category.status === "registration";
 
   // Обчислюємо оцінку розкладу для поточної категорії
   let estimateBanner = null;
@@ -697,9 +698,10 @@ export default function CategoryDetailPage() {
             <p className="text-sm text-muted-foreground">
               {category.confirmed_registrations_count} учасників · {getWeightRange(category.min_weight, category.max_weight)} · {category.min_age}–{category.max_age} р.
             </p>
+          {/* estimateBanner placement */}
             {estimateBanner}
           </div>
-          {isOrganizer && tatamis.length > 0 && category.has_bracket && !isCompleted && (
+          {(isOrganizer || isChiefJudge) && tatamis.length > 0 && category.has_bracket && !isCompleted && (
             <div
               className="flex items-center gap-2 mt-3 border rounded-lg px-3 py-1.5 w-fit shadow-md text-zinc-100"
               style={{ backgroundColor: '#18181b', borderColor: '#27272a' }}
@@ -743,7 +745,7 @@ export default function CategoryDetailPage() {
               Згенерувати сітку
             </Button>
           )}
-          {isOrganizer && category.has_bracket && !isCompleted && (
+          {(isOrganizer || isChiefJudge) && category.has_bracket && !isCompleted && (
             <Button variant="destructive" size="sm" onClick={() => setDeleteBracketDialogOpen(true)}>
               Вилучити сітку
             </Button>
@@ -766,7 +768,7 @@ export default function CategoryDetailPage() {
               </Link>
             </Button>
           ) : null}
-          {isOrganizer && !isCompleted && (
+          {(isOrganizer || isChiefJudge) && !isCompleted && (
             <>
               <Button variant="outline" size="sm" onClick={handleOpenEditCat}>
                 Редагувати
@@ -1370,7 +1372,11 @@ export default function CategoryDetailPage() {
                   <SelectValue placeholder="Оберіть правила..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {rulesets.map((r) => (
+                  {rulesets.filter(r => {
+                    const tSport = normalizeSportType(tournament?.sport_type);
+                    const rSport = normalizeSportType(r.sport_type);
+                    return !tSport || rSport === tSport;
+                  }).map((r) => (
                     <SelectItem key={r.key} value={r.key}>
                       {r.name} ({formatSportType(r.sport_type)})
                     </SelectItem>

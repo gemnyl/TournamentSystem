@@ -9,6 +9,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import api from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 import { cn, formatRegistrationName, formatAthleteName } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,7 @@ interface TatamiWorkloadCardProps {
   readonly matches: Match[];
   readonly tatamis: Tatami[];
   readonly isReassigning: number | null;
+  readonly canEdit: boolean;
   readonly handleMoveCategory: (catId: number, direction: "up" | "down", currentTatamiCats: Category[]) => Promise<void>;
   readonly handleReassignCategory: (catId: number, newTatamiIdStr: string) => Promise<void>;
   readonly formatFinishTime: (timestamp: number) => string;
@@ -88,6 +90,7 @@ function TatamiWorkloadCard({
   matches,
   tatamis,
   isReassigning,
+  canEdit,
   handleMoveCategory,
   handleReassignCategory,
   formatFinishTime,
@@ -193,7 +196,7 @@ function TatamiWorkloadCard({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          disabled={isReassigning === cat.id || tatamiCats.indexOf(cat) === 0}
+                          disabled={!canEdit || isReassigning === cat.id || tatamiCats.indexOf(cat) === 0}
                           onClick={() => handleMoveCategory(cat.id, "up", tatamiCats)}
                           className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-20 transition-all"
                           title="Перемістити вгору"
@@ -205,7 +208,7 @@ function TatamiWorkloadCard({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          disabled={isReassigning === cat.id || tatamiCats.indexOf(cat) === tatamiCats.length - 1}
+                          disabled={!canEdit || isReassigning === cat.id || tatamiCats.indexOf(cat) === tatamiCats.length - 1}
                           onClick={() => handleMoveCategory(cat.id, "down", tatamiCats)}
                           className="h-6 w-6 text-muted-foreground hover:text-foreground disabled:opacity-20 transition-all"
                           title="Перемістити вниз"
@@ -216,9 +219,12 @@ function TatamiWorkloadCard({
                     )}
                     <select
                       value={tatami.id}
-                      disabled={isReassigning === cat.id}
+                      disabled={!canEdit || isReassigning === cat.id}
                       onChange={(e) => handleReassignCategory(cat.id, e.target.value)}
-                      className="h-8 text-xs rounded-md border border-input bg-background px-2 py-1 focus-visible:ring-1 focus-visible:ring-amber-500 font-medium text-muted-foreground hover:text-foreground cursor-pointer"
+                      className={cn(
+                        "h-8 text-xs rounded-md border border-input bg-background px-2 py-1 focus-visible:ring-1 focus-visible:ring-amber-500 font-medium text-muted-foreground hover:text-foreground cursor-pointer disabled:cursor-not-allowed disabled:opacity-75",
+                        !canEdit && "cursor-default hover:text-muted-foreground"
+                      )}
                     >
                       {tatamis.map((tat) => (
                         <option key={tat.id} value={tat.id}>
@@ -252,9 +258,16 @@ type TatamiFormValues = z.infer<typeof tatamiSchema>;
 export default function TatamiAdminPage() {
   const { tid } = useParams<{ tid: string }>();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [tatamis, setTatamis] = useState<Tatami[]>([]);
   const [tournament, setTournament] = useState<Tournament | null>(null);
+
+  const isOrganizer = user?.id === tournament?.organizer;
+  const isChiefJudge = user?.id === tournament?.chief_judge;
+  const isAdmin = user?.role === "admin";
+  const canEdit = isOrganizer || isChiefJudge || isAdmin;
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -352,14 +365,24 @@ export default function TatamiAdminPage() {
   const fetchData = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
-      const [tRes, tatamiRes, judgeRes, catRes, matchRes] = await Promise.all([
-        api.get<Tournament>(`/tournaments/${tid}/`),
+      const tRes = await api.get<Tournament>(`/tournaments/${tid}/`);
+      const tournamentData = tRes.data;
+      setTournament(tournamentData);
+
+      const judgeIds = [
+        ...(tournamentData.chief_judge ? [tournamentData.chief_judge] : []),
+        ...(tournamentData.judges || [])
+      ];
+
+      const [tatamiRes, judgeRes, catRes, matchRes] = await Promise.all([
         api.get<Tatami[] | { results: Tatami[] }>(`/tatamis/?tournament=${tid}`),
-        api.get<JudgeUser[] | { results: JudgeUser[] }>("/auth/users/?role=judge"),
+        judgeIds.length > 0
+          ? api.get<JudgeUser[] | { results: JudgeUser[] }>(`/auth/users/?ids=${judgeIds.join(",")}`)
+          : Promise.resolve({ data: [] }),
         api.get<Category[] | { results: Category[] }>(`/categories/?tournament=${tid}`),
         api.get<Match[] | { results: Match[] }>(`/matches/?tournament=${tid}`),
       ]);
-      setTournament(tRes.data);
+
       const list = Array.isArray(tatamiRes.data)
         ? tatamiRes.data
         : (tatamiRes.data as { results: Tatami[] }).results;
@@ -564,9 +587,26 @@ export default function TatamiAdminPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="font-display text-4xl font-bold tracking-tight">Керування татамі</h1>
-            <Badge variant="outline" className="border-amber-500/30 text-amber-500 bg-amber-500/5 flex items-center gap-1">
-              <Shield className="w-3.5 h-3.5" /> Організатор
-            </Badge>
+            {isAdmin && (
+              <Badge variant="outline" className="border-red-500/30 text-red-500 bg-red-500/5 flex items-center gap-1">
+                <Shield className="w-3.5 h-3.5" /> Адміністратор
+              </Badge>
+            )}
+            {isOrganizer && !isAdmin && (
+              <Badge variant="outline" className="border-amber-500/30 text-amber-500 bg-amber-500/5 flex items-center gap-1">
+                <Shield className="w-3.5 h-3.5" /> Організатор
+              </Badge>
+            )}
+            {isChiefJudge && !isOrganizer && !isAdmin && (
+              <Badge variant="outline" className="border-blue-500/30 text-blue-500 bg-blue-500/5 flex items-center gap-1">
+                <Shield className="w-3.5 h-3.5" /> Головний суддя
+              </Badge>
+            )}
+            {!canEdit && (
+              <Badge variant="outline" className="border-slate-500/30 text-slate-500 bg-slate-500/5 flex items-center gap-1">
+                <Shield className="w-3.5 h-3.5" /> Суддя (перегляд)
+              </Badge>
+            )}
           </div>
           <p className="text-muted-foreground mt-1 text-sm">
             {tournament?.title ?? `Tournament ${tid}`} · {tatamis.length} татамі в системі
@@ -577,9 +617,11 @@ export default function TatamiAdminPage() {
           <Button variant="outline" size="sm" onClick={() => fetchData()}>
             <RefreshCw className="w-4 h-4 mr-1" /> Оновити
           </Button>
-          <Button variant="sport" size="sm" onClick={handleOpenCreate}>
-            <Plus className="w-4 h-4" /> Додати татамі
-          </Button>
+          {canEdit && (
+            <Button variant="sport" size="sm" onClick={handleOpenCreate}>
+              <Plus className="w-4 h-4" /> Додати татамі
+            </Button>
+          )}
         </div>
       </div>
 
@@ -599,9 +641,11 @@ export default function TatamiAdminPage() {
               Створіть перше татамі для цього турніру, щоб судді могли керувати поєдинками
             </p>
           </div>
-          <Button variant="sport" size="sm" onClick={handleOpenCreate}>
-            <Plus className="w-4 h-4" /> Додати татамі
-          </Button>
+          {canEdit && (
+            <Button variant="sport" size="sm" onClick={handleOpenCreate}>
+              <Plus className="w-4 h-4" /> Додати татамі
+            </Button>
+          )}
         </div>
       ) : (
         <div className="rounded-xl border border-border overflow-hidden bg-card/10">
@@ -655,11 +699,12 @@ export default function TatamiAdminPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <button
-                        onClick={() => handleToggleActive(t)}
+                        onClick={() => canEdit && handleToggleActive(t)}
+                        disabled={!canEdit}
                         className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold transition-all border ${
                           t.is_active
-                            ? "border-green-500/40 text-green-400 bg-green-500/5 hover:bg-green-500/10"
-                            : "border-red-500/40 text-red-400 bg-red-500/5 hover:bg-red-500/10"
+                            ? `border-green-500/40 text-green-400 bg-green-500/5 ${canEdit ? "hover:bg-green-500/10" : "cursor-default"}`
+                            : `border-red-500/40 text-red-400 bg-red-500/5 ${canEdit ? "hover:bg-red-500/10" : "cursor-default"}`
                         }`}
                       >
                         {t.is_active ? (
@@ -685,24 +730,28 @@ export default function TatamiAdminPage() {
                       {t.matches_count ?? 0}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleOpenEdit(t)}
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteConfirm(t)}
-                          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+                      {canEdit ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleOpenEdit(t)}
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteConfirm(t)}
+                            className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -738,6 +787,7 @@ export default function TatamiAdminPage() {
                 matches={matches}
                 tatamis={tatamis}
                 isReassigning={isReassigning}
+                canEdit={canEdit}
                 handleMoveCategory={handleMoveCategory}
                 handleReassignCategory={handleReassignCategory}
                 formatFinishTime={formatFinishTime}
@@ -788,9 +838,12 @@ export default function TatamiAdminPage() {
                         </div>
                         <select
                           value="none"
-                          disabled={isReassigning === cat.id}
+                          disabled={!canEdit || isReassigning === cat.id}
                           onChange={(e) => handleReassignCategory(cat.id, e.target.value)}
-                          className="h-8 text-xs rounded-md border border-amber-500/40 bg-background px-2 py-1 focus-visible:ring-1 focus-visible:ring-amber-500 font-semibold text-amber-500 hover:text-amber-400 cursor-pointer shrink-0"
+                          className={cn(
+                            "h-8 text-xs rounded-md border border-amber-500/40 bg-background px-2 py-1 focus-visible:ring-1 focus-visible:ring-amber-500 font-semibold text-amber-500 hover:text-amber-400 cursor-pointer shrink-0 disabled:cursor-not-allowed disabled:opacity-75",
+                            !canEdit && "cursor-default border-muted-foreground/30 text-muted-foreground hover:text-muted-foreground"
+                          )}
                         >
                           <option value="none">Оберіть...</option>
                           {tatamis.map((tat) => (

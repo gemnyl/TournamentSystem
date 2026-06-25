@@ -70,7 +70,7 @@ export default function App() {
               <Route path="/staff" element={<StaffDashboardPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allowedRoles={["organizer"]} />}>
+            <Route element={<ProtectedRoute allowedRoles={["organizer", "judge"]} />}>
               <Route path="/tournaments/:tid/tatamis" element={<TatamiAdminPage />} />
             </Route>
 

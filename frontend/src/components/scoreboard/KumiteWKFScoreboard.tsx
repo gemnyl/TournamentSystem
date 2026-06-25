@@ -148,15 +148,15 @@ export default function KumiteWKFScoreboard({
 
   const renderStandings = () => {
     return (
-      <div className="col-span-3 h-full w-full bg-[#0b0f15] flex flex-col items-center justify-center p-12 z-50 select-none">
-        <div className="text-center space-y-3 mb-10 w-full max-w-4xl">
-          <h1 className="text-white font-extrabold tracking-tight text-5xl uppercase font-scoreboard">
+      <div className="col-span-3 h-full w-full bg-[#0a0e14] flex flex-col items-center justify-center p-10 md:p-12 z-50 select-none">
+        <div className="text-center space-y-3 mb-9 w-full max-w-4xl">
+          <h2 className="text-white font-extrabold tracking-tighter text-5xl uppercase font-scoreboard">
             {resultsCategoryName}
-          </h1>
-          <div className="text-amber-500 font-bold tracking-[0.2em] uppercase text-sm font-scoreboard">
+          </h2>
+          <div className="text-amber-500 font-semibold tracking-[0.21em] uppercase text-sm font-scoreboard">
             ПІДСУМКОВИЙ ЗАЛІК ЗМАГАНЬ
           </div>
-          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-2" />
+          <div className="w-28 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-2" />
         </div>
 
         {/* Standings List */}

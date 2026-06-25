@@ -107,7 +107,10 @@ export default function PointsOperatorPanel({
         { corner: winnerDialog, win_method: winMethod },
       );
       onMatchUpdate(data);
-      toast({ title: "Переможця успішно оголошено!" });
+      toast({
+        title: "Переможця успішно оголошено!",
+        description: "Результат поєдинку збережено на сервері.",
+      });
       setWinnerDialog(null);
     } catch {
       toast({ title: "Помилка при оголошенні переможця", variant: "destructive" });

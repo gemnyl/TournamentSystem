@@ -26,6 +26,7 @@ interface TatamiCardProps {
   readonly tatami: Tatami;
   readonly tid: string;
   readonly isCompleted: boolean;
+  readonly isChiefJudge?: boolean;
 }
 
 function mapMatchTimerState(match: Match) {
@@ -89,7 +90,7 @@ function UpcomingQueueSection({ tatami, currentMatch }: Readonly<UpcomingQueuePr
   );
 }
 
-function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted }: TatamiCardProps) {
+function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted, isChiefJudge }: TatamiCardProps) {
   const { isOrganizer, user } = useAuth();
   const [tatami, setTatami] = useState<Tatami>(initialTatami);
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
@@ -240,7 +241,7 @@ function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted }: Tatami
             </div>
 
             {/* Open operator panel link for organizer/judge, scoreboard for spectator */}
-            {!isCompleted && (isOrganizer || (user?.role === "judge" && tatami.assigned_judge === user.id)) ? (
+            {!isCompleted && (isOrganizer || isChiefJudge || (user?.role === "judge" && tatami.assigned_judge === user.id)) ? (
               <Link
                 to={`/operator/tournament/${tid}/tatami/${tatami.number}`}
                 className="block mt-auto text-center text-xs font-semibold text-amber-500 hover:text-amber-400 hover:underline pt-2"
@@ -272,17 +273,19 @@ function TatamiDashboardCard({ tatami: initialTatami, tid, isCompleted }: Tatami
 export default function DayDashboardPage() {
   const { tid } = useParams<{ tid: string }>();
   const { toast } = useToast();
-  const { isOrganizer } = useAuth();
+  const { isOrganizer, user } = useAuth();
 
   const [tatamis, setTatamis] = useState<Tatami[]>([]);
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const isChiefJudge = tournament?.chief_judge === user?.id;
+
   const fetchTatamis = async () => {
     setIsLoading(true);
     try {
       const { data } = await api.get<Tatami[] | { results: Tatami[] }>(`/tatamis/?tournament=${tid}`);
-      const list = Array.isArray(data) ? data : (data as { results: Tatami[] }).results;
+      const list = Array.isArray(data) ? data : (data as { results: Tatami[] }).results || [];
       setTatamis(list);
     } catch {
       toast({ title: "Помилка завантаження татамі", variant: "destructive" });
@@ -325,7 +328,7 @@ export default function DayDashboardPage() {
           <Button variant="outline" size="sm" onClick={fetchTatamis}>
             <RefreshCw className="w-4 h-4 mr-1" /> Оновити
           </Button>
-          {isOrganizer && tournament?.status !== "completed" && (
+          {(isOrganizer || isChiefJudge) && tournament?.status !== "completed" && (
             <Button variant="outline" size="sm" asChild>
               <Link to={`/tournaments/${tid}/tatamis`}>
                 <Layers className="w-4 h-4 mr-1" /> Керування татамі
@@ -348,12 +351,12 @@ export default function DayDashboardPage() {
           <div>
             <p className="font-medium text-foreground">Татамі не знайдено</p>
             <p className="text-sm text-muted-foreground mt-1">
-              {isOrganizer
+              {(isOrganizer || isChiefJudge)
                 ? "Перейдіть до панелі керування, щоб додати татамі для цього турніру"
                 : "Організатор ще не додав жодного татамі для цього турніру"}
             </p>
           </div>
-          {isOrganizer && tournament?.status !== "completed" && (
+          {(isOrganizer || isChiefJudge) && tournament?.status !== "completed" && (
             <Button variant="sport" size="sm" asChild>
               <Link to={`/tournaments/${tid}/tatamis`}>Додати татамі</Link>
             </Button>
