@@ -185,6 +185,26 @@ class EmailConfirmationCode(models.Model):
         return f"{self.user.email} - {self.code}"
 
 
+class PasswordResetCode(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="password_reset_code",
+        verbose_name="Користувач",
+    )
+    code = models.CharField(max_length=6, verbose_name="Код скидання")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+    expires_at = models.DateTimeField(verbose_name="Дійсний до")
+
+    class Meta:
+        db_table = "password_reset_code"
+        verbose_name = "Код скидання пароля"
+        verbose_name_plural = "Коди скидання пароля"
+
+    def __str__(self):
+        return f"{self.user.email} - {self.code}"
+
+
 class RoleRequest(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Очікує"

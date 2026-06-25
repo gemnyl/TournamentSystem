@@ -5,7 +5,7 @@ from unfold.admin import ModelAdmin as UnfoldModelAdmin
 from unfold.decorators import action, display
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 
-from .models import Club, EmailConfirmationCode, RoleRequest, User
+from .models import Club, EmailConfirmationCode, PasswordResetCode, RoleRequest, User
 
 
 @admin.register(User)
@@ -173,5 +173,11 @@ class RoleRequestAdmin(UnfoldModelAdmin):
 
 @admin.register(EmailConfirmationCode)
 class EmailConfirmationCodeAdmin(UnfoldModelAdmin):
+    list_display = ("user", "code", "created_at", "expires_at")
+    search_fields = ("user__email", "code")
+
+
+@admin.register(PasswordResetCode)
+class PasswordResetCodeAdmin(UnfoldModelAdmin):
     list_display = ("user", "code", "created_at", "expires_at")
     search_fields = ("user__email", "code")
