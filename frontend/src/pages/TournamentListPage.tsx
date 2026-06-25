@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TournamentCard } from "@/components/tournament/TournamentCard";
-import type { Tournament, PaginatedResponse } from "@/types/api";
 import { formatSportType, cn } from "@/lib/utils";
+import type { Tournament, PaginatedResponse } from "@/types/api";
+import { UserMultiSelect } from "@/components/tournament/UserMultiSelect";
 
 const getTodayAtTime = (hours: number, minutes: number) => {
   const d = new Date();
@@ -55,6 +56,8 @@ const createSchema = z.object({
   end_date:           z.string().min(1, "Оберіть дату кінця"),
   registration_start: z.string().optional().nullable(),
   registration_end:   z.string().optional().nullable(),
+  chief_judge:        z.union([z.number(), z.null()]).optional().nullable(),
+  judges:             z.array(z.number()).default([]),
 }).refine((data) => {
   const start = new Date(data.start_date).getTime();
   const now = Date.now() - 5 * 60 * 1000; // 5-minute buffer
@@ -105,13 +108,15 @@ export default function TournamentListPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
 
+  const [selectedJudgesList, setSelectedJudgesList] = useState<any[]>([]);
+
   // Стан фільтрації та пагінації
   const [nextUrl, setNextUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"active" | "completed" | "draft">("active");
   const [sortBy, setSortBy] = useState<"date_asc" | "date_desc" | "title_asc">("date_asc");
   const [isPayingId, setIsPayingId] = useState<number | null>(null);
 
-  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<CreateForm>({
+  const { register, handleSubmit, reset, setValue, formState: { errors }, watch } = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
     defaultValues: {
       start_date: getTodayAtTime(9, 0),
@@ -119,6 +124,8 @@ export default function TournamentListPage() {
       registration_start: "",
       registration_end: "",
       sport_type: "",
+      chief_judge: null,
+      judges: [],
     }
   });
 
@@ -152,6 +159,8 @@ export default function TournamentListPage() {
       setIsLoading(false);
     }
   };
+
+
 
   useEffect(() => {
     fetchTournaments(true);
@@ -211,16 +220,26 @@ export default function TournamentListPage() {
         ...data,
         registration_start: data.registration_start || null,
         registration_end: data.registration_end || null,
+        chief_judge: data.chief_judge || null,
+        judges: data.judges || [],
       };
       await api.post("/tournaments/", payload);
       toast({ title: "Турнір створено!", variant: "default" });
       setDialogOpen(false);
       reset();
+      setSelectedJudgesList([]);
       fetchTournaments(true);
     } finally {
       setIsCreating(false);
     }
   };
+
+  useEffect(() => {
+    if (!dialogOpen) {
+      reset();
+      setSelectedJudgesList([]);
+    }
+  }, [dialogOpen]);
 
   const renderListContent = () => {
     if (isLoading && sortedTournaments.length === 0) {
@@ -491,6 +510,67 @@ export default function TournamentListPage() {
                 {errors.registration_end && <p className="text-xs text-destructive">{errors.registration_end.message}</p>}
               </div>
             </div>
+
+            {/* Призначення суддів турніру */}
+            <div className="border-t border-border pt-4 space-y-3">
+              <h4 className="text-sm font-semibold text-foreground">Судді турніру</h4>
+              <UserMultiSelect
+                role="judge"
+                placeholder="Введіть ім'я, прізвище або email судді..."
+                searchLabel="Додати суддю (пошук за іменем чи email)"
+                emptyLabel="Суддів не призначено"
+                selectedIds={watch("judges") || []}
+                selectedProfiles={selectedJudgesList}
+                onAddProfile={(userObj) => {
+                  const alreadyHas = selectedJudgesList.some(profileItem => profileItem.id === userObj.id);
+                  if (!alreadyHas) {
+                    setSelectedJudgesList(currentList => [...currentList, userObj]);
+                  }
+                }}
+                onChange={(newJudgeIds) => {
+                  setValue("judges", newJudgeIds);
+                  const cjId = watch("chief_judge");
+                  if (cjId && !newJudgeIds.includes(cjId)) {
+                    setValue("chief_judge", null);
+                  }
+                }}
+              />
+            </div>
+
+            {/* Призначення головного судді */}
+            <div className="border-t border-border pt-4 space-y-3">
+              <h4 className="text-sm font-semibold text-foreground">Головний суддя турніру</h4>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Оберіть головного суддю зі списку суддів турніру</Label>
+                <select
+                  id="chief_judge"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-foreground"
+                  value={watch("chief_judge") || ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const cjId = val ? Number(val) : null;
+                    setValue("chief_judge", cjId);
+                  }}
+                >
+                  <option value="">-- Не призначено --</option>
+                  {(() => {
+                    const judgesList = watch("judges") || [];
+                    return judgesList.map((judgeId: number) => {
+                      const user = selectedJudgesList.find(u => u.id === judgeId);
+                      const displayLabel = user
+                        ? `${user.last_name} ${user.first_name} (${user.email})`
+                        : `Користувач #${judgeId}`;
+                      return (
+                        <option key={judgeId} value={judgeId}>
+                          {displayLabel}
+                        </option>
+                      );
+                    });
+                  })()}
+                </select>
+              </div>
+            </div>
+
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Скасувати

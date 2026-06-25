@@ -9,6 +9,7 @@ from unfold.admin import TabularInline as UnfoldTabularInline
 from unfold.contrib.import_export.forms import ExportForm, ImportForm
 from unfold.decorators import action, display
 
+from apps.common.admin import BaseTournamentAdminMixin
 from apps.tatamis.models import Tatami
 from apps.tournaments.models import Category, Registration, Tournament
 
@@ -85,13 +86,13 @@ class RegistrationResource(resources.ModelResource):
 
 # --- ModelAdmins ---
 @admin.register(Tournament)
-class TournamentAdmin(UnfoldModelAdmin):
+class TournamentAdmin(BaseTournamentAdminMixin, UnfoldModelAdmin):
     list_display = ["id", "title", "sport_type", "location", "start_date", "status", "organizer"]
     list_display_links = ["id", "title"]
     list_filter = ["status", "sport_type"]
     search_fields = ["title", "location", "organizer__email"]
     ordering = ["-start_date"]
-    autocomplete_fields = ["organizer"]
+    autocomplete_fields = ["organizer", "chief_judge", "judges"]
     inlines = [CategoryInline, TatamiInline]
 
     actions_list = ["open_registration", "start_tournament"]
@@ -100,7 +101,17 @@ class TournamentAdmin(UnfoldModelAdmin):
     fieldsets = (
         (
             "Основна інфо",
-            {"fields": ("organizer", "title", "sport_type", "status", "use_check_in")},
+            {
+                "fields": (
+                    "organizer",
+                    "chief_judge",
+                    "judges",
+                    "title",
+                    "sport_type",
+                    "status",
+                    "use_check_in",
+                )
+            },
         ),
         (
             "Дати",
@@ -142,7 +153,11 @@ class TournamentAdmin(UnfoldModelAdmin):
         if request.user.role == User.Role.ORGANIZER:
             return queryset.filter(organizer=request.user)
         if request.user.role == User.Role.JUDGE:
-            return queryset.filter(tatamis__assigned_judge=request.user).distinct()
+            from django.db.models import Q
+
+            return queryset.filter(
+                Q(tatamis__assigned_judge=request.user) | Q(chief_judge=request.user)
+            ).distinct()
         return queryset.none()
 
     def save_model(self, request, obj, form, change):
@@ -205,7 +220,7 @@ class TournamentAdmin(UnfoldModelAdmin):
 
 
 @admin.register(Category)
-class CategoryAdmin(UnfoldModelAdmin):
+class CategoryAdmin(BaseTournamentAdminMixin, UnfoldModelAdmin):
     list_select_related = ["tournament"]
     list_display = (
         "id",
@@ -232,7 +247,12 @@ class CategoryAdmin(UnfoldModelAdmin):
         if request.user.role == User.Role.ORGANIZER:
             return queryset.filter(tournament__organizer=request.user)
         if request.user.role == User.Role.JUDGE:
-            return queryset.filter(tournament__tatamis__assigned_judge=request.user).distinct()
+            from django.db.models import Q
+
+            return queryset.filter(
+                Q(tournament__tatamis__assigned_judge=request.user)
+                | Q(tournament__chief_judge=request.user)
+            ).distinct()
         return queryset.none()
 
     @display(description="Учасники", ordering="participants_count")
@@ -251,7 +271,7 @@ class CategoryAdmin(UnfoldModelAdmin):
 
 
 @admin.register(Registration)
-class RegistrationAdmin(UnfoldModelAdmin, ImportExportModelAdmin):
+class RegistrationAdmin(BaseTournamentAdminMixin, UnfoldModelAdmin, ImportExportModelAdmin):
     resource_classes = [RegistrationResource]
     import_form_class = ImportForm
     export_form_class = ExportForm
@@ -265,10 +285,27 @@ class RegistrationAdmin(UnfoldModelAdmin, ImportExportModelAdmin):
         if request.user.role == User.Role.ORGANIZER:
             return queryset.filter(category__tournament__organizer=request.user)
         if request.user.role == User.Role.JUDGE:
+            from django.db.models import Q
+
             return queryset.filter(
-                category__tournament__tatamis__assigned_judge=request.user
+                Q(category__tournament__tatamis__assigned_judge=request.user)
+                | Q(category__tournament__chief_judge=request.user)
             ).distinct()
         return queryset.none()
+
+    def has_delete_permission(self, request, obj=None):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser:
+            return True
+        User = get_user_model()
+        if request.user.role == User.Role.ADMIN:
+            return True
+        if request.user.role == User.Role.ORGANIZER:
+            if obj is None:
+                return True
+            return obj.category.tournament.organizer == request.user
+        return False
 
     list_display = [
         "id",

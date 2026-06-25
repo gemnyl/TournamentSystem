@@ -228,10 +228,10 @@ export default function KumiteOperatorControls({
       {/* Undo Action Toggle & Alert */}
       <div className="flex flex-col items-center gap-1 bg-zinc-950/40 p-2.5 rounded-xl border border-border/40">
         <Button
-          variant={undoMode ? "destructive" : "outline"}
-          size="sm"
           disabled={isCompleted || busy}
           onClick={() => setUndoMode(!undoMode)}
+          variant={undoMode ? "destructive" : "outline"}
+          size="sm"
           className={cn(
             "gap-1.5 font-bold transition-all duration-200 text-xs px-4 h-8",
             undoMode && "animate-pulse"

@@ -78,12 +78,24 @@ class TournamentSerializer(serializers.ModelSerializer):
         queryset=User.objects.all(),
         required=False,
     )
+    chief_judge = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(role="judge"),
+        required=False,
+        allow_null=True,
+    )
+    chief_judge_name = serializers.CharField(source="chief_judge.get_full_name", read_only=True)
+    judges = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=User.objects.filter(role="judge"),
+        required=False,
+    )
 
     class Meta:
         model = Tournament
         fields = [
             "id",
             "title",
+            "description",
             "sport_type",
             "location",
             "start_date",
@@ -95,6 +107,9 @@ class TournamentSerializer(serializers.ModelSerializer):
             "status_display",
             "organizer",
             "organizer_name",
+            "chief_judge",
+            "chief_judge_name",
+            "judges",
             "weigh_in_required",
             "online_payment_enabled",
             "payment_details",
@@ -120,8 +135,37 @@ class TournamentSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        # Перевірка, що Головний суддя є у списку суддів турніру
+        chief_judge = attrs.get("chief_judge", getattr(self.instance, "chief_judge", None))
+        judges = attrs.get("judges", None)
+        if judges is not None:
+            judge_ids = {getattr(j, "id", j) for j in judges}
+        else:
+            judge_ids = {j.id for j in self.instance.judges.all()} if self.instance else set()
+
+        if chief_judge:
+            cj_id = getattr(chief_judge, "id", chief_judge)
+            if cj_id not in judge_ids:
+                raise serializers.ValidationError(
+                    {"chief_judge": "Головний суддя має бути обраний зі списку суддів турніру."}
+                )
+
         request = self.context.get("request")
         if request and request.user and request.user.is_authenticated:
+            # Якщо користувач є головним суддею, але не організатором/адміном
+            if self.instance and (
+                self.instance.chief_judge == request.user
+                and self.instance.organizer != request.user
+                and request.user.role != "admin"
+            ):
+                # Перевіримо, чи намагається він змінити інші поля крім description
+                allowed_fields = {"description"}
+                for field in attrs.keys():
+                    if field not in allowed_fields:
+                        raise serializers.ValidationError(
+                            f"Головний суддя не має права змінювати поле '{field}'."
+                        )
+
             request.user.refresh_from_db()
             from django.db.models import Sum
 
@@ -495,3 +539,34 @@ class CategoryResultSerializer(serializers.Serializer):
     points = serializers.IntegerField()
     scores_scored = serializers.IntegerField()
     scores_conceded = serializers.IntegerField()
+
+
+class RegistrationListSerializer(serializers.ModelSerializer):
+    """Спрощений серіалайзер для списку учасників турніру."""
+
+    athlete = AthleteSerializer(read_only=True)
+    team = TeamSerializer(read_only=True)
+    category_name = serializers.CharField(source="category.name", read_only=True)
+    club_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Registration
+        fields = [
+            "id",
+            "athlete",
+            "team",
+            "category",
+            "category_name",
+            "club_name",
+            "status",
+            "payment_status",
+            "offline_refund_status",
+            "created_at",
+        ]
+
+    def get_club_name(self, obj):
+        if obj.athlete and obj.athlete.club:
+            return obj.athlete.club.name
+        if obj.team and obj.team.club:
+            return obj.team.club.name
+        return "—"

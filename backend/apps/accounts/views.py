@@ -25,7 +25,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Club, EmailConfirmationCode, RoleRequest, User
-from apps.accounts.permissions import IsOrganizer
+from apps.accounts.permissions import IsJudgeOrOrganizer
 from apps.accounts.serializers import (
     ChangePasswordSerializer,
     ClubSerializer,
@@ -172,7 +172,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     """Список користувачів — тільки для адміністраторів та організаторів."""
 
     serializer_class = UserSerializer
-    permission_classes = [IsOrganizer]
+    permission_classes = [IsJudgeOrOrganizer]
     from apps.common.pagination import OptionalPageNumberPagination
 
     pagination_class = OptionalPageNumberPagination
@@ -181,7 +181,11 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         qs = User.objects.select_related("club").all()
         role = self.request.query_params.get("role")
         if role:
-            qs = qs.filter(role=role)
+            if "," in role:
+                roles = role.split(",")
+                qs = qs.filter(role__in=roles)
+            else:
+                qs = qs.filter(role=role)
 
         search = self.request.query_params.get("search")
         if search:

@@ -21,33 +21,11 @@ import { useTimer } from "@/hooks/useTimer";
 import type { TimerState } from "@/hooks/useTimer";
 import KumiteWKFOperatorPanel from "@/components/operator/KumiteWKFOperatorPanel";
 import KataOperatorPanel from "@/components/operator/KataOperatorPanel";
+import TaekwondoOperatorPanel from "@/components/operator/TaekwondoOperatorPanel";
+import JudoOperatorPanel from "@/components/operator/JudoOperatorPanel";
 import { BracketView } from "@/components/bracket/BracketView";
 import { RoundRobinTable } from "@/components/bracket/RoundRobinTable";
-import type { Match, RulesetInfo, Tatami, Tournament, BracketResponse, Category, Athlete } from "@/types/api";
-
-interface CategoryResult {
-  place: number | null;
-  wins: number;
-  draws: number;
-  losses: number;
-  points: number;
-  scores_scored: number;
-  scores_conceded: number;
-  name?: string;
-  club?: string;
-  registration: {
-    id: number;
-    place?: number | null;
-    athlete?: {
-      full_name: string;
-      club?: { name?: string } | null;
-    } | null;
-    team?: {
-      name: string;
-      club?: { name?: string } | null;
-    } | null;
-  };
-}
+import type { Match, RulesetInfo, Tatami, Tournament, BracketResponse, Category, Athlete, CategoryResult } from "@/types/api";
 
 function matchToTimerState(m: Match): TimerState {
   return {
@@ -408,6 +386,14 @@ export default function OperatorPanelPage() {
     DEFAULT_TIMER,
     serverTimeOffset,
   );
+
+  const handleMatchUpdate = useCallback((m: Match) => {
+    setCurrentMatch(m);
+    setMatches((prev) => prev.map((x) => x.id === m.id ? m : x));
+    setTimerState(matchToTimerState(m));
+    fetchCategories();
+    fetchCategoryResults();
+  }, [fetchCategories, fetchCategoryResults, setTimerState]);
 
   // fetch match queue for this specific tatami
   const fetchMatches = useCallback(async () => {
@@ -975,8 +961,31 @@ export default function OperatorPanelPage() {
     const isCompleted = m.status === "completed";
     const isNext = m.id === nextMatchId;
 
-    const aoName = formatParticipant(m.reg_second, m.athlete_second);
-    const akaName = formatParticipant(m.reg_first, m.athlete_first);
+    let leftName = "";
+    let rightName = "";
+    let leftColorClass = "text-blue-400";
+    let rightColorClass = "text-red-400";
+
+    const isTaekwondo = m.ruleset_key === "taekwondo_wt";
+    const isJudo = m.ruleset_key === "judo_ijf";
+
+    if (isTaekwondo) {
+      leftName = formatParticipant(m.reg_first, m.athlete_first);
+      rightName = formatParticipant(m.reg_second, m.athlete_second);
+      leftColorClass = "text-blue-400";
+      rightColorClass = "text-red-400";
+    } else if (isJudo) {
+      leftName = formatParticipant(m.reg_first, m.athlete_first);
+      rightName = formatParticipant(m.reg_second, m.athlete_second);
+      leftColorClass = "text-slate-300";
+      rightColorClass = "text-blue-400";
+    } else {
+      leftName = formatParticipant(m.reg_second, m.athlete_second);
+      rightName = formatParticipant(m.reg_first, m.athlete_first);
+      leftColorClass = "text-blue-400";
+      rightColorClass = "text-red-400";
+    }
+
     const winnerReg = m.winner === m.reg_first?.id ? m.reg_first : m.reg_second;
     const winnerAthlete = m.winner === m.reg_first?.id ? m.athlete_first : m.athlete_second;
     const winnerName = winnerReg ? formatParticipant(winnerReg, winnerAthlete) : "";
@@ -1031,9 +1040,9 @@ export default function OperatorPanelPage() {
           )}
         </div>
         <p className="whitespace-normal break-words text-[11px] font-medium leading-tight">
-          <span className="text-blue-400">{aoName}</span>
+          <span className={leftColorClass}>{leftName}</span>
           <span className="text-muted-foreground text-[9px] font-normal px-0.5"> vs </span>
-          <span className="text-red-400">{akaName}</span>
+          <span className={rightColorClass}>{rightName}</span>
         </p>
           {isCompleted && winnerReg && (
             <p className="text-green-400 text-[10px] mt-1 whitespace-normal break-words flex items-center gap-1 font-semibold">
@@ -1816,6 +1825,32 @@ export default function OperatorPanelPage() {
           {currentMatch ? (
             currentMatch.category_is_team && !currentMatch.parent_team_match && currentMatch.is_team_bouts_supported ? (
               renderTeamMatchDashboard()
+            ) : currentMatch.ruleset_key === "taekwondo_wt" ? (
+              <TaekwondoOperatorPanel
+                match={currentMatch}
+                timerState={timerState}
+                remainingMs={remainingMs}
+                serverTimeOffset={serverTimeOffset}
+                onMatchUpdate={handleMatchUpdate}
+                onRelease={handleRelease}
+                onNextMatch={handleNextMatch}
+                disabled={busy}
+                allMatches={matches}
+                bracketFormat={categories.find((c) => c.id === currentMatch.category)?.bracket_format}
+              />
+            ) : currentMatch.ruleset_key === "judo_ijf" ? (
+              <JudoOperatorPanel
+                timerState={timerState}
+                remainingMs={remainingMs}
+                match={currentMatch}
+                serverTimeOffset={serverTimeOffset}
+                onMatchUpdate={handleMatchUpdate}
+                onNextMatch={handleNextMatch}
+                onRelease={handleRelease}
+                disabled={busy}
+                allMatches={matches}
+                bracketFormat={categories.find((c) => c.id === currentMatch.category)?.bracket_format}
+              />
             ) : currentMatch.judging_mode === "points" ? (
               <KumiteWKFOperatorPanel
                 match={currentMatch}
@@ -1826,13 +1861,7 @@ export default function OperatorPanelPage() {
                 rulesetActions={rulesetActions}
                 winMethods={winMethods}
                 serverTimeOffset={serverTimeOffset}
-                onMatchUpdate={(m) => {
-                  setCurrentMatch(m);
-                  setMatches((prev) => prev.map((x) => x.id === m.id ? m : x));
-                  setTimerState(matchToTimerState(m));
-                  fetchCategories();
-                  fetchCategoryResults();
-                }}
+                onMatchUpdate={handleMatchUpdate}
                 onRelease={handleRelease}
                 onCompleteAndNext={handleCompleteAndNext}
                 onNextMatch={handleNextMatch}
@@ -1844,13 +1873,7 @@ export default function OperatorPanelPage() {
                 timerState={timerState}
                 remainingMs={remainingMs}
                 serverTimeOffset={serverTimeOffset}
-                onMatchUpdate={(m) => {
-                  setCurrentMatch(m);
-                  setMatches((prev) => prev.map((x) => x.id === m.id ? m : x));
-                  setTimerState(matchToTimerState(m));
-                  fetchCategories();
-                  fetchCategoryResults();
-                }}
+                onMatchUpdate={handleMatchUpdate}
                 onRelease={handleRelease}
                 onNextMatch={handleNextMatch}
                 disabled={busy}

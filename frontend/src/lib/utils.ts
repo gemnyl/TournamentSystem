@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, prefer-const */
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { Match } from "@/types/api";
+import type { Match, JudoMatchState, TaekwondoMatchState } from "@/types/api";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -21,6 +21,20 @@ export function formatSportType(sport: string | null | undefined): string {
   if (!sport) return "";
   const lower = sport.trim().toLowerCase();
   return SPORT_TYPE_MAP[lower] || sport;
+}
+
+export function normalizeSportType(sport: string | null | undefined): string {
+  if (!sport) return "";
+  const lower = sport.trim().toLowerCase();
+  if (lower === "judo" || lower === "дзюдо") return "judo";
+  if (lower === "karate" || lower === "карате") return "karate";
+  if (lower === "taekwondo" || lower === "тхеквондо" || lower === "тхекводно" || lower === "тхэквондо") return "taekwondo";
+  for (const [key, val] of Object.entries(SPORT_TYPE_MAP)) {
+    if (key.toLowerCase() === lower || val.toLowerCase() === lower) {
+      return key.toLowerCase();
+    }
+  }
+  return lower;
 }
 
 export function getErrorMessage(error: unknown, defaultMessage: string): string {
@@ -137,4 +151,59 @@ export function getAgeAsOf(birthDateStr: string, refDateStr: string): number {
     age--;
   }
   return age;
+}
+
+export function parseJudoMatchState(rawState: any): JudoMatchState {
+  return {
+    scores: rawState.scores ?? {
+      shiro: { waza_ari: 0, ippon: 0 },
+      ao: { waza_ari: 0, ippon: 0 },
+    },
+    penalties: rawState.penalties ?? {
+      shiro: { shido: 0, hansoku_make: false },
+      ao: { shido: 0, hansoku_make: false },
+    },
+    is_golden_score: rawState.is_golden_score ?? false,
+    osaekomi: rawState.osaekomi ?? {
+      active_for: null,
+      start_timestamp: null,
+    },
+  };
+}
+
+export function parseTaekwondoMatchState(rawState: any): TaekwondoMatchState {
+  return {
+    scores: rawState.scores ?? { chung: 0, hong: 0 },
+    gam_jeoms: rawState.gam_jeoms ?? { chung: 0, hong: 0 },
+    current_round: rawState.current_round ?? 1,
+    rounds_won: rawState.rounds_won ?? { chung: 0, hong: 0 },
+    round_history: rawState.round_history ?? [],
+  };
+}
+
+export function getFighterName(
+  match: Match | null | undefined,
+  corner: "shiro" | "ao" | "chung" | "hong" | "first" | "second"
+): string {
+  if (!match) return "";
+  const isFirst = corner === "shiro" || corner === "chung" || corner === "first";
+  const reg = isFirst ? match.reg_first : match.reg_second;
+  const athlete = isFirst ? match.athlete_first : match.athlete_second;
+  if (athlete) return formatAthleteName(athlete);
+  if (reg) return formatRegistrationName(reg);
+  return "TBD";
+}
+
+export function getFighterClub(
+  match: Match | null | undefined,
+  corner: "shiro" | "ao" | "chung" | "hong" | "first" | "second"
+): string {
+  if (!match) return "";
+  const isFirst = corner === "shiro" || corner === "chung" || corner === "first";
+  const reg = isFirst ? match.reg_first : match.reg_second;
+  const athlete = isFirst ? match.athlete_first : match.athlete_second;
+  if (athlete) {
+    return reg?.team?.name ?? "";
+  }
+  return reg?.athlete?.club?.name ?? reg?.team?.club?.name ?? "";
 }

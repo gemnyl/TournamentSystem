@@ -83,6 +83,7 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
             "submit_flags",
             "toggle_timer",
             "set_judges_count",
+            "ruleset_event",
         )
         if self.action in judge_actions:
             return [IsJudgeOrOrganizer()]
@@ -97,11 +98,18 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     def _execute_and_broadcast(self, match, action_func, *args, **kwargs):
         try:
             action_func(*args, **kwargs)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+
+            if isinstance(exc, ValueError | TypeError | DjangoValidationError | DRFValidationError):
+                msg = exc.message if hasattr(exc, "message") else str(exc)
+                return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+            raise exc
         match.refresh_from_db()
         last_event = match.events.order_by("-sequence").first()
-        broadcast_match_event(match, last_event)
+        if last_event:
+            broadcast_match_event(match, last_event)
         return Response(MatchSerializer(match).data)
 
     def _execute_service_action(self, match, action_func, *args, **kwargs):
@@ -140,6 +148,28 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
         svc = MatchService(match)
         return self._execute_and_broadcast(
             match, svc.apply_score, corner, action_key, judge=request.user, is_undo=is_undo
+        )
+
+    @action(detail=True, methods=["post"], url_path="ruleset_event")
+    def ruleset_event(self, request, pk=None):
+        """POST /api/matches/{id}/ruleset_event/
+        Тіло: {"event_type": str, "payload": dict}
+        """
+        match = self.get_object()
+        event_type = request.data.get("event_type")
+        payload = request.data.get("payload")
+
+        if not event_type:
+            return Response(
+                {"detail": "Поле 'event_type' є обов'язковим."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if payload is None:
+            payload = {}
+
+        svc = MatchService(match)
+        return self._execute_and_broadcast(
+            match, svc.apply_ruleset_event, event_type, payload, judge=request.user
         )
 
     @action(detail=True, methods=["post"], url_path="set_senshu")

@@ -45,6 +45,7 @@ class TeamBoutSerializer(serializers.ModelSerializer):
             "timer_elapsed_ms",
             "timer_duration_ms",
             "show_timer",
+            "match_state",
         ]
 
 
@@ -150,6 +151,7 @@ class MatchSerializer(serializers.ModelSerializer):
             "tatami_number",
             "is_bracket_reset",
             "redirect_to_match_id",
+            "match_state",
         ]
         read_only_fields = fields
 
@@ -168,6 +170,8 @@ class BracketNodeSerializer(serializers.Serializer):
 class MatchEventSerializer(serializers.ModelSerializer):
     """Серіалайзер події поєдинку."""
 
+    judge_name = serializers.CharField(source="judge.get_full_name", read_only=True)
+
     class Meta:
         model = MatchEvent
         fields = [
@@ -177,5 +181,6 @@ class MatchEventSerializer(serializers.ModelSerializer):
             "event_type",
             "payload",
             "judge",
+            "judge_name",
             "created_at",
         ]

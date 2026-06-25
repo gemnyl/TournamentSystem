@@ -48,9 +48,9 @@ class TatamiViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
-            from apps.accounts.permissions import IsOrganizer
+            from apps.accounts.permissions import IsTournamentChiefJudgeOrOrganizer
 
-            return [IsOrganizer()]
+            return [IsTournamentChiefJudgeOrOrganizer()]
         if self.action in ("assign_match", "release", "set_active_results_category"):
             from apps.accounts.permissions import IsJudgeOrOrganizer
 
@@ -59,7 +59,9 @@ class TatamiViewSet(viewsets.ModelViewSet):
 
     def _check_judge_assignment(self, request, tatami) -> Response | None:
         if request.user.is_authenticated and request.user.role == "judge":
-            if tatami.assigned_judge_id != request.user.id:
+            is_assigned_judge = tatami.assigned_judge_id == request.user.id
+            is_chief_judge = tatami.tournament.chief_judge_id == request.user.id
+            if not is_assigned_judge and not is_chief_judge:
                 return Response(
                     {"detail": self.NOT_ASSIGNED_MESSAGE},
                     status=status.HTTP_403_FORBIDDEN,

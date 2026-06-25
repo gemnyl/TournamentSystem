@@ -686,6 +686,26 @@ class TestCategoryNLPImport(TournamentAPITestCase):
         res = parse_category_name("18+ (double)", "Karate")
         self.assertEqual(res["bracket_format"], Category.BracketFormat.DOUBLE_ELIMINATION)
 
+        # Robust ruleset parsing tests
+        res = parse_category_name("boy 12-14yo", "тхекводно")
+        self.assertEqual(res["ruleset_key"], "taekwondo_wt")
+
+        res = parse_category_name("boy judo 10+", "any sport")
+        self.assertEqual(res["ruleset_key"], "judo_ijf")
+
+        res = parse_category_name("ката дівчата", "karate")
+        self.assertEqual(res["ruleset_key"], "karate_kata")
+
+        # Ukrainian sport_type inputs
+        res = parse_category_name("12-13 років, хлопці, -40 кг", "дзюдо")
+        self.assertEqual(res["ruleset_key"], "judo_ijf")
+        res = parse_category_name("14-15 років, дівчата, до 45 кг", "Дзюдо")
+        self.assertEqual(res["ruleset_key"], "judo_ijf")
+        res = parse_category_name("10-11 років, хлопці, -30 кг", "Тхеквондо")
+        self.assertEqual(res["ruleset_key"], "taekwondo_wt")
+        res = parse_category_name("10-11 років, хлопці, -30 кг", "Карате")
+        self.assertEqual(res["ruleset_key"], "karate_wkf")
+
 
 class CategoryResultsTestCase(TournamentAPITestCase):
     """Тести для розрахунку результатів категорії (Results Engine)."""
@@ -2353,3 +2373,240 @@ class TournamentDashboardEnhancementsTestCase(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class TestTournamentChiefJudgePermissions(TournamentAPITestCase):
+    """Тести для перевірки прав головного судді (Chief Judge)."""
+
+    def setUp(self):
+        super().setUp()
+        # Призначаємо головного суддю
+        self.tournament.chief_judge = self.judge
+        self.tournament.save()
+
+    def test_chief_judge_can_generate_and_delete_bracket(self):
+        """Головний суддя може генерувати та видаляти сітку для категорій свого турніру."""
+        self._login(self.judge)
+
+        # Створимо принаймні 2 учасників для генерації
+        self._create_athlete(1)
+        self._create_athlete(2)
+
+        # Генерація сітки
+        response = self.client.post(f"/api/categories/{self.category.pk}/generate_bracket/")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Видалення сітки
+        response = self.client.post(f"/api/categories/{self.category.pk}/delete_bracket/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_chief_judge_can_manage_tatami_assignments(self):
+        """Головний суддя може призначати категорії на татамі."""
+        self._login(self.judge)
+
+        # Створюємо татамі для турніру
+        from apps.tatamis.models import Tatami
+
+        tatami = Tatami.objects.create(
+            tournament=self.tournament, number=1, name="Tatami 1", is_active=True
+        )
+
+        response = self.client.post(
+            f"/api/categories/{self.category.pk}/assign_tatami/",
+            {"tatami_id": tatami.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_chief_judge_cannot_modify_critical_tournament_fields(self):
+        """Головний суддя не може змінювати дати проведення чи статус турніру."""
+        self._login(self.judge)
+
+        payload = {
+            "title": "Зміна назви головним суддею",
+            "start_date": (timezone.now() + timedelta(days=5)).isoformat(),
+        }
+
+        # Редагування турніру через PATCH
+        url = f"/api/tournaments/{self.tournament.pk}/"
+        response = self.client.patch(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_chief_judge_cannot_delete_registrations(self):
+        """Головний суддя не може видаляти реєстрації спортсменів."""
+        self._create_athlete(1)
+        registration = Registration.objects.first()
+
+        self._login(self.judge)
+        response = self.client.delete(f"/api/registrations/{registration.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_chief_judge_must_be_in_judges_list_validation(self):
+        """Валідація не дозволяє встановити головного суддю,
+        якщо він не входить до списку суддів турніру.
+        """
+        self._login(self.organizer)
+
+        # Скинемо спочатку chief_judge, щоб перевірити оновлення
+        self.tournament.chief_judge = None
+        self.tournament.save()
+
+        payload = {"chief_judge": self.judge.id, "judges": []}
+        url = f"/api/tournaments/{self.tournament.pk}/"
+        response = self.client.patch(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("chief_judge", response.data)
+
+    def test_chief_judge_successfully_set(self):
+        """Організатор може успішно встановити головного суддю,
+        якщо він доданий до списку суддів турніру.
+        """
+        self._login(self.organizer)
+
+        # Скинемо спочатку chief_judge та очистимо judges
+        self.tournament.chief_judge = None
+        self.tournament.judges.clear()
+        self.tournament.save()
+
+        payload = {"chief_judge": self.judge.id, "judges": [self.judge.id]}
+        url = f"/api/tournaments/{self.tournament.pk}/"
+        response = self.client.patch(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.tournament.refresh_from_db()
+        self.assertEqual(self.tournament.chief_judge_id, self.judge.id)
+        self.assertTrue(self.tournament.judges.filter(id=self.judge.id).exists())
+
+
+class TestRegistrationFiltersAndSearch(TournamentAPITestCase):
+    """Тести для фільтрації, пошуку та сортування реєстрацій (учасників)."""
+
+    def setUp(self):
+        super().setUp()
+        self.club_c = Club.objects.create(name="Альфа Клуб", region="Одеса")
+        self.club_d = Club.objects.create(name="Бета Клуб", region="Харків")
+
+        # Створимо кілька атлетів з різними параметрами
+        # Атлет 1: Альфа Клуб, Male, weight 70
+        self.athlete1 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_c,
+            first_name="Олексій",
+            last_name="Борисов",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=70,
+        )
+        self.reg1 = Registration.objects.create(
+            athlete=self.athlete1,
+            category=self.category,
+            status=Registration.Status.CONFIRMED,
+        )
+
+        # Атлет 2: Бета Клуб, Male, weight 74
+        self.athlete2 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_d,
+            first_name="Дмитро",
+            last_name="Петров",
+            gender=Athlete.Gender.MALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=74,
+        )
+        self.reg2 = Registration.objects.create(
+            athlete=self.athlete2,
+            category=self.category,
+            status=Registration.Status.CONFIRMED,
+        )
+
+        # Атлет 3: Альфа Клуб, Female, weight 65 (у іншій категорії)
+        self.category_female = Category.objects.create(
+            name="Жінки -65кг",
+            tournament=self.tournament,
+            allowed_gender=Category.AllowedGender.FEMALE,
+            min_age=18,
+            max_age=35,
+            min_weight=60,
+            max_weight=65,
+        )
+        self.athlete3 = Athlete.objects.create(
+            coach=self.coach,
+            club=self.club_c,
+            first_name="Марія",
+            last_name="Антонова",
+            gender=Athlete.Gender.FEMALE,
+            birth_date=date(2000, 1, 1),
+            base_weight=65,
+        )
+        self.reg3 = Registration.objects.create(
+            athlete=self.athlete3,
+            category=self.category_female,
+            status=Registration.Status.CONFIRMED,
+        )
+
+    def test_filter_by_category(self):
+        """Перевірка фільтрації реєстрацій за категорією."""
+        self._login(self.organizer)
+        response = self.client.get(f"/api/registrations/?category={self.category_female.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Має бути тільки reg3
+        results = response.data.get("results", response.data)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], self.reg3.id)
+
+    def test_filter_by_club(self):
+        """Перевірка фільтрації реєстрацій за клубом спортсмена."""
+        self._login(self.organizer)
+        response = self.client.get(f"/api/registrations/?athlete__club={self.club_c.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        # Очікуємо reg1 та reg3 (обидва з Альфа Клуб)
+        self.assertEqual(len(results), 2)
+        reg_ids = [r["id"] for r in results]
+        self.assertIn(self.reg1.id, reg_ids)
+        self.assertIn(self.reg3.id, reg_ids)
+
+    def test_filter_by_gender(self):
+        """Перевірка фільтрації реєстрацій за статтю."""
+        self._login(self.organizer)
+        response = self.client.get("/api/registrations/?athlete__gender=female")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        # Очікуємо лише reg3 (female)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], self.reg3.id)
+
+    def test_search_registrations(self):
+        """Перевірка пошуку за ім'ям, прізвищем або назвою клубу."""
+        self._login(self.organizer)
+
+        # Пошук за прізвищем "Петров"
+        response = self.client.get("/api/registrations/?search=Петров")
+        results = response.data.get("results", response.data)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], self.reg2.id)
+
+        # Пошук за назвою клубу "Альфа"
+        response = self.client.get("/api/registrations/?search=Альфа")
+        results = response.data.get("results", response.data)
+        self.assertEqual(len(results), 2)
+
+    def test_ordering_registrations(self):
+        """Перевірка сортування реєстрацій."""
+        self._login(self.organizer)
+
+        # Сортування за вагою спортсмена (через remapped athlete__weight параметр)
+        response = self.client.get("/api/registrations/?ordering=athlete__weight")
+        results = response.data.get("results", response.data)
+        # Очікувана черга ваг: 65, 70, 74 (reg3, reg1, reg2)
+        self.assertEqual(results[0]["id"], self.reg3.id)
+        self.assertEqual(results[1]["id"], self.reg1.id)
+        self.assertEqual(results[2]["id"], self.reg2.id)
+
+        # Зворотне сортування за прізвищем
+        response = self.client.get("/api/registrations/?ordering=-athlete__last_name")
+        results = response.data.get("results", response.data)
+        # Антонова (А), Борисов (Б), Петров (П)
+        # -> Зворотне: Петров (reg2), Борисов (reg1), Антонова (reg3)
+        self.assertEqual(results[0]["id"], self.reg2.id)
+        self.assertEqual(results[1]["id"], self.reg1.id)
+        self.assertEqual(results[2]["id"], self.reg3.id)

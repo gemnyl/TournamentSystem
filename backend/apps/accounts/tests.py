@@ -1,15 +1,20 @@
 from datetime import timedelta
 
 import django.core.signing as signing
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Club, User
+from apps.accounts.permissions import (
+    IsTournamentChiefJudgeOrOrganizer,
+    IsTournamentStaffOrOrganizer,
+)
 from apps.accounts.serializers import UserRegistrationSerializer
 from apps.athletes.models import Athlete
+from apps.matches.models import Match
 from apps.tournaments.models import Category, Registration, Tournament
 
 
@@ -548,3 +553,111 @@ class AccountsAPITestCase(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class TournamentPermissionsTest(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.superuser = User.objects.create_superuser(
+            email="perm_super@test.com", password="password"
+        )
+        self.organizer = User.objects.create_user(
+            email="perm_org@test.com", password="password", role=User.Role.ORGANIZER
+        )
+        self.judge = User.objects.create_user(
+            email="perm_judge@test.com", password="password", role=User.Role.JUDGE
+        )
+        self.coach = User.objects.create_user(
+            email="perm_coach@test.com", password="password", role=User.Role.COACH
+        )
+
+        self.tournament = Tournament.objects.create(
+            organizer=self.organizer,
+            chief_judge=self.judge,
+            title="Perm Test Tournament",
+            sport_type="Judo",
+            location="Dnipro",
+            start_date="2026-06-25T10:00:00Z",
+            end_date="2026-06-26T18:00:00Z",
+            status=Tournament.Status.ACTIVE,
+        )
+        self.tournament.staff_members.add(self.coach)
+
+        self.category = Category.objects.create(
+            tournament=self.tournament,
+            name="Perm Test Cat",
+            allowed_gender=Category.AllowedGender.MALE,
+            min_age=10,
+            max_age=99,
+            min_weight=10,
+            max_weight=150,
+        )
+        self.match = Match.objects.create(
+            category=self.category,
+            round_index=1,
+            match_order=1,
+        )
+
+    def test_is_tournament_staff_or_organizer(self):
+        perm = IsTournamentStaffOrOrganizer()
+
+        # GET request with query param tournament
+        req = self.factory.get(f"/?tournament={self.tournament.id}")
+        req.query_params = req.GET
+
+        # Admin -> True
+        req.user = self.superuser
+        self.assertTrue(perm.has_permission(req, None))
+
+        # Organizer -> True
+        req.user = self.organizer
+        self.assertTrue(perm.has_permission(req, None))
+
+        # Staff coach -> True
+        req.user = self.coach
+        self.assertTrue(perm.has_permission(req, None))
+
+        # Chief judge -> True
+        req.user = self.judge
+        self.assertTrue(perm.has_permission(req, None))
+
+        # Other user not associated
+        other_user = User.objects.create_user(
+            email="perm_other@test.com", password="password", role=User.Role.JUDGE
+        )
+        req.user = other_user
+        self.assertFalse(perm.has_permission(req, None))
+
+        # Test POST request payload resolution of category
+        req_post = self.factory.post("/")
+        req_post.data = {"category_id": self.category.id}
+        req_post.user = other_user
+        self.assertFalse(perm.has_permission(req_post, None))
+
+        # Test POST request payload resolution of match
+        req_post_match = self.factory.post("/")
+        req_post_match.data = {"match": self.match.id}
+        req_post_match.user = self.coach
+        self.assertTrue(perm.has_permission(req_post_match, None))
+
+    def test_is_tournament_chief_judge_or_organizer(self):
+        perm = IsTournamentChiefJudgeOrOrganizer()
+
+        req = self.factory.get(f"/?tournament={self.tournament.id}")
+        req.query_params = req.GET
+
+        # Chief judge -> True
+        req.user = self.judge
+        self.assertTrue(perm.has_permission(req, None))
+
+        # Staff coach -> False (not chief judge)
+        req.user = self.coach
+        self.assertFalse(perm.has_permission(req, None))
+
+        # Test has_object_permission
+        req_obj = self.factory.get("/")
+        req_obj.user = self.judge
+        self.assertTrue(perm.has_object_permission(req_obj, None, self.match))
+
+        req_obj.user = self.coach
+        self.assertFalse(perm.has_object_permission(req_obj, None, self.match))

@@ -14,29 +14,30 @@ from django.db import migrations
 
 def backfill_match_tatami(apps, schema_editor):
     Tatami = apps.get_model("tatamis", "Tatami")
+    db_alias = schema_editor.connection.alias
 
     updated = 0
-    for tatami in Tatami.objects.select_related("current_match").filter(
+    for tatami in Tatami.objects.using(db_alias).select_related("current_match").filter(
         current_match__isnull=False
     ):
         match = tatami.current_match
         if match.tatami_id != tatami.pk:
             match.tatami_id = tatami.pk
-            match.save(update_fields=["tatami_id"])
+            match.save(using=db_alias, update_fields=["tatami_id"])
             updated += 1
 
     print(f"\n  [backfill_match_tatami] Оновлено {updated} матч(ів).")
 
 
 def reverse_backfill(apps, schema_editor):
-    # Скасування: обнулити tatami_id для матчів що є current_match татамі
     Tatami = apps.get_model("tatamis", "Tatami")
-    for tatami in Tatami.objects.select_related("current_match").filter(
+    db_alias = schema_editor.connection.alias
+    for tatami in Tatami.objects.using(db_alias).select_related("current_match").filter(
         current_match__isnull=False
     ):
         match = tatami.current_match
         match.tatami_id = None
-        match.save(update_fields=["tatami_id"])
+        match.save(using=db_alias, update_fields=["tatami_id"])
 
 
 class Migration(migrations.Migration):

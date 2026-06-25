@@ -2,11 +2,12 @@ from django.contrib import admin
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
 from unfold.decorators import display
 
+from apps.common.admin import BaseTournamentAdminMixin
 from apps.tatamis.models import Tatami
 
 
 @admin.register(Tatami)
-class TatamiAdmin(UnfoldModelAdmin):
+class TatamiAdmin(BaseTournamentAdminMixin, UnfoldModelAdmin):
     list_select_related = ["tournament", "current_match", "assigned_judge"]
     autocomplete_fields = ["assigned_judge", "current_match", "tournament"]
 
@@ -20,7 +21,11 @@ class TatamiAdmin(UnfoldModelAdmin):
         if request.user.role == User.Role.ORGANIZER:
             return queryset.filter(tournament__organizer=request.user)
         if request.user.role == User.Role.JUDGE:
-            return queryset.filter(assigned_judge=request.user)
+            from django.db.models import Q
+
+            return queryset.filter(
+                Q(assigned_judge=request.user) | Q(tournament__chief_judge=request.user)
+            ).distinct()
         return queryset.none()
 
     list_display = (

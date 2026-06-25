@@ -86,7 +86,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
         className={cn(
           "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-between text-left outline-none focus:ring-1 focus:ring-amber-500/50",
           !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
-          isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 animate-pulse bg-amber-500/5",
+          isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 bg-amber-500/5",
           "w-72 py-1.5",
           (match.team_bouts?.length ?? 0) > 3 ? "h-[180px]" : "h-[140px]"
         )}
@@ -193,7 +193,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
         className={cn(
           "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm flex flex-col justify-center text-left outline-none focus:ring-1 focus:ring-amber-500/50",
           !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
-          isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 animate-pulse bg-amber-500/5",
+          isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 bg-amber-500/5",
           isBye && "opacity-30",
           "w-60 min-h-[60px] py-1"
         )}
@@ -232,7 +232,7 @@ export function MatchCard({ match, compact = false, onClick }: MatchCardProps) {
         "rounded-xl border backdrop-blur-md bg-card/65 border-border/70 transition-all duration-300 overflow-hidden shadow-sm text-left outline-none focus:ring-1 focus:ring-amber-500/50",
         "h-[108px] py-1.5 flex flex-col justify-center",
         !isBye && onClick && "cursor-pointer hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/5 hover:translate-y-[-1px]",
-        isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 animate-pulse bg-amber-500/5",
+        isLive && "border-amber-500/80 shadow-md shadow-amber-500/20 ring-2 ring-amber-500/55 bg-amber-500/5",
         isBye && "opacity-30",
         compact ? "min-w-[220px] w-60" : "min-w-[280px] w-72"
       )}

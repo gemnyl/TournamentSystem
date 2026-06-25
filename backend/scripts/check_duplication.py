@@ -52,10 +52,42 @@ def load_file_lines_with_meta(path: Path) -> list[tuple[int, str]]:
     try:
         with open(path, encoding="utf-8") as f:
             lines = []
+            in_import = False
             for i, line in enumerate(f, 1):
                 cleaned = clean_line(line)
-                if cleaned:
-                    lines.append((i, cleaned))
+                if not cleaned:
+                    continue
+                # Skip import lines (JS/TS/Python)
+                is_import_start = (
+                    cleaned.startswith("import ")
+                    or cleaned.startswith("import{")
+                    or cleaned.startswith("from ")
+                )
+                if is_import_start:
+                    is_single_line = (
+                        ";" in cleaned
+                        or cleaned.endswith("'")
+                        or cleaned.endswith('"')
+                        or (
+                            not cleaned.endswith("\\")
+                            and "(" not in cleaned
+                            and "import" in cleaned
+                        )
+                    )
+                    if not is_single_line:
+                        in_import = True
+                    continue
+                if in_import:
+                    is_import_end = (
+                        ";" in cleaned
+                        or cleaned.endswith("'")
+                        or cleaned.endswith('"')
+                        or cleaned.endswith(")")
+                    )
+                    if is_import_end:
+                        in_import = False
+                    continue
+                lines.append((i, cleaned))
             return lines
     except Exception:
         return []
@@ -112,6 +144,11 @@ def get_git_untracked_files(root_dir: Path) -> set[Path]:
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except AttributeError:
+        pass
+
     root_dir = Path(__file__).resolve().parent.parent.parent
 
     analyze_all = "--all" in sys.argv
@@ -163,6 +200,11 @@ def main():
     # Index blocks
     block_map = {}
     for i in range(total_lines - BLOCK_SIZE + 1):
+        # Ensure block does not cross file boundaries
+        file_start = line_meta[i][0]
+        file_end = line_meta[i + BLOCK_SIZE - 1][0]
+        if file_start != file_end:
+            continue
         block = tuple(all_lines[i : i + BLOCK_SIZE])
         block_map.setdefault(block, []).append(i)
 

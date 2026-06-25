@@ -616,6 +616,39 @@ class TestMatchService(MatchAPITestCase):
         with self.assertRaises(ValidationError):
             svc.reset_match()
 
+    def test_ruleset_round_transition_resets_timer(self):
+        # Configure category ruleset to Taekwondo WT
+        self.category.ruleset_key = "taekwondo_wt"
+        self.category.save()
+
+        match = self.first_round_match
+        match.timer_elapsed_ms = 45000
+        match.timer_status = Match.TimerStatus.RUNNING
+        match.save()
+
+        # Call next round via MatchService
+        svc = MatchService(match)
+        svc.apply_ruleset_event("NEXT_ROUND", {"round_winner": "chung"})
+
+        match.refresh_from_db()
+        self.assertEqual(match.timer_status, Match.TimerStatus.NOT_STARTED)
+        self.assertEqual(match.timer_elapsed_ms, 0)
+        self.assertIsNone(match.timer_started_at)
+
+    def test_completed_match_actions_rejected(self):
+        match = self.first_round_match
+        match.status = Match.Status.COMPLETED
+        match.save()
+
+        svc = MatchService(match)
+        # Try to apply score
+        with self.assertRaises(ValueError):
+            svc.apply_score("aka", "yuko")
+
+        # Try to start timer
+        with self.assertRaises(ValueError):
+            svc.timer_start()
+
 
 class TestSetSenshuEndpoint(MatchAPITestCase):
     """Тест ендпоінту set_senshu через HTTP."""
@@ -1458,3 +1491,19 @@ class TestMatchSequencingAndRollback(MatchAPITestCase):
         # Перевіряємо, що татамі знову показує відкочений матч m
         self.tatami.refresh_from_db()
         self.assertEqual(self.tatami.current_match_id, m.id)
+
+
+class TestMatchViewSetCompletedTournament(MatchAPITestCase):
+    def test_completed_tournament_raises_permission_denied(self):
+        self._login(self.judge)
+
+        # Mark tournament as completed
+        self.tournament.status = "completed"
+        self.tournament.save()
+
+        # Try updating score
+        url = f"/api/matches/{self.first_round_match.pk}/update_score/"
+        payload = {"corner": "aka", "action_key": "yuko"}
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("Турнір завершено", response.data["detail"])

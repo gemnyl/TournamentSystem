@@ -6,6 +6,7 @@
 """
 
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -133,6 +134,10 @@ DATABASES = {
         "CONN_MAX_AGE": 60,
     }
 }
+
+
+if "test" in sys.argv or "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv):
+    DATABASES["default"]["CONN_MAX_AGE"] = 0
 
 # ---------------------------------------------------------------------------
 # Django Channels — Redis channel layer

@@ -88,6 +88,7 @@ export interface Tournament {
   id: number;
   title: string;        // бекенд повертає "title", не "name"
   sport_type: string;   // бекенд повертає "sport_type", не "description"
+  description?: string | null;
   location: string;
   start_date: string;   // ISO datetime з timezone
   end_date: string;
@@ -111,6 +112,9 @@ export interface Tournament {
   platform_fee_status?: "paid" | "unpaid";
   platform_fee_amount?: number;
   staff_members?: number[];
+  judges?: number[];
+  chief_judge?: number | null;
+  chief_judge_name?: string | null;
   use_check_in?: boolean;
   categories?: Category[];
 }
@@ -251,6 +255,40 @@ export interface Match {
   tournament_title?: string;
   is_bracket_reset?: boolean;
   redirect_to_match_id?: number | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  match_state?: TaekwondoMatchState | JudoMatchState | any;
+}
+
+export interface TaekwondoRoundHistoryEntry {
+  round: number;
+  scores: { chung: number; hong: number };
+  gam_jeoms: { chung: number; hong: number };
+  winner: "chung" | "hong" | null;
+  win_method?: string;
+}
+
+export interface TaekwondoMatchState {
+  current_round: number;
+  rounds_won: { chung: number; hong: number };
+  scores: { chung: number; hong: number };
+  gam_jeoms: { chung: number; hong: number };
+  round_history: TaekwondoRoundHistoryEntry[];
+}
+
+export interface JudoMatchState {
+  scores: {
+    shiro: { waza_ari: number; ippon: number };
+    ao: { waza_ari: number; ippon: number };
+  };
+  penalties: {
+    shiro: { shido: number; hansoku_make: boolean };
+    ao: { shido: number; hansoku_make: boolean };
+  };
+  is_golden_score: boolean;
+  osaekomi: {
+    active_for: "shiro" | "ao" | null;
+    start_timestamp: number | null;
+  };
 }
 
 // ─── Рулсет ─────────────────────────────────────────────────────────────────
@@ -366,4 +404,41 @@ export interface PaginatedResponse<T> {
   next: string | null;
   previous: string | null;
   results: T[];
+}
+
+export interface MatchEvent {
+  id: number;
+  match: number;
+  sequence: number;
+  event_type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: Record<string, any>;
+  judge: number | null;
+  judge_name: string | null;
+  created_at: string;
+}
+
+export interface CategoryResult {
+  place: number | null;
+  wins: number;
+  draws: number;
+  losses: number;
+  points: number;
+  scores_scored: number;
+  scores_conceded: number;
+  name?: string;
+  club?: string;
+  registration: {
+    id: number;
+    place?: number | null;
+    athlete?: {
+      full_name: string;
+      club?: { name?: string; region?: string } | null;
+    } | null;
+    team?: {
+      name: string;
+      club?: { name?: string; region?: string } | null;
+      athletes?: { last_name: string }[] | null;
+    } | null;
+  };
 }
