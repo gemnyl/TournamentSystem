@@ -9,6 +9,10 @@ from rest_framework import serializers
 from apps.accounts.models import Club, RoleRequest, User
 
 PASSWORD_KEY = "password"  # noqa: S105 # NOSONAR
+PASSWORD_CONFIRM_KEY = "password_confirm"  # noqa: S105 # NOSONAR
+OLD_PASSWORD_KEY = "old_password"  # noqa: S105 # NOSONAR
+NEW_PASSWORD_KEY = "new_password"  # noqa: S105 # NOSONAR
+NEW_PASSWORD_CONFIRM_KEY = "new_password_confirm"  # noqa: S105 # NOSONAR
 
 
 class ClubSerializer(serializers.ModelSerializer):
@@ -163,8 +167,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             "patronymic",
             "role",
             "club_id",
-            "password",
-            "password_confirm",
+            PASSWORD_KEY,
+            PASSWORD_CONFIRM_KEY,
             "phone",
             "birth_date",
             "gender",
@@ -173,8 +177,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        if attrs[PASSWORD_KEY] != attrs.pop("password_confirm"):  # noqa: S105 # NOSONAR
-            raise serializers.ValidationError({"password_confirm": "Паролі не співпадають."})
+        if attrs[PASSWORD_KEY] != attrs.pop(PASSWORD_CONFIRM_KEY):  # noqa: S105 # NOSONAR
+            raise serializers.ValidationError({PASSWORD_CONFIRM_KEY: "Паролі не співпадають."})
         return attrs
 
     def create(self, validated_data):
@@ -309,8 +313,8 @@ class ChangePasswordSerializer(serializers.Serializer):
     new_password_confirm = serializers.CharField(write_only=True, required=True)
 
     def validate(self, attrs):
-        if attrs["new_password"] != attrs["new_password_confirm"]:
+        if attrs[NEW_PASSWORD_KEY] != attrs[NEW_PASSWORD_CONFIRM_KEY]:  # noqa: S105 # NOSONAR
             raise serializers.ValidationError(
-                {"new_password_confirm": _("Нові паролі не співпадають.")}
+                {NEW_PASSWORD_CONFIRM_KEY: _("Нові паролі не співпадають.")}
             )
         return attrs

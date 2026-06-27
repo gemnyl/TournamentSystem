@@ -2917,6 +2917,7 @@ export default function CoachDashboardPage() {
                                           key={ath.id}
                                           htmlFor={`team-athlete-chk-${ath.id}`}
                                           className="p-2.5 flex items-center gap-3 hover:bg-muted/30 cursor-pointer transition-colors"
+                                          aria-label={`${ath.last_name} ${ath.first_name}`}
                                         >
                                           <input
                                             id={`team-athlete-chk-${ath.id}`}
