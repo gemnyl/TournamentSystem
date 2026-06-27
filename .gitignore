@@ -41,3 +41,8 @@ Thumbs.db
 *.bak
 *.tmp
 backend/coverage.xml
+
+# Playwright
+test-results/
+playwright-report/
+cookies.txt

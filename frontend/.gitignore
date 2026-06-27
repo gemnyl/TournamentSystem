@@ -13,6 +13,11 @@ dist-ssr
 *.local
 *.tsbuildinfo
 
+# Playwright
+e2e/.auth/
+test-results/
+playwright-report/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

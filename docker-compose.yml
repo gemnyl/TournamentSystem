@@ -13,6 +13,8 @@
 #   відкрий http://localhost  (фронт)
 ##
 
+name: tournament-webservice
+
 services:
 
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
@@ -65,6 +67,8 @@ services:
       MONOBANK_TOKEN:        ${MONOBANK_TOKEN:-}
       MONOBANK_USE_SANDBOX:  ${MONOBANK_USE_SANDBOX:-True}
       MONOBANK_MOCK_PAYMENTS: ${MONOBANK_MOCK_PAYMENTS:-True}
+      # Relaxed for local dev / E2E; the 5/min default still applies in prod.
+      AUTH_THROTTLE_RATE:    ${AUTH_THROTTLE_RATE:-10000/minute}
     volumes:
       - ./backend:/app
       - staticfiles:/app/staticfiles
