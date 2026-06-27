@@ -13,6 +13,8 @@
 #   відкрий http://localhost  (фронт)
 ##
 
+name: tournament-webservice
+
 services:
 
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
