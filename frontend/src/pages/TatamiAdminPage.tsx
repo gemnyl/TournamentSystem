@@ -960,7 +960,7 @@ export default function TatamiAdminPage() {
             <span className="font-bold text-foreground">
               {deleteConfirm?.name || `Татамі ${deleteConfirm?.number}`}
             </span>
-            ? Ця дія є незворотною.
+            ?{' '}Ця дія є незворотною.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirm(null)}>

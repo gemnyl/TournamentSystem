@@ -66,8 +66,8 @@ export default function JudoOperatorPanel({
   const handleCustomTimeAdjust = (sign: number) => {
     const inputElement = customTimeInputRef.current;
     if (!inputElement || !inputElement.value) return;
-    const secs = parseInt(inputElement.value, 10);
-    if (isNaN(secs) || secs <= 0) return;
+    const secs = Number.parseInt(inputElement.value, 10);
+    if (Number.isNaN(secs) || secs <= 0) return;
     timerAction("add_time", { delta_ms: sign * secs * 1000 });
     inputElement.value = "";
   };

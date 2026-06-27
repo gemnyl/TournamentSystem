@@ -132,15 +132,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data } = await authApi.get<User>("/me/");
       set({ user: data, isLoading: false, isInitialized: true });
     } catch (error: unknown) {
-      // Django DRF повертає 403 для неавторизованих (не 401)
-      // Обидва коди означають "не залогінений"
-      const status = (error as { response?: { status?: number } })?.response?.status;
-      if (status === 401 || status === 403) {
-        set({ user: null, isLoading: false, isInitialized: true });
-      } else {
-        // Мережева помилка або щось інше — теж ініціалізуємо
-        set({ user: null, isLoading: false, isInitialized: true });
-      }
+      // Django DRF повертає 403 для неавторизованих (не 401).
+      // За будь-якої помилки (неавторизований чи мережева помилка) скидаємо користувача та завершуємо ініціалізацію.
+      set({ user: null, isLoading: false, isInitialized: true });
     }
   },
 }));

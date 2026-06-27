@@ -517,18 +517,20 @@ def parse_category_name(name_str: str, sport_type: str) -> dict:
 
     # Extract patterns and replace them in the search string for weight
     range_match = re.search(
-        r"(\d+)\s*[-–]\s*(\d+)\s*(?:років|року|р\.?|years|y\.?o\.?)?",
+        r"(\d{1,3})\s{0,10}[-–]\s{0,10}(\d{1,3})\s{0,10}(?:років|року|р\b|р\.|years|y\.?o\.?)?",
         name_clean,
         re.IGNORECASE,
     )
     u_match = re.search(r"\bU\s*(\d+)\b", name_clean, re.IGNORECASE)
     plus_match = re.search(
-        r"(\d+)\s*(?:років|р\.|р|years|\+)\s*(?:\+|і старше|понад|and older)",
+        r"(\d{1,3})\s{0,10}(?:(?:років|р\.|р|years)\s{0,10}"
+        r"(?:\+|і старше|понад|and older)|\+\s{0,10}"
+        r"(?:і старше|понад|and older))",
         name_clean,
         re.IGNORECASE,
     )
     if not plus_match:
-        plus_match = re.search(r"(\d+)\s*\+", name_clean)
+        plus_match = re.search(r"(\d{1,3})\s{0,10}\+", name_clean)
 
     under_match = re.search(
         r"(?:до|under)\s*(\d+)\s*(?:років|р\.|р|years|yo)?",
@@ -556,7 +558,7 @@ def parse_category_name(name_str: str, sport_type: str) -> dict:
         weight_search_str = weight_search_str.replace(under_match.group(0), "")
     else:
         simple_age = re.search(
-            r"(\d+)\s*(?:років|р\.|р|року|years|yo)\b", name_clean, re.IGNORECASE
+            r"(\d{1,3})\s{0,10}(?:років|р\.|р|року|years|yo)\b", name_clean, re.IGNORECASE
         )
         if simple_age:
             min_age = int(simple_age.group(1))
@@ -568,7 +570,7 @@ def parse_category_name(name_str: str, sport_type: str) -> dict:
     max_weight = None
 
     w_range = re.search(
-        r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*(?:кг|kg)?",
+        r"(\d{1,3}(?:\.\d{1,2})?)\s{0,10}[-–]\s{0,10}(\d{1,3}(?:\.\d{1,2})?)\s{0,10}(?:кг|kg)?",
         weight_search_str,
         re.IGNORECASE,
     )
