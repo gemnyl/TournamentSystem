@@ -131,7 +131,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const { data } = await authApi.get<User>("/me/");
       set({ user: data, isLoading: false, isInitialized: true });
-    } catch (error: unknown) {
+    } catch {
       // Django DRF повертає 403 для неавторизованих (не 401).
       // За будь-якої помилки (неавторизований чи мережева помилка) скидаємо користувача та завершуємо ініціалізацію.
       set({ user: null, isLoading: false, isInitialized: true });
