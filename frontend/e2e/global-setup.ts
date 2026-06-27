@@ -7,7 +7,6 @@
  *      so specs authenticate WITHOUT calling the throttled login endpoint.
  *   3. Records baseline object ids in .auth/seed-ids.json.
  */
-import type { FullConfig } from "@playwright/test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,7 +39,7 @@ function cookie(name: string, value: string, httpOnly: boolean): Cookie {
   };
 }
 
-export default async function globalSetup(_config: FullConfig): Promise<void> {
+export default async function globalSetup(): Promise<void> {
   mkdirSync(AUTH_DIR, { recursive: true });
 
   const seed = readFileSync(join(HERE, "seed.py"), "utf-8");
@@ -62,7 +61,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   }
 
   const roles: string[] = [];
-  let ids: Record<string, number> = {};
+  const ids: Record<string, number> = {};
 
   for (const raw of output.split("\n")) {
     const line = raw.trim();
@@ -87,6 +86,5 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   }
 
   writeFileSync(join(AUTH_DIR, "seed-ids.json"), JSON.stringify(ids, null, 2));
-  // eslint-disable-next-line no-console
   console.log(`[e2e] seeded roles: ${roles.join(", ")} | ids: ${JSON.stringify(ids)}`);
 }

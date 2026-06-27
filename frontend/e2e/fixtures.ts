@@ -11,8 +11,8 @@ import { test as base, expect } from "@playwright/test";
 import { type SeedIds, loadSeedIds } from "./helpers/roles";
 
 export const test = base.extend<{ seedIds: SeedIds }>({
-  seedIds: async ({}, use) => {
-    await use(loadSeedIds());
+  seedIds: async (_, provide) => {
+    await provide(loadSeedIds());
   },
 });
 

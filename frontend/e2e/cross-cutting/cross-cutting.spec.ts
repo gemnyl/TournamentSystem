@@ -2,7 +2,6 @@ import { request } from "@playwright/test";
 import { test, expect } from "../fixtures";
 import { storageStateFor, csrfTokenFor } from "../helpers/roles";
 import { newApiContext, createTournament } from "../helpers/api";
-import { deleteTournament } from "../helpers/backend";
 
 /**
  * Group 23 — cross-cutting concerns.
