@@ -4,7 +4,7 @@
     "pk": 1,
     "fields": {
       "name": "Клуб Додзьо",
-      "region": "Житомир"
+      "region": "zhytomyr"
     }
   },
   {
@@ -12,10 +12,9 @@
     "pk": 2,
     "fields": {
       "name": "Клуб Легіон",
-      "region": "Київ"
+      "region": "kyiv_city"
     }
   },
-
   {
     "model": "accounts.user",
     "pk": 1,
@@ -26,8 +25,21 @@
       "email": "organizer@demo.local",
       "first_name": "Олег",
       "last_name": "Організаторенко",
+      "patronymic": "Миколайович",
       "role": "organizer",
-      "club": 1,
+      "club": null,
+      "photo": null,
+      "phone": "+380671112233",
+      "birth_date": "1990-05-12",
+      "gender": "male",
+      "skill_level": "",
+      "referee_category": "",
+      "email_verified": true,
+      "name_locked": true,
+      "is_club_leader": false,
+      "credit_limit": 1000,
+      "is_banned": false,
+      "ban_reason": "",
       "is_active": true,
       "is_staff": false,
       "date_joined": "2026-01-01T10:00:00Z",
@@ -45,8 +57,21 @@
       "email": "coach1@demo.local",
       "first_name": "Іван",
       "last_name": "Тренеренко",
+      "patronymic": "Олександрович",
       "role": "coach",
       "club": 1,
+      "photo": null,
+      "phone": "+380674445566",
+      "birth_date": "1985-08-20",
+      "gender": "male",
+      "skill_level": "Чорний пояс 2 дан",
+      "referee_category": "",
+      "email_verified": true,
+      "name_locked": true,
+      "is_club_leader": true,
+      "credit_limit": 1000,
+      "is_banned": false,
+      "ban_reason": "",
       "is_active": true,
       "is_staff": false,
       "date_joined": "2026-01-01T10:00:00Z",
@@ -64,8 +89,21 @@
       "email": "coach2@demo.local",
       "first_name": "Марія",
       "last_name": "Коченко",
+      "patronymic": "Іванівна",
       "role": "coach",
       "club": 2,
+      "photo": null,
+      "phone": "+380507778899",
+      "birth_date": "1988-11-05",
+      "gender": "female",
+      "skill_level": "Коричневий пояс",
+      "referee_category": "",
+      "email_verified": true,
+      "name_locked": true,
+      "is_club_leader": true,
+      "credit_limit": 1000,
+      "is_banned": false,
+      "ban_reason": "",
       "is_active": true,
       "is_staff": false,
       "date_joined": "2026-01-01T10:00:00Z",
@@ -83,10 +121,21 @@
       "email": "judge@demo.local",
       "first_name": "Петро",
       "last_name": "Суддяренко",
-      "patronymic": "",
-      "photo": null,
+      "patronymic": "Васильович",
       "role": "judge",
       "club": null,
+      "photo": null,
+      "phone": "+380631234567",
+      "birth_date": "1978-03-15",
+      "gender": "male",
+      "skill_level": "Чорний пояс 4 дан",
+      "referee_category": "Національна категорія",
+      "email_verified": true,
+      "name_locked": true,
+      "is_club_leader": false,
+      "credit_limit": 1000,
+      "is_banned": false,
+      "ban_reason": "",
       "is_active": true,
       "is_staff": false,
       "date_joined": "2026-01-01T10:00:00Z",
@@ -105,9 +154,20 @@
       "first_name": "Микола",
       "last_name": "Персоналенко",
       "patronymic": "Іванович",
-      "photo": null,
       "role": "staff",
       "club": null,
+      "photo": null,
+      "phone": "+380993332211",
+      "birth_date": "1995-02-18",
+      "gender": "male",
+      "skill_level": "",
+      "referee_category": "",
+      "email_verified": true,
+      "name_locked": true,
+      "is_club_leader": false,
+      "credit_limit": 1000,
+      "is_banned": false,
+      "ban_reason": "",
       "is_active": true,
       "is_staff": false,
       "date_joined": "2026-01-01T10:00:00Z",
@@ -126,9 +186,20 @@
       "first_name": "Оксана",
       "last_name": "Суддівська",
       "patronymic": "Петрівна",
-      "photo": null,
       "role": "staff",
       "club": null,
+      "photo": null,
+      "phone": "+380689998877",
+      "birth_date": "1994-07-22",
+      "gender": "female",
+      "skill_level": "",
+      "referee_category": "",
+      "email_verified": true,
+      "name_locked": true,
+      "is_club_leader": false,
+      "credit_limit": 1000,
+      "is_banned": false,
+      "ban_reason": "",
       "is_active": true,
       "is_staff": false,
       "date_joined": "2026-01-01T10:00:00Z",
@@ -136,7 +207,74 @@
       "user_permissions": []
     }
   },
-
+  {
+    "model": "accounts.user",
+    "pk": 11,
+    "fields": {
+      "password": "pbkdf2_sha256$870000$demo0000000000000000000000000011$aBcDeFgHiJkLmNoPqRsTuVwXyZ012345678=",
+      "last_login": null,
+      "is_superuser": true,
+      "email": "admin@demo.local",
+      "first_name": "Адмін",
+      "last_name": "Адміненко",
+      "patronymic": "Адмінович",
+      "role": "admin",
+      "club": null,
+      "photo": null,
+      "phone": "+380442223344",
+      "birth_date": "1980-01-01",
+      "gender": "male",
+      "skill_level": "",
+      "referee_category": "",
+      "email_verified": true,
+      "name_locked": true,
+      "is_club_leader": false,
+      "credit_limit": 1000,
+      "is_banned": false,
+      "ban_reason": "",
+      "is_active": true,
+      "is_staff": true,
+      "date_joined": "2026-01-01T10:00:00Z",
+      "groups": [],
+      "user_permissions": []
+    }
+  },
+  {
+    "model": "accounts.rolerequest",
+    "pk": 1,
+    "fields": {
+      "user": 2,
+      "requested_role": "coach",
+      "club": 1,
+      "referee_category": "",
+      "status": "approved",
+      "details": "Сертифікований тренер карате",
+      "document": null,
+      "photo_with_id": null,
+      "created_at": "2026-01-01T10:00:00Z",
+      "reviewed_at": "2026-01-01T12:00:00Z",
+      "reviewed_by": 11,
+      "review_notes": "Схвалено адміністратором при налаштуванні системи"
+    }
+  },
+  {
+    "model": "accounts.rolerequest",
+    "pk": 2,
+    "fields": {
+      "user": 10,
+      "requested_role": "judge",
+      "club": null,
+      "referee_category": "Друга категорія",
+      "status": "pending",
+      "details": "Запит на отримання суддівських прав",
+      "document": null,
+      "photo_with_id": null,
+      "created_at": "2026-06-20T12:00:00Z",
+      "reviewed_at": null,
+      "reviewed_by": null,
+      "review_notes": ""
+    }
+  },
   {
     "model": "athletes.athlete",
     "pk": 1,
@@ -145,10 +283,12 @@
       "club": 1,
       "first_name": "Андрій",
       "last_name": "Бойко",
+      "patronymic": "Сергійович",
       "gender": "male",
       "birth_date": "2000-03-15",
       "base_weight": "73.50",
-      "skill_level": "Чорний пояс 1 дан"
+      "skill_level": "Чорний пояс 1 дан",
+      "photo": null
     }
   },
   {
@@ -159,10 +299,12 @@
       "club": 1,
       "first_name": "Василь",
       "last_name": "Гриценко",
+      "patronymic": "Михайлович",
       "gender": "male",
       "birth_date": "2001-07-22",
       "base_weight": "74.00",
-      "skill_level": "Коричневий пояс"
+      "skill_level": "Коричневий пояс",
+      "photo": null
     }
   },
   {
@@ -173,10 +315,12 @@
       "club": 1,
       "first_name": "Дмитро",
       "last_name": "Захаренко",
+      "patronymic": "Олегович",
       "gender": "male",
       "birth_date": "1999-11-05",
       "base_weight": "72.80",
-      "skill_level": "Чорний пояс 1 дан"
+      "skill_level": "Чорний пояс 1 дан",
+      "photo": null
     }
   },
   {
@@ -187,10 +331,12 @@
       "club": 1,
       "first_name": "Євген",
       "last_name": "Кравченко",
+      "patronymic": "Вікторович",
       "gender": "male",
       "birth_date": "2002-04-18",
       "base_weight": "74.90",
-      "skill_level": "Синій пояс"
+      "skill_level": "Синій пояс",
+      "photo": null
     }
   },
   {
@@ -201,10 +347,12 @@
       "club": 2,
       "first_name": "Максим",
       "last_name": "Литвиненко",
+      "patronymic": "Анатолійович",
       "gender": "male",
       "birth_date": "2000-08-30",
       "base_weight": "73.20",
-      "skill_level": "Чорний пояс 2 дан"
+      "skill_level": "Чорний пояс 2 дан",
+      "photo": null
     }
   },
   {
@@ -215,10 +363,12 @@
       "club": 2,
       "first_name": "Олексій",
       "last_name": "Мельниченко",
+      "patronymic": "Дмитрович",
       "gender": "male",
       "birth_date": "2001-02-14",
       "base_weight": "74.50",
-      "skill_level": "Чорний пояс 1 дан"
+      "skill_level": "Чорний пояс 1 дан",
+      "photo": null
     }
   },
   {
@@ -229,10 +379,12 @@
       "club": 2,
       "first_name": "Сергій",
       "last_name": "Пономаренко",
+      "patronymic": "Юрійович",
       "gender": "male",
       "birth_date": "1998-06-09",
       "base_weight": "72.60",
-      "skill_level": "Чорний пояс 1 дан"
+      "skill_level": "Чорний пояс 1 дан",
+      "photo": null
     }
   },
   {
@@ -243,28 +395,137 @@
       "club": 2,
       "first_name": "Тарас",
       "last_name": "Романенко",
+      "patronymic": "Ігорович",
       "gender": "male",
       "birth_date": "2003-09-25",
       "base_weight": "73.80",
-      "skill_level": "Синій пояс"
+      "skill_level": "Синій пояс",
+      "photo": null
     }
   },
-
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 1,
+    "fields": {
+      "athlete": 1,
+      "weight": "73.50",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 2,
+    "fields": {
+      "athlete": 2,
+      "weight": "74.00",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 3,
+    "fields": {
+      "athlete": 3,
+      "weight": "72.80",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 4,
+    "fields": {
+      "athlete": 4,
+      "weight": "74.90",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 5,
+    "fields": {
+      "athlete": 5,
+      "weight": "73.20",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 6,
+    "fields": {
+      "athlete": 6,
+      "weight": "74.50",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 7,
+    "fields": {
+      "athlete": 7,
+      "weight": "72.60",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.athleteweightlog",
+    "pk": 8,
+    "fields": {
+      "athlete": 8,
+      "weight": "73.80",
+      "logged_at": "2026-04-10T10:00:00Z",
+      "notes": "Початкова вага при реєстрації"
+    }
+  },
+  {
+    "model": "athletes.team",
+    "pk": 1,
+    "fields": {
+      "name": "Легіон-1",
+      "club": 2,
+      "coach": 3,
+      "athletes": [5, 6, 7]
+    }
+  },
   {
     "model": "tournaments.tournament",
     "pk": 1,
     "fields": {
       "organizer": 1,
       "title": "Відкритий Кубок Чернівців з Карате 2026",
+      "description": "Щорічний турнір з карате WKF серед дорослих та юніорів.",
       "sport_type": "Карате",
       "location": "Палац спорту «Колос», Чернівці",
       "start_date": "2026-06-14T09:00:00Z",
       "end_date": "2026-06-14T18:00:00Z",
-      "status": "registration",
+      "registration_start": "2026-04-01T09:00:00Z",
+      "registration_end": "2026-06-10T18:00:00Z",
+      "completed_at": null,
+      "status": "active",
+      "weigh_in_required": true,
+      "online_payment_enabled": true,
+      "payment_details": "Оплата благодійного внеску через платформу (Monobank API)",
+      "base_registration_fee": 500,
+      "ruleset_prices": {"karate_wkf": 500},
+      "base_team_registration_fee": 1200,
+      "ruleset_team_prices": {"karate_wkf": 1200},
+      "commission_payer": "buyer",
+      "refund_policy": "refundable",
+      "platform_fee_status": "paid",
+      "platform_fee_amount": 0,
+      "staff_members": [9, 10],
+      "chief_judge": 4,
+      "judges": [4],
+      "use_check_in": true,
       "created_at": "2026-04-01T12:00:00Z"
     }
   },
-
   {
     "model": "tournaments.category",
     "pk": 1,
@@ -277,19 +538,33 @@
       "min_weight": "70.00",
       "max_weight": "75.00",
       "allowed_skill_level": "",
-      "bracket_format": "single_elimination"
+      "is_team": false,
+      "team_size": 3,
+      "registration_fee": null,
+      "bracket_format": "single_elimination",
+      "double_elim_type": "",
+      "ruleset_key": "karate_wkf",
+      "match_duration_seconds": 180,
+      "schedule_order": 1,
+      "two_third_places": true,
+      "judges_count": null
     }
   },
-
   {
     "model": "tournaments.registration",
     "pk": 1,
     "fields": {
       "athlete": 1,
+      "team": null,
       "category": 1,
       "seed_number": 1,
       "recorded_weight": "73.50",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:00:00Z"
     }
   },
@@ -298,10 +573,16 @@
     "pk": 2,
     "fields": {
       "athlete": 2,
+      "team": null,
       "category": 1,
       "seed_number": 2,
       "recorded_weight": "74.00",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:05:00Z"
     }
   },
@@ -310,10 +591,16 @@
     "pk": 3,
     "fields": {
       "athlete": 3,
+      "team": null,
       "category": 1,
       "seed_number": 3,
       "recorded_weight": "72.80",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:10:00Z"
     }
   },
@@ -322,10 +609,16 @@
     "pk": 4,
     "fields": {
       "athlete": 4,
+      "team": null,
       "category": 1,
       "seed_number": 4,
       "recorded_weight": "74.90",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:15:00Z"
     }
   },
@@ -334,10 +627,16 @@
     "pk": 5,
     "fields": {
       "athlete": 5,
+      "team": null,
       "category": 1,
       "seed_number": 5,
       "recorded_weight": "73.20",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:20:00Z"
     }
   },
@@ -346,10 +645,16 @@
     "pk": 6,
     "fields": {
       "athlete": 6,
+      "team": null,
       "category": 1,
       "seed_number": 6,
       "recorded_weight": "74.50",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:25:00Z"
     }
   },
@@ -358,10 +663,16 @@
     "pk": 7,
     "fields": {
       "athlete": 7,
+      "team": null,
       "category": 1,
       "seed_number": 7,
       "recorded_weight": "72.60",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:30:00Z"
     }
   },
@@ -370,11 +681,405 @@
     "pk": 8,
     "fields": {
       "athlete": 8,
+      "team": null,
       "category": 1,
       "seed_number": 8,
       "recorded_weight": "73.80",
       "status": "confirmed",
+      "payment_status": "paid",
+      "payment_method": "online",
+      "offline_refund_status": "none",
+      "place": null,
+      "checked_in": true,
       "created_at": "2026-04-10T10:35:00Z"
+    }
+  },
+  {
+    "model": "billing.paymentinvoice",
+    "pk": 1,
+    "fields": {
+      "user": 2,
+      "invoice_id": "inv_demo_00001",
+      "payment_type": "registrations",
+      "amount": 2000,
+      "status": "paid",
+      "registrations": [1, 2, 3, 4],
+      "tournament": null,
+      "tournaments": [],
+      "payment_url": "https://send.monobank.ua/jar/demo_invoice_1",
+      "created_at": "2026-04-10T10:30:00Z",
+      "updated_at": "2026-04-10T10:32:00Z"
+    }
+  },
+  {
+    "model": "billing.paymentinvoice",
+    "pk": 2,
+    "fields": {
+      "user": 3,
+      "invoice_id": "inv_demo_00002",
+      "payment_type": "registrations",
+      "amount": 2000,
+      "status": "paid",
+      "registrations": [5, 6, 7, 8],
+      "tournament": null,
+      "tournaments": [],
+      "payment_url": "https://send.monobank.ua/jar/demo_invoice_2",
+      "created_at": "2026-04-10T10:30:00Z",
+      "updated_at": "2026-04-10T10:32:00Z"
+    }
+  },
+  {
+    "model": "billing.transaction",
+    "pk": 1,
+    "fields": {
+      "invoice": 1,
+      "user": 2,
+      "payment_type": "registrations",
+      "transaction_type": "payment",
+      "amount": 2000,
+      "method": "online",
+      "reference": "ref_demo_tr_00001",
+      "monobank_receipt_id": "receipt_demo_00001",
+      "receipt_url": "https://demo.monobank.ua/receipt/receipt_demo_00001",
+      "requires_refund": false,
+      "created_at": "2026-04-10T10:32:00Z"
+    }
+  },
+  {
+    "model": "billing.transaction",
+    "pk": 2,
+    "fields": {
+      "invoice": 2,
+      "user": 3,
+      "payment_type": "registrations",
+      "transaction_type": "payment",
+      "amount": 2000,
+      "method": "online",
+      "reference": "ref_demo_tr_00002",
+      "monobank_receipt_id": "receipt_demo_00002",
+      "receipt_url": "https://demo.monobank.ua/receipt/receipt_demo_00002",
+      "requires_refund": false,
+      "created_at": "2026-04-10T10:32:00Z"
+    }
+  },
+  {
+    "model": "billing.payoutrequest",
+    "pk": 1,
+    "fields": {
+      "tournament": 1,
+      "organizer": 1,
+      "amount": 3800,
+      "bank_details": "UA123456789012345678901234567",
+      "iban": "UA123456789012345678901234567",
+      "recipient_name": "Олег Організаторенко",
+      "recipient_code": "2912345678",
+      "purpose": "Виплата накопичених благодійних внесків за мінусом комісії платформи (5%)",
+      "status": "pending",
+      "created_at": "2026-06-24T14:00:00Z",
+      "updated_at": "2026-06-24T14:00:00Z"
+    }
+  },
+  {
+    "model": "tatamis.tatami",
+    "pk": 1,
+    "fields": {
+      "assigned_judge": 4,
+      "tournament": 1,
+      "number": 1,
+      "name": "Татамі 1",
+      "current_match": null,
+      "active_results_category": null,
+      "is_active": true,
+      "scoreboard_ip": null,
+      "scoreboard_connected": false
+    }
+  },
+  {
+    "model": "tatamis.tatami",
+    "pk": 2,
+    "fields": {
+      "assigned_judge": null,
+      "tournament": 1,
+      "number": 2,
+      "name": "Татамі 2",
+      "current_match": null,
+      "active_results_category": null,
+      "is_active": true,
+      "scoreboard_ip": null,
+      "scoreboard_connected": false
+    }
+  },
+  {
+    "model": "matches.match",
+    "pk": 1,
+    "fields": {
+      "category": 1,
+      "parent_team_match": null,
+      "athlete_first": 1,
+      "athlete_second": 8,
+      "bout_index": null,
+      "reg_first": 1,
+      "reg_second": 8,
+      "round_index": 1,
+      "match_order": 1,
+      "tatami": 1,
+      "score_first": 3,
+      "score_second": 1,
+      "warnings_first": 1,
+      "warnings_second": 0,
+      "winner": 1,
+      "win_method": "points",
+      "match_duration": 120,
+      "next_match": 5,
+      "loser_next_match": null,
+      "senshu": "none",
+      "flags_aka": null,
+      "flags_ao": null,
+      "judges_count": null,
+      "status": "completed",
+      "started_at": "2026-06-14T09:10:00Z",
+      "completed_at": "2026-06-14T09:12:00Z",
+      "timer_status": "finished",
+      "timer_started_at": null,
+      "timer_elapsed_ms": 120000,
+      "timer_duration_ms": 180000,
+      "show_timer": false,
+      "is_bracket_reset": false,
+      "match_state": {}
+    }
+  },
+  {
+    "model": "matches.match",
+    "pk": 2,
+    "fields": {
+      "category": 1,
+      "parent_team_match": null,
+      "athlete_first": 4,
+      "athlete_second": 5,
+      "bout_index": null,
+      "reg_first": 4,
+      "reg_second": 5,
+      "round_index": 1,
+      "match_order": 2,
+      "tatami": 1,
+      "score_first": 0,
+      "score_second": 2,
+      "warnings_first": 0,
+      "warnings_second": 0,
+      "winner": 5,
+      "win_method": "points",
+      "match_duration": 115,
+      "next_match": 5,
+      "loser_next_match": null,
+      "senshu": "none",
+      "flags_aka": null,
+      "flags_ao": null,
+      "judges_count": null,
+      "status": "completed",
+      "started_at": "2026-06-14T09:15:00Z",
+      "completed_at": "2026-06-14T09:17:00Z",
+      "timer_status": "finished",
+      "timer_started_at": null,
+      "timer_elapsed_ms": 115000,
+      "timer_duration_ms": 180000,
+      "show_timer": false,
+      "is_bracket_reset": false,
+      "match_state": {}
+    }
+  },
+  {
+    "model": "matches.match",
+    "pk": 3,
+    "fields": {
+      "category": 1,
+      "parent_team_match": null,
+      "athlete_first": 2,
+      "athlete_second": 7,
+      "bout_index": null,
+      "reg_first": 2,
+      "reg_second": 7,
+      "round_index": 1,
+      "match_order": 3,
+      "tatami": 2,
+      "score_first": 4,
+      "score_second": 2,
+      "warnings_first": 0,
+      "warnings_second": 2,
+      "winner": 2,
+      "win_method": "points",
+      "match_duration": 180,
+      "next_match": 6,
+      "loser_next_match": null,
+      "senshu": "none",
+      "flags_aka": null,
+      "flags_ao": null,
+      "judges_count": null,
+      "status": "completed",
+      "started_at": "2026-06-14T09:10:00Z",
+      "completed_at": "2026-06-14T09:13:00Z",
+      "timer_status": "finished",
+      "timer_started_at": null,
+      "timer_elapsed_ms": 180000,
+      "timer_duration_ms": 180000,
+      "show_timer": false,
+      "is_bracket_reset": false,
+      "match_state": {}
+    }
+  },
+  {
+    "model": "matches.match",
+    "pk": 4,
+    "fields": {
+      "category": 1,
+      "parent_team_match": null,
+      "athlete_first": 3,
+      "athlete_second": 6,
+      "bout_index": null,
+      "reg_first": 3,
+      "reg_second": 6,
+      "round_index": 1,
+      "match_order": 4,
+      "tatami": 2,
+      "score_first": 1,
+      "score_second": 3,
+      "warnings_first": 1,
+      "warnings_second": 1,
+      "winner": 6,
+      "win_method": "points",
+      "match_duration": 150,
+      "next_match": 6,
+      "loser_next_match": null,
+      "senshu": "none",
+      "flags_aka": null,
+      "flags_ao": null,
+      "judges_count": null,
+      "status": "completed",
+      "started_at": "2026-06-14T09:20:00Z",
+      "completed_at": "2026-06-14T09:22:30Z",
+      "timer_status": "finished",
+      "timer_started_at": null,
+      "timer_elapsed_ms": 150000,
+      "timer_duration_ms": 180000,
+      "show_timer": false,
+      "is_bracket_reset": false,
+      "match_state": {}
+    }
+  },
+  {
+    "model": "matches.match",
+    "pk": 5,
+    "fields": {
+      "category": 1,
+      "parent_team_match": null,
+      "athlete_first": 1,
+      "athlete_second": 5,
+      "bout_index": null,
+      "reg_first": 1,
+      "reg_second": 5,
+      "round_index": 2,
+      "match_order": 1,
+      "tatami": 1,
+      "score_first": 2,
+      "score_second": 0,
+      "warnings_first": 0,
+      "warnings_second": 1,
+      "winner": 1,
+      "win_method": "points",
+      "match_duration": 180,
+      "next_match": 7,
+      "loser_next_match": null,
+      "senshu": "none",
+      "flags_aka": null,
+      "flags_ao": null,
+      "judges_count": null,
+      "status": "completed",
+      "started_at": "2026-06-14T10:00:00Z",
+      "completed_at": "2026-06-14T10:03:00Z",
+      "timer_status": "finished",
+      "timer_started_at": null,
+      "timer_elapsed_ms": 180000,
+      "timer_duration_ms": 180000,
+      "show_timer": false,
+      "is_bracket_reset": false,
+      "match_state": {}
+    }
+  },
+  {
+    "model": "matches.match",
+    "pk": 6,
+    "fields": {
+      "category": 1,
+      "parent_team_match": null,
+      "athlete_first": 2,
+      "athlete_second": 6,
+      "bout_index": null,
+      "reg_first": 2,
+      "reg_second": 6,
+      "round_index": 2,
+      "match_order": 2,
+      "tatami": 1,
+      "score_first": 1,
+      "score_second": 1,
+      "warnings_first": 0,
+      "warnings_second": 0,
+      "winner": null,
+      "win_method": "",
+      "match_duration": null,
+      "next_match": 7,
+      "loser_next_match": null,
+      "senshu": "none",
+      "flags_aka": null,
+      "flags_ao": null,
+      "judges_count": null,
+      "status": "ongoing",
+      "started_at": "2026-06-14T10:15:00Z",
+      "completed_at": null,
+      "timer_status": "running",
+      "timer_started_at": "2026-06-14T10:17:15Z",
+      "timer_elapsed_ms": 45000,
+      "timer_duration_ms": 180000,
+      "show_timer": true,
+      "is_bracket_reset": false,
+      "match_state": {}
+    }
+  },
+  {
+    "model": "matches.match",
+    "pk": 7,
+    "fields": {
+      "category": 1,
+      "parent_team_match": null,
+      "athlete_first": 1,
+      "athlete_second": null,
+      "bout_index": null,
+      "reg_first": 1,
+      "reg_second": null,
+      "round_index": 3,
+      "match_order": 1,
+      "tatami": 1,
+      "score_first": 0,
+      "score_second": 0,
+      "warnings_first": 0,
+      "warnings_second": 0,
+      "winner": null,
+      "win_method": "",
+      "match_duration": null,
+      "next_match": null,
+      "loser_next_match": null,
+      "senshu": "none",
+      "flags_aka": null,
+      "flags_ao": null,
+      "judges_count": null,
+      "status": "scheduled",
+      "started_at": null,
+      "completed_at": null,
+      "timer_status": "not_started",
+      "timer_started_at": null,
+      "timer_elapsed_ms": 0,
+      "timer_duration_ms": 180000,
+      "show_timer": false,
+      "is_bracket_reset": false,
+      "match_state": {}
     }
   }
 ]
