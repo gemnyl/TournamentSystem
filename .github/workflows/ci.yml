@@ -239,6 +239,11 @@ jobs:
       - name: Wait for the app to be ready
         run: timeout 180 bash -c 'until curl -sf http://localhost/ >/dev/null; do sleep 3; done'
 
+      # The Dockerfile CMD starts daphne directly without running migrations.
+      # On a fresh CI volume the DB is empty, so we migrate explicitly here.
+      - name: Run Django migrations
+        run: docker exec tournament-webservice-backend-1 python manage.py migrate --noinput
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
