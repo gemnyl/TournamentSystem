@@ -151,6 +151,23 @@ export function ImageCropperDialog({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = 5;
+    if (e.key === "ArrowLeft") {
+      setPosition((prev) => ({ ...prev, x: prev.x - step }));
+      e.preventDefault();
+    } else if (e.key === "ArrowRight") {
+      setPosition((prev) => ({ ...prev, x: prev.x + step }));
+      e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      setPosition((prev) => ({ ...prev, y: prev.y - step }));
+      e.preventDefault();
+    } else if (e.key === "ArrowDown") {
+      setPosition((prev) => ({ ...prev, y: prev.y + step }));
+      e.preventDefault();
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(val) => !val && onClose()}>
       <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 max-w-sm sm:max-w-md">
@@ -162,13 +179,17 @@ export function ImageCropperDialog({
           {/* Crop area wrapper */}
           <div
             ref={containerRef}
-            className="w-[250px] h-[250px] rounded-full border-2 border-amber-500 overflow-hidden relative bg-slate-950 cursor-move select-none flex items-center justify-center"
+            className="w-[250px] h-[250px] rounded-full border-2 border-amber-500 overflow-hidden relative bg-slate-950 cursor-move select-none flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-amber-500"
             style={{
               transform: "translateZ(0)",
               WebkitTransform: "translateZ(0)",
               isolation: "isolate",
               WebkitMaskImage: "-webkit-radial-gradient(white, black)",
             }}
+            role="button"
+            tabIndex={0}
+            aria-label="Область обрізки фотографії. Використовуйте стрілки на клавіатурі для точного позиціонування."
+            onKeyDown={handleKeyDown}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUpOrLeave}
@@ -206,7 +227,7 @@ export function ImageCropperDialog({
               max="4"
               step="0.05"
               value={zoom}
-              onChange={(e) => setZoom(parseFloat(e.target.value))}
+              onChange={(e) => setZoom(Number.parseFloat(e.target.value))}
               className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
             />
             <p className="text-[11px] text-slate-500 text-center mt-1">

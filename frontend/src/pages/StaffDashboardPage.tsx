@@ -370,8 +370,8 @@ export default function StaffDashboardPage() {
   const handleRequestPayout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTournament || !financeReport) return;
-    const amountNum = parseInt(payoutAmount);
-    if (isNaN(amountNum) || amountNum <= 0) {
+    const amountNum = Number.parseInt(payoutAmount, 10);
+    if (Number.isNaN(amountNum) || amountNum <= 0) {
       toast({
         title: "Некоректна сума",
         description: "Будь ласка, вкажіть суму більшу за нуль.",
@@ -2619,14 +2619,15 @@ export default function StaffDashboardPage() {
                                   <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
                                   <div>
                                     <strong className="font-bold block mb-1">Виведення коштів обмежено</strong>
-                                    Виведення коштів доступне лише для завершених турнірів. Поточний статус турніру: <span className="font-semibold">{selectedTournament?.status_display || selectedTournament?.status || "—"}</span>.
+                                    Виведення коштів доступне лише для завершених турнірів. Поточний статус турніру:{' '}<span className="font-semibold">{selectedTournament?.status_display || selectedTournament?.status || "—"}</span>.
                                   </div>
                                 </div>
                               )}
 
                               <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">Сума виплати (UAH)</label>
+                                <label htmlFor="payout-amount" className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">Сума виплати (UAH)</label>
                                 <Input
+                                  id="payout-amount"
                                   type="number"
                                   placeholder={`Макс. ${financeReport.available_balance}`}
                                   value={payoutAmount}
@@ -2640,8 +2641,9 @@ export default function StaffDashboardPage() {
                               </div>
 
                               <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">IBAN отримувача *</label>
+                                <label htmlFor="payout-iban" className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">IBAN отримувача *</label>
                                 <Input
+                                  id="payout-iban"
                                   placeholder="UA0030000000000000000000000"
                                   value={payoutIBAN}
                                   onChange={(e) => setPayoutIBAN(e.target.value)}
@@ -2653,8 +2655,9 @@ export default function StaffDashboardPage() {
                               </div>
 
                               <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">ПІБ отримувача / Назва організації *</label>
+                                <label htmlFor="payout-recipient-name" className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">ПІБ отримувача / Назва організації *</label>
                                 <Input
+                                  id="payout-recipient-name"
                                   placeholder="ФОП Шевченко Тарас Григорович"
                                   value={payoutRecipientName}
                                   onChange={(e) => setPayoutRecipientName(e.target.value)}
@@ -2666,8 +2669,9 @@ export default function StaffDashboardPage() {
                               </div>
 
                               <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">Код ЄДРПОУ / ІПН отримувача *</label>
+                                <label htmlFor="payout-recipient-code" className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">Код ЄДРПОУ / ІПН отримувача *</label>
                                 <Input
+                                  id="payout-recipient-code"
                                   placeholder="1234567890"
                                   value={payoutRecipientCode}
                                   onChange={(e) => setPayoutRecipientCode(e.target.value)}
@@ -2679,8 +2683,9 @@ export default function StaffDashboardPage() {
                               </div>
 
                               <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">Призначення платежу (необов'язково)</label>
+                                <label htmlFor="payout-purpose" className="text-[10px] font-semibold text-slate-500 block uppercase tracking-wider">Призначення платежу (необов'язково)</label>
                                 <Input
+                                  id="payout-purpose"
                                   placeholder="Виплата коштів за участь у турнірі..."
                                   value={payoutPurpose}
                                   onChange={(e) => setPayoutPurpose(e.target.value)}

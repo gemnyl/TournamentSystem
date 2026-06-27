@@ -1050,7 +1050,7 @@ export default function TournamentDetailPage() {
               className="border-green-500/30 text-green-500 hover:bg-green-500/5 hover:text-green-400 relative"
             >
               <Link to={`/tournaments/${id}/day`} className="flex items-center gap-1.5 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />{' '}
                 Live-табло татамі
               </Link>
             </Button>
@@ -1195,7 +1195,7 @@ export default function TournamentDetailPage() {
         <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-2xl font-semibold">
-            Категорії
+            Категорії{' '}
             <span className="ml-2 text-base font-normal text-muted-foreground">({categories.length})</span>
           </h2>
           {isOrgOrAdmin && tournament?.status !== "completed" && (
@@ -1857,7 +1857,7 @@ export default function TournamentDetailPage() {
                   <Select
                     onValueChange={(presetIndex) => {
                       const idx = Number(presetIndex);
-                      if (!isNaN(idx) && presets[idx]) {
+                      if (!Number.isNaN(idx) && presets[idx]) {
                         setBulkRules(presets[idx].rules);
                       }
                     }}

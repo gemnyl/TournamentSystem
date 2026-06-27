@@ -1315,7 +1315,7 @@ export default function OperatorPanelPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               {/* AKA Athlete selection */}
                               <div className="space-y-1.5 text-left">
-                                <label className="text-[10px] font-bold text-red-400 uppercase tracking-wider block select-none">
+                                <label htmlFor={`aka-select-${bout.id}`} className="text-[10px] font-bold text-red-400 uppercase tracking-wider block select-none">
                                   Боєць AKA (Червоний)
                                 </label>
                                 <Select
@@ -1327,7 +1327,7 @@ export default function OperatorPanelPage() {
                                     }));
                                   }}
                                 >
-                                  <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-white text-xs" disabled={availableAka.length === 0 && !assignedAka}>
+                                  <SelectTrigger id={`aka-select-${bout.id}`} className="w-full bg-zinc-900 border-zinc-800 text-white text-xs" disabled={availableAka.length === 0 && !assignedAka}>
                                     <SelectValue placeholder={availableAka.length === 0 && !assignedAka ? "Немає доступних бійців" : "Оберіть бійця зі складу"} />
                                   </SelectTrigger>
                                   <SelectContent className="bg-zinc-950 border-zinc-800 text-white">
@@ -1347,7 +1347,7 @@ export default function OperatorPanelPage() {
 
                               {/* AO Athlete selection */}
                               <div className="space-y-1.5 text-left">
-                                <label className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block select-none">
+                                <label htmlFor={`ao-select-${bout.id}`} className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block select-none">
                                   Боєць AO (Синій)
                                 </label>
                                 <Select
@@ -1359,7 +1359,7 @@ export default function OperatorPanelPage() {
                                     }));
                                   }}
                                 >
-                                  <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-white text-xs" disabled={availableAo.length === 0 && !assignedAo}>
+                                  <SelectTrigger id={`ao-select-${bout.id}`} className="w-full bg-zinc-900 border-zinc-800 text-white text-xs" disabled={availableAo.length === 0 && !assignedAo}>
                                     <SelectValue placeholder={availableAo.length === 0 && !assignedAo ? "Немає доступних бійців" : "Оберіть бійця зі складу"} />
                                   </SelectTrigger>
                                   <SelectContent className="bg-zinc-950 border-zinc-800 text-white">
@@ -1645,7 +1645,7 @@ export default function OperatorPanelPage() {
                             checked={showPlaceholders}
                             onChange={(e) => setShowPlaceholders(e.target.checked)}
                             className="rounded border-zinc-800 bg-zinc-950 text-amber-500 focus:ring-amber-500 focus:ring-offset-zinc-950 w-3 h-3 cursor-pointer"
-                          />
+                          />{' '}
                           Показувати технічні бої (BYE/TBD)
                         </label>
                       </div>

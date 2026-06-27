@@ -2913,8 +2913,13 @@ export default function CoachDashboardPage() {
                                       const isLimitReached = teamRegAthleteIds.length >= selectedCategory.team_size;
 
                                       return (
-                                        <label key={ath.id} className="p-2.5 flex items-center gap-3 hover:bg-muted/30 cursor-pointer transition-colors">
+                                        <label
+                                          key={ath.id}
+                                          htmlFor={`team-athlete-chk-${ath.id}`}
+                                          className="p-2.5 flex items-center gap-3 hover:bg-muted/30 cursor-pointer transition-colors"
+                                        >
                                           <input
+                                            id={`team-athlete-chk-${ath.id}`}
                                             type="checkbox"
                                             checked={isChecked}
                                             disabled={!isChecked && isLimitReached}
@@ -4485,7 +4490,7 @@ export default function CoachDashboardPage() {
 
                     <div className="flex items-center justify-between text-xs pt-1">
                       <span className="text-muted-foreground flex items-center gap-1.5">
-                        Статус:
+                        Статус:{' '}
                         <strong className={cn(
                           "font-bold",
                           isOngoing ? "text-red-500" : m.status === "scheduled" ? "text-amber-500" : "text-muted-foreground"

@@ -84,8 +84,8 @@ export default function TaekwondoOperatorPanel({
   const handleCustomTimeAdjust = (sign: number) => {
     const val = customTimeInputRef.current?.value;
     if (!val) return;
-    const secs = parseInt(val, 10);
-    if (isNaN(secs) || secs <= 0) return;
+    const secs = Number.parseInt(val, 10);
+    if (Number.isNaN(secs) || secs <= 0) return;
     timerAction("add_time", { delta_ms: sign * secs * 1000 });
     if (customTimeInputRef.current) {
       customTimeInputRef.current.value = "";

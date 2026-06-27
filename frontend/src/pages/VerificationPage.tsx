@@ -320,7 +320,7 @@ export default function VerificationPage() {
 
   const handleWeighInSubmit = async () => {
     if (!passData || !targetRegId) return;
-    const weightVal = parseFloat(weighInValue);
+    const weightVal = Number.parseFloat(weighInValue);
     if (Number.isNaN(weightVal) || weightVal <= 0) {
       toast({
         title: "Некоректна вага",

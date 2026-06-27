@@ -8,6 +8,8 @@ from rest_framework import serializers
 
 from apps.accounts.models import Club, RoleRequest, User
 
+PASSWORD_KEY = "password"  # noqa: S105 # NOSONAR
+
 
 class ClubSerializer(serializers.ModelSerializer):
     """Серіалайзер спортивного клубу."""
@@ -171,12 +173,12 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        if attrs["password"] != attrs.pop("password_confirm"):  # NOSONAR
+        if attrs[PASSWORD_KEY] != attrs.pop("password_confirm"):  # noqa: S105 # NOSONAR
             raise serializers.ValidationError({"password_confirm": "Паролі не співпадають."})
         return attrs
 
     def create(self, validated_data):
-        password = validated_data.pop("password")
+        password = validated_data.pop(PASSWORD_KEY)
         # При реєстрації роль користувача спочатку SPECTATOR
         requested_role = validated_data.get("role", User.Role.SPECTATOR)
         validated_data["role"] = User.Role.SPECTATOR
@@ -208,7 +210,7 @@ class LoginSerializer(serializers.Serializer):
         user = authenticate(
             request=self.context.get("request"),
             username=attrs["email"],
-            password=attrs["password"],
+            password=attrs[PASSWORD_KEY],  # noqa: S105 # NOSONAR
         )
         if not user:
             raise serializers.ValidationError("Невірний email або пароль.")

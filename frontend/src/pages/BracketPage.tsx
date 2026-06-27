@@ -410,7 +410,7 @@ export default function BracketPage() {
               checked={showPlaceholders}
               onChange={(e) => setShowPlaceholders(e.target.checked)}
               className="rounded border-zinc-800 bg-zinc-950 text-amber-500 focus:ring-amber-500 focus:ring-offset-zinc-950 w-3.5 h-3.5 cursor-pointer"
-            />
+            />{' '}
             Показувати технічні бої (BYE/TBD)
           </label>
 
