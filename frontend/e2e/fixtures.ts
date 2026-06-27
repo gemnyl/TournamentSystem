@@ -11,7 +11,8 @@ import { test as base, expect } from "@playwright/test";
 import { type SeedIds, loadSeedIds } from "./helpers/roles";
 
 export const test = base.extend<{ seedIds: SeedIds }>({
-  seedIds: async (_, provide) => {
+  // eslint-disable-next-line no-empty-pattern
+  seedIds: async ({}, provide) => {
     await provide(loadSeedIds());
   },
 });
