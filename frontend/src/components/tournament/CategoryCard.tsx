@@ -29,7 +29,7 @@ export function CategoryCard({ category, estimate }: Readonly<CategoryCardProps>
     : "";
 
   let estimateBadge: React.ReactNode = null;
-  if (estimate) {
+  if (estimate && category.status !== "completed") {
     if (estimate.isTatamiActive) {
       if (estimate.isLive) {
         estimateBadge = (
@@ -67,7 +67,7 @@ export function CategoryCard({ category, estimate }: Readonly<CategoryCardProps>
     <Link to={`/categories/${category.id}`} className="block group">
       <Card className={cn(
         "transition-all duration-200 hover:border-amber-500/40 hover:shadow-lg hover:shadow-amber-500/5",
-        estimate?.isLive && "border-green-500/30 bg-green-500/5 hover:border-green-500/50"
+        estimate?.isLive && category.status !== "completed" && "border-green-500/30 bg-green-500/5 hover:border-green-500/50"
       )}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-3">

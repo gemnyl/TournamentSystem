@@ -315,9 +315,8 @@ def _calculate_swiss_standings(matches: list[Match], stats: dict[int, dict]) -> 
 
     completed_matches = [m for m in matches if m.status == Match.Status.COMPLETED]
 
-    # Assign stable random seeds for the random draw fallback
     for r_id in stats:
-        stats[r_id]["random_seed"] = secrets.SystemRandom().random()
+        stats[r_id]["random_seed"] = secrets.randbelow(1_000_000) / 1_000_000.0
 
     # Calculate Buchholz score for each player in two passes
     for r_id in stats:

@@ -10,6 +10,8 @@ import TournamentListPage from "@/pages/TournamentListPage";
 import TournamentDetailPage from "@/pages/TournamentDetailPage";
 import CategoryDetailPage from "@/pages/CategoryDetailPage";
 import BracketPage from "@/pages/BracketPage";
+import PrintCategoryBracketPage from "@/pages/PrintCategoryBracketPage";
+import PrintAllBracketsPage from "@/pages/PrintAllBracketsPage";
 import AthletesPage from "@/pages/AthletesPage";
 import GlobalRatingsPage from "@/pages/GlobalRatingsPage";
 import NotFoundPage from "@/pages/NotFoundPage";
@@ -45,6 +47,9 @@ export default function App() {
             path="/scoreboard/tournament/:tid/tatami/:n"
             element={<ScoreboardPage />}
           />
+          {/* Сторінки друку без лейауту */}
+          <Route path="/categories/:id/print" element={<PrintCategoryBracketPage />} />
+          <Route path="/tournaments/:id/print-brackets" element={<PrintAllBracketsPage />} />
 
           {/* Публічні маршрути З лейаутом (перегляд без логіну) */}
           <Route element={<AppLayout />}>

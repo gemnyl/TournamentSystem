@@ -9,6 +9,7 @@ import { useDragScroll } from "@/hooks/useDragScroll";
 interface RoundRobinTableProps {
   matches: Match[];
   hideMatrix?: boolean;
+  forcePrintMode?: boolean;
 }
 
 interface ParticipantStats {
@@ -172,7 +173,7 @@ function getMedalOrRank(displayRank: number): string {
  * Таблиця round-robin — показує учасників, їх W/D/L та очки.
  * Також рендерить сітку результатів (матриця учасник × учасник).
  */
-export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTableProps) {
+export function RoundRobinTable({ matches, hideMatrix = false, forcePrintMode = false }: RoundRobinTableProps) {
   const dragScroll = useDragScroll();
   // Збираємо унікальних учасників
   const participantsMap = new Map<number, string>();
@@ -229,8 +230,11 @@ export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTable
     <div className="space-y-8 select-none">
       {/* Турнірна таблиця */}
       <div className="space-y-3">
-        <h3 className="font-display text-sm font-bold uppercase tracking-wider text-muted-foreground">Залікова таблиця</h3>
-        <div className="rounded-2xl border border-border/80 backdrop-blur-md bg-card/45 shadow-md overflow-hidden">
+        <h3 className={cn("font-display text-sm font-bold uppercase tracking-wider", forcePrintMode ? "text-zinc-700" : "text-muted-foreground")}>Залікова таблиця</h3>
+        <div className={cn(
+          "rounded-2xl border border-border/80 backdrop-blur-md bg-card/45 shadow-md overflow-hidden",
+          forcePrintMode && "border-2 border-zinc-950 bg-white shadow-none text-zinc-950"
+        )}>
           <Table>
             <TableHeader className="bg-muted/40">
               <TableRow className="hover:bg-transparent border-b border-border/70">
@@ -251,18 +255,22 @@ export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTable
                   <TableRow key={s.regId} className="hover:bg-muted/25 border-b border-border/50 transition-colors">
                     <TableCell className={cn(
                       "text-center font-bold text-xs font-mono",
-                      displayRank === 1 && "text-yellow-400 text-sm",
-                      displayRank === 2 && "text-slate-300",
-                      displayRank === 3 && "text-amber-600",
-                      displayRank > 3 && "text-muted-foreground"
+                      !forcePrintMode && displayRank === 1 && "text-yellow-400 text-sm",
+                      !forcePrintMode && displayRank === 2 && "text-slate-300",
+                      !forcePrintMode && displayRank === 3 && "text-amber-600",
+                      !forcePrintMode && displayRank > 3 && "text-muted-foreground",
+                      forcePrintMode && displayRank === 1 && "text-amber-600 text-sm",
+                      forcePrintMode && displayRank === 2 && "text-zinc-600",
+                      forcePrintMode && displayRank === 3 && "text-zinc-500",
+                      forcePrintMode && displayRank > 3 && "text-zinc-400"
                     )}>
-                      {medal}
+                      {forcePrintMode ? "" : medal}
                     </TableCell>
-                    <TableCell className="font-semibold text-sm text-foreground/90">{s.name}</TableCell>
-                    <TableCell className="text-center text-emerald-400 font-bold font-mono text-sm">{s.wins}</TableCell>
-                    <TableCell className="text-center text-amber-400 font-semibold font-mono text-sm">{s.draws}</TableCell>
-                    <TableCell className="text-center text-rose-400 font-medium font-mono text-sm">{s.losses}</TableCell>
-                    <TableCell className="text-center font-black font-mono text-sm text-amber-400 bg-amber-500/5">{s.points}</TableCell>
+                    <TableCell className={cn("font-semibold text-sm", forcePrintMode ? "text-zinc-950 font-bold" : "text-foreground/90")}>{s.name}</TableCell>
+                    <TableCell className={cn("text-center font-bold font-mono text-sm", forcePrintMode ? "text-emerald-700 font-black" : "text-emerald-400")}>{forcePrintMode ? "" : s.wins}</TableCell>
+                    <TableCell className={cn("text-center font-semibold font-mono text-sm", forcePrintMode ? "text-zinc-700" : "text-amber-400")}>{forcePrintMode ? "" : s.draws}</TableCell>
+                    <TableCell className={cn("text-center font-medium font-mono text-sm", forcePrintMode ? "text-rose-700" : "text-rose-400")}>{forcePrintMode ? "" : s.losses}</TableCell>
+                    <TableCell className={cn("text-center font-black font-mono text-sm", forcePrintMode ? "text-zinc-950 bg-zinc-100 border-l border-zinc-200" : "text-amber-400 bg-amber-500/5")}>{forcePrintMode ? "" : s.points}</TableCell>
                   </TableRow>
                 );
               })}
@@ -274,21 +282,24 @@ export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTable
       {/* Матриця результатів */}
       {!hideMatrix && participants.length <= 12 && (
         <div className="space-y-3">
-          <h3 className="font-display text-sm font-bold uppercase tracking-wider text-muted-foreground">Результати матчів (Матриця)</h3>
+          <h3 className={cn("font-display text-sm font-bold uppercase tracking-wider", forcePrintMode ? "text-zinc-700" : "text-muted-foreground")}>Результати матчів (Матриця)</h3>
           <div
             ref={dragScroll.ref}
             {...dragScroll.props}
-            className="rounded-2xl border border-border/80 bg-card/30 shadow-md overflow-x-auto cursor-grab active:cursor-grabbing select-none"
+            className={cn(
+              "rounded-2xl border border-border/80 bg-card/30 shadow-md overflow-x-auto cursor-grab active:cursor-grabbing select-none",
+              forcePrintMode && "border-2 border-zinc-950 bg-white shadow-none text-zinc-950"
+            )}
           >
             <table className="w-full text-xs border-collapse">
               <thead>
-                <tr className="border-b border-border/70 bg-muted/40">
-                  <th className="p-3 text-left font-bold text-muted-foreground border-r border-border/50 min-w-[150px]">
+                <tr className={cn("border-b", forcePrintMode ? "border-zinc-950 bg-zinc-100" : "border-border/70 bg-muted/40")}>
+                  <th className={cn("p-3 text-left font-bold border-r min-w-[150px]", forcePrintMode ? "border-zinc-950 text-zinc-950" : "border-border/50 text-muted-foreground")}>
                     Учасник
                   </th>
                   {participants.map((p) => (
-                    <th key={p.id} className="p-3 text-center font-bold border-r border-border/30 min-w-[80px] max-w-[80px] text-[10px]">
-                      <span className="block whitespace-normal break-words text-foreground/80 leading-tight" title={p.name}>
+                    <th key={p.id} className={cn("p-3 text-center font-bold border-r min-w-[80px] max-w-[80px] text-[10px]", forcePrintMode ? "border-zinc-950 text-zinc-950" : "border-border/30")}>
+                      <span className={cn("block whitespace-normal break-words leading-tight", forcePrintMode ? "text-zinc-950 font-bold" : "text-foreground/80")} title={p.name}>
                         {p.name}
                       </span>
                     </th>
@@ -297,14 +308,14 @@ export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTable
               </thead>
               <tbody>
                 {participants.map((row) => (
-                  <tr key={row.id} className="hover:bg-muted/20 border-b border-border/40 transition-colors">
-                    <td className="p-3 font-semibold text-foreground/90 border-r border-border/50 whitespace-normal break-words max-w-[220px]" title={row.name}>
+                  <tr key={row.id} className={cn("border-b transition-colors", forcePrintMode ? "border-zinc-950 hover:bg-zinc-50" : "hover:bg-muted/20 border-b border-border/40")}>
+                    <td className={cn("p-3 font-semibold border-r whitespace-normal break-words max-w-[220px]", forcePrintMode ? "border-zinc-950 text-zinc-950 font-bold bg-zinc-50" : "border-r border-border/50 text-foreground/90")} title={row.name}>
                       {row.name}
                     </td>
                     {participants.map((col) => {
                       if (row.id === col.id) {
                         return (
-                          <td key={col.id} className="p-3 text-center border-r border-border/30 bg-muted/30 text-muted-foreground/30 font-bold select-none">
+                          <td key={col.id} className={cn("p-3 text-center border-r font-bold select-none", forcePrintMode ? "border-zinc-950 bg-zinc-200 text-zinc-650" : "border-r border-border/30 bg-muted/30 text-muted-foreground/30")}>
                             —
                           </td>
                         );
@@ -312,8 +323,8 @@ export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTable
                       const res = resultMatrix[`${row.id}-${col.id}`];
                       if (!res) {
                         return (
-                          <td key={col.id} className="p-3 text-center border-r border-border/30 text-muted-foreground/30 font-mono">
-                            TBD
+                          <td key={col.id} className={cn("p-3 text-center border-r font-mono", forcePrintMode ? "border-zinc-950 text-zinc-350" : "border-r border-border/30 text-muted-foreground/30")}>
+                            {forcePrintMode ? "....." : "TBD"}
                           </td>
                         );
                       }
@@ -321,13 +332,16 @@ export function RoundRobinTable({ matches, hideMatrix = false }: RoundRobinTable
                       return (
                         <td
                           key={col.id}
-                          className="p-2 text-center border-r border-border/30 font-mono transition-all duration-200"
+                          className={cn("p-2 text-center border-r font-mono transition-all duration-200", forcePrintMode ? "border-zinc-950 bg-white" : "border-border/30")}
                         >
                           <span className={cn(
                             "inline-flex items-center justify-center px-2 py-1 rounded-lg text-[11px] font-bold font-mono border min-w-[44px]",
-                            res.outcome === "win" && "text-emerald-400 bg-emerald-500/10 border-emerald-500/15 shadow-sm shadow-emerald-500/5",
-                            res.outcome === "loss" && "text-rose-400 bg-rose-500/10 border-rose-500/15",
-                            res.outcome === "draw" && "text-amber-400 bg-amber-500/10 border-amber-500/15"
+                            !forcePrintMode && res.outcome === "win" && "text-emerald-400 bg-emerald-500/10 border-emerald-500/15 shadow-sm shadow-emerald-500/5",
+                            !forcePrintMode && res.outcome === "loss" && "text-rose-400 bg-rose-500/10 border-rose-500/15",
+                            !forcePrintMode && res.outcome === "draw" && "text-amber-400 bg-amber-500/10 border-amber-500/15",
+                            forcePrintMode && res.outcome === "win" && "text-emerald-700 bg-emerald-50 border-emerald-300 font-bold",
+                            forcePrintMode && res.outcome === "loss" && "text-rose-700 bg-rose-50 border-rose-300",
+                            forcePrintMode && res.outcome === "draw" && "text-amber-700 bg-amber-50 border-amber-300"
                           )}>
                             {res.score}
                           </span>

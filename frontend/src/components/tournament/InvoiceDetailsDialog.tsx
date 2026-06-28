@@ -244,7 +244,7 @@ export const InvoiceDetailsDialog: React.FC<InvoiceDetailsDialogProps> = ({
               className="flex-1 sm:flex-none h-9 text-xs border-slate-800 hover:bg-slate-850 hover:text-white bg-slate-900 text-slate-350"
             >
               <Download className="w-3.5 h-3.5 mr-1.5" />
-              Скачати список
+              Завантажити список
             </Button>
           </div>
           <Button

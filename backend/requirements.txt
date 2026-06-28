@@ -12,3 +12,4 @@ django-unfold>=0.30.0
 django-import-export>=4.1.0
 psutil>=5.9.0
 django-filter>=24.0,<25.0
+whitenoise>=6.0,<7.0
