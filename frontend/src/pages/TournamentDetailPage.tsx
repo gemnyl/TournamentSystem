@@ -453,7 +453,7 @@ export default function TournamentDetailPage() {
     resolver: zodResolver(categorySchema),
     defaultValues: {
       allowed_gender: "male",
-      ruleset_key: "karate_wkf",
+      ruleset_key: "",
       two_third_places: true,
       is_team: false,
       team_size: 3,
@@ -695,11 +695,12 @@ export default function TournamentDetailPage() {
     try {
       const { data } = await api.get<RulesetInfo[]>("/rulesets/");
       setRulesets(data);
-      if (data.length > 0) {
-        const filtered = data.filter(r => normalizeSportType(r.sport_type) === normalizeSportType(tournament?.sport_type));
-        const defaultRuleset = filtered.length > 0 ? filtered[0] : data[0];
-        setValue("ruleset_key", defaultRuleset.key);
-        setSelectedRuleset(defaultRuleset);
+      const currentKey = watchRulesetKey;
+      if (currentKey) {
+        const activeRuleset = data.find((r) => r.key === currentKey);
+        if (activeRuleset) {
+          setSelectedRuleset(activeRuleset);
+        }
       }
     } catch {
       // ігноруємо помилки
@@ -886,75 +887,11 @@ export default function TournamentDetailPage() {
                         {(() => {
                           const { categoryEstimates } = estimateSchedule(tatamis, matches, catsInGroup, undefined, tournament?.start_date);
                           return (
-                            <Table>
-                              <TableHeader className="bg-zinc-950/50">
-                                <TableRow className="border-b border-zinc-800 hover:bg-transparent">
-                                  <TableHead className="text-zinc-400">Назва</TableHead>
-                                  <TableHead className="text-zinc-400">Вікова група</TableHead>
-                                  <TableHead className="text-zinc-400">Вага</TableHead>
-                                  <TableHead className="text-zinc-400">Правила</TableHead>
-                                  <TableHead className="text-center text-zinc-400">Час початку</TableHead>
-                                  <TableHead className="text-center text-zinc-400">Учасники</TableHead>
-                                  <TableHead className="text-center text-zinc-400">Статус</TableHead>
-                                  <TableHead className="text-right text-zinc-400">Дія</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {catsInGroup.map((c) => {
-                                  const est = categoryEstimates[c.id];
-                                  const timeStr = est
-                                    ? new Date(est.startTime).toLocaleTimeString("uk-UA", {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      })
-                                    : "—";
-                                  const timeDisplay = est?.isLive && c.status !== "completed"
-                                    ? <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 animate-pulse"><span className="w-1 h-1 rounded-full bg-green-400 shrink-0" />Live</span>
-                                    : <span className="text-xs text-zinc-300">{timeStr}</span>;
-
-                                  let weightStr = "без обмежень";
-                                  if (c.min_weight !== null && c.max_weight !== null) {
-                                    weightStr = `${c.min_weight}–${c.max_weight} кг`;
-                                  } else if (c.min_weight !== null) {
-                                    weightStr = `від ${c.min_weight} кг`;
-                                  } else if (c.max_weight !== null) {
-                                    weightStr = `до ${c.max_weight} кг`;
-                                  }
-                                  return (
-                                    <TableRow key={c.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/30">
-                                      <TableCell className="font-semibold text-zinc-200">
-                                        <Link to={`/categories/${c.id}`} className="hover:text-amber-500 transition-colors flex items-center gap-2">
-                                          {c.name}
-                                          {c.is_team && (
-                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                                              Команда
-                                            </span>
-                                          )}
-                                          {!c.has_bracket && (
-                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
-                                              Без сітки
-                                            </span>
-                                          )}
-                                        </Link>
-                                      </TableCell>
-                                      <TableCell className="text-zinc-300">{c.min_age}–{c.max_age} років</TableCell>
-                                      <TableCell className="text-zinc-300">{weightStr}</TableCell>
-                                      <TableCell className="text-zinc-300">{getRulesetName(c.ruleset_key)}</TableCell>
-                                      <TableCell className="text-center">{timeDisplay}</TableCell>
-                                      <TableCell className="text-center font-semibold text-zinc-300">{c.confirmed_registrations_count}</TableCell>
-                                      <TableCell className="text-center">
-                                        <StatusBadge status={c.status} type="category" />
-                                      </TableCell>
-                                      <TableCell className="text-right">
-                                        <Button variant="ghost" size="sm" asChild className="h-7 text-xs hover:bg-zinc-800 hover:text-zinc-100">
-                                          <Link to={`/categories/${c.id}`}>Деталі</Link>
-                                        </Button>
-                                      </TableCell>
-                                    </TableRow>
-                                  );
-                                })}
-                              </TableBody>
-                            </Table>
+                            <CategoriesTable
+                              categoriesList={catsInGroup}
+                              categoryEstimates={categoryEstimates}
+                              getRulesetName={getRulesetName}
+                            />
                           );
                         })()}
                       </div>
@@ -986,75 +923,11 @@ export default function TournamentDetailPage() {
         {(() => {
           const { categoryEstimates } = estimateSchedule(tatamis, matches, sortedCategories, undefined, tournament?.start_date);
           return (
-            <Table>
-              <TableHeader className="bg-zinc-950/50">
-                <TableRow className="border-b border-zinc-800 hover:bg-transparent">
-                  <TableHead className="text-zinc-400">Назва</TableHead>
-                  <TableHead className="text-zinc-400">Вікова група</TableHead>
-                  <TableHead className="text-zinc-400">Вага</TableHead>
-                  <TableHead className="text-zinc-400">Правила</TableHead>
-                  <TableHead className="text-center text-zinc-400">Час початку</TableHead>
-                  <TableHead className="text-center text-zinc-400">Учасники</TableHead>
-                  <TableHead className="text-center text-zinc-400">Статус</TableHead>
-                  <TableHead className="text-right text-zinc-400">Дія</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedCategories.map((c) => {
-                  const est = categoryEstimates[c.id];
-                  const timeStr = est
-                    ? new Date(est.startTime).toLocaleTimeString("uk-UA", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "—";
-                  const timeDisplay = est?.isLive && c.status !== "completed"
-                    ? <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 animate-pulse"><span className="w-1 h-1 rounded-full bg-green-400 shrink-0" />Live</span>
-                    : <span className="text-xs text-zinc-300">{timeStr}</span>;
-
-                  let weightStr = "без обмежень";
-                  if (c.min_weight !== null && c.max_weight !== null) {
-                    weightStr = `${c.min_weight}–${c.max_weight} кг`;
-                  } else if (c.min_weight !== null) {
-                    weightStr = `від ${c.min_weight} кг`;
-                  } else if (c.max_weight !== null) {
-                    weightStr = `до ${c.max_weight} кг`;
-                  }
-                  return (
-                    <TableRow key={c.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/30">
-                      <TableCell className="font-semibold text-zinc-200">
-                        <Link to={`/categories/${c.id}`} className="hover:text-amber-500 transition-colors flex items-center gap-2">
-                          {c.name}
-                          {c.is_team && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                              Команда
-                            </span>
-                          )}
-                          {!c.has_bracket && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
-                              Без сітки
-                            </span>
-                          )}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-zinc-300">{c.min_age}–{c.max_age} років</TableCell>
-                      <TableCell className="text-zinc-300">{weightStr}</TableCell>
-                      <TableCell className="text-zinc-300">{getRulesetName(c.ruleset_key)}</TableCell>
-                      <TableCell className="text-center">{timeDisplay}</TableCell>
-                      <TableCell className="text-center font-semibold text-zinc-300">{c.confirmed_registrations_count}</TableCell>
-                      <TableCell className="text-center">
-                        <StatusBadge status={c.status} type="category" />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" asChild className="h-7 text-xs hover:bg-zinc-800 hover:text-zinc-100">
-                          <Link to={`/categories/${c.id}`}>Деталі</Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <CategoriesTable
+              categoriesList={sortedCategories}
+              categoryEstimates={categoryEstimates}
+              getRulesetName={getRulesetName}
+            />
           );
         })()}
       </div>
@@ -2337,5 +2210,85 @@ export default function TournamentDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+interface CategoriesTableProps {
+  categoriesList: Category[];
+  categoryEstimates: Record<number, any>;
+  getRulesetName: (key: string) => string;
+}
+
+function CategoriesTable({ categoriesList, categoryEstimates, getRulesetName }: CategoriesTableProps) {
+  return (
+    <Table>
+      <TableHeader className="bg-zinc-950/50">
+        <TableRow className="border-b border-zinc-800 hover:bg-transparent">
+          <TableHead className="text-zinc-400">Назва</TableHead>
+          <TableHead className="text-zinc-400">Вікова група</TableHead>
+          <TableHead className="text-zinc-400">Вага</TableHead>
+          <TableHead className="text-zinc-400">Правила</TableHead>
+          <TableHead className="text-center text-zinc-400">Час початку</TableHead>
+          <TableHead className="text-center text-zinc-400">Учасники</TableHead>
+          <TableHead className="text-center text-zinc-400">Статус</TableHead>
+          <TableHead className="text-right text-zinc-400">Дія</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {categoriesList.map((c) => {
+          const est = categoryEstimates[c.id];
+          const timeStr = est
+            ? new Date(est.startTime).toLocaleTimeString("uk-UA", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "—";
+          const timeDisplay = est?.isLive && c.status !== "completed"
+            ? <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 animate-pulse"><span className="w-1 h-1 rounded-full bg-green-400 shrink-0" />Live</span>
+            : <span className="text-xs text-zinc-300">{timeStr}</span>;
+
+          let weightStr = "без обмежень";
+          if (c.min_weight !== null && c.max_weight !== null) {
+            weightStr = `${c.min_weight}–${c.max_weight} кг`;
+          } else if (c.min_weight !== null) {
+            weightStr = `від ${c.min_weight} кг`;
+          } else if (c.max_weight !== null) {
+            weightStr = `до ${c.max_weight} кг`;
+          }
+          return (
+            <TableRow key={c.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/30">
+              <TableCell className="font-semibold text-zinc-200">
+                <Link to={`/categories/${c.id}`} className="hover:text-amber-500 transition-colors flex items-center gap-2">
+                  {c.name}
+                  {c.is_team && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                      Команда
+                    </span>
+                  )}
+                  {!c.has_bracket && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
+                      Без сітки
+                    </span>
+                  )}
+                </Link>
+              </TableCell>
+              <TableCell className="text-zinc-300">{c.min_age}–{c.max_age} років</TableCell>
+              <TableCell className="text-zinc-300">{weightStr}</TableCell>
+              <TableCell className="text-zinc-300">{getRulesetName(c.ruleset_key)}</TableCell>
+              <TableCell className="text-center">{timeDisplay}</TableCell>
+              <TableCell className="text-center font-semibold text-zinc-300">{c.confirmed_registrations_count}</TableCell>
+              <TableCell className="text-center">
+                <StatusBadge status={c.status} type="category" />
+              </TableCell>
+              <TableCell className="text-right">
+                <Button variant="ghost" size="sm" asChild className="h-7 text-xs hover:bg-zinc-800 hover:text-zinc-100">
+                  <Link to={`/categories/${c.id}`}>Деталі</Link>
+                </Button>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }

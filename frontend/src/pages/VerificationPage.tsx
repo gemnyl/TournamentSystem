@@ -23,35 +23,7 @@ import {
   Users,
 } from "lucide-react";
 
-const REGIONS_MAP: Record<string, string> = {
-  vinnytsia: "Вінницька область",
-  volyn: "Волинська область",
-  dnipro: "Дніпропетровська область",
-  donetsk: "Донецька область",
-  zhytomyr: "Житомирська область",
-  zakarpattia: "Закарпатська область",
-  zaporizhzhia: "Запорізька область",
-  "ivano-frankivsk": "Івано-Франківська область",
-  kyiv_oblast: "Київська область",
-  kyiv_city: "м. Київ",
-  kirovohrad: "Кіровоградська область",
-  luhansk: "Луганська область",
-  lviv: "Львівська область",
-  mykolaiv: "Миколаївська область",
-  odesa: "Одеська область",
-  poltava: "Полтавська область",
-  rivne: "Рівненська область",
-  sumy: "Сумська область",
-  ternopil: "Тернопільська область",
-  kharkiv: "Харківська область",
-  kherson: "Херсонська область",
-  khmelnytskyi: "Хмельницька область",
-  cherkasy: "Черкаська область",
-  chernivtsi: "Чернівецька область",
-  chernihiv: "Чернігівська область",
-  crimea: "АР Крим",
-  sevastopol: "м. Севастополь",
-};
+import { REGIONS_MAP } from "@/lib/utils";
 
 
 interface RegistrationCardProps {

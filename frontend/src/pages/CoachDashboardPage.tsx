@@ -37,7 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { cn, formatSportType, formatRegistrationName, getAgeAsOf } from "@/lib/utils";
+import { cn, formatSportType, formatRegistrationName, getAgeAsOf, REGIONS_MAP } from "@/lib/utils";
 import { PhotoUploadField } from "@/components/ui/photo-upload-field";
 import type { Athlete, Tournament, Category, Registration, Team, PaginatedResponse } from "@/types/api";
 import { useForm } from "react-hook-form";
@@ -678,36 +678,6 @@ export default function CoachDashboardPage() {
   const printBadges = (items: Array<{ athlete: Athlete | null; registration?: Registration }>) => {
     const validItems = items.filter(item => item.athlete || (item.registration && item.registration.team));
     if (validItems.length === 0) return;
-
-    const REGIONS_MAP: Record<string, string> = {
-      vinnytsia: "Вінницька обл.",
-      volyn: "Волинська обл.",
-      dnipro: "Дніпропетровська обл.",
-      donetsk: "Донецька обл.",
-      zhytomyr: "Житомирська обл.",
-      zakarpattia: "Закарпатська обл.",
-      zaporizhzhia: "Запорізька обл.",
-      "ivano-frankivsk": "Івано-Франківська обл.",
-      kyiv_oblast: "Київська обл.",
-      kyiv_city: "м. Київ",
-      kirovohrad: "Кіровоградська обл.",
-      luhansk: "Луганська обл.",
-      lviv: "Львівська обл.",
-      mykolaiv: "Миколаївська обл.",
-      odesa: "Одеська обл.",
-      poltava: "Poltava Oblast",
-      rivne: "Рівненська обл.",
-      sumy: "Сумська обл.",
-      ternopil: "Тернопільська обл.",
-      kharkiv: "Харківська обл.",
-      kherson: "Херсонська обл.",
-      khmelnytskyi: "Хмельницька обл.",
-      cherkasy: "Черкаська обл.",
-      chernivtsi: "Чернівецька обл.",
-      chernihiv: "Чернігівська обл.",
-      crimea: "АР Крим",
-      sevastopol: "м. Севастополь"
-    };
 
     // 1. Expand and separate base profile passes vs registrations
     const flatRegistrations: Array<{ athlete: Athlete; registration: Registration }> = [];
