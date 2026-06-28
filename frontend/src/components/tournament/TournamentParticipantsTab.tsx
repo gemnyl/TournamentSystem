@@ -26,12 +26,19 @@ interface ParticipantRegistration {
     gender: "male" | "female";
     base_weight: number;
     skill_level?: string;
+    club?: {
+      id: number;
+      name: string;
+      region: string;
+    };
   };
   team?: {
     id: number;
     name: string;
     club?: {
+      id: number;
       name: string;
+      region: string;
     };
   };
   category: number;
@@ -196,7 +203,7 @@ export default function TournamentParticipantsTab({ tournament, categories }: To
     if (groupBy === "none") return null;
     const groups: Record<string, ParticipantRegistration[]> = {};
     registrations.forEach((reg) => {
-      const key = groupBy === "club" ? reg.club_name : reg.category_name;
+      const key = groupBy === "club" ? (reg.athlete?.club?.name ?? reg.team?.club?.name ?? "—") : reg.category_name;
       if (!groups[key]) {
         groups[key] = [];
       }
@@ -272,7 +279,9 @@ export default function TournamentParticipantsTab({ tournament, categories }: To
           <TableCell className="font-semibold text-zinc-200 max-w-[200px] truncate">
             {participantName}
           </TableCell>
-          <TableCell className="text-zinc-300 truncate max-w-[150px]">{reg.club_name}</TableCell>
+          <TableCell className="text-zinc-300 truncate max-w-[150px]">
+            {reg.athlete?.club?.name ?? reg.team?.club?.name ?? "—"}
+          </TableCell>
           <TableCell className="text-zinc-400 text-xs">{genderLabel}</TableCell>
           <TableCell className="text-zinc-400 text-xs font-mono">{weightLabel}</TableCell>
           <TableCell className="text-zinc-300 font-medium truncate max-w-[200px]">{reg.category_name}</TableCell>

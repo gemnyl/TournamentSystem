@@ -17,6 +17,7 @@ interface BracketRoundProps {
   showPlaceholders?: boolean;
   virtualRoundIndex?: number;
   customRoundLabel?: string;
+  forcePrintMode?: boolean;
 }
 
 /**
@@ -56,6 +57,7 @@ export function BracketRound({
   showPlaceholders = false,
   virtualRoundIndex,
   customRoundLabel,
+  forcePrintMode = false,
 }: BracketRoundProps) {
   // ─── Назва раунду ──────────────────────────────────────────────────────────
   const roundLabel = () => {
@@ -72,7 +74,7 @@ export function BracketRound({
   // ─── Розміри картки ────────────────────────────────────────────────────────
   const isTeam = matches.some((m) => m.category_is_team);
   const maxBouts = matches.reduce((max, m) => Math.max(max, m.team_bouts?.length ?? 0), 0);
-  let cardHeight = 108;
+  let cardHeight = forcePrintMode ? 96 : 108;
   if (isTeam) {
     cardHeight = maxBouts > 3 ? 180 : 140;
   }
@@ -97,13 +99,14 @@ export function BracketRound({
     paddingTop = customPaddingTop ?? 0;
   } else {
     // SE-режим: exponential spacing
-    const spacing = getSESpacing(roundIndex, cardHeight, baseGap);
+    const power = isLosers ? Math.floor(roundIndex / 2) : roundIndex;
+    const spacing = getSESpacing(power, cardHeight, baseGap);
     gapBetween = spacing.gap;
     paddingTop = spacing.paddingTop;
   }
 
   return (
-    <div className="flex flex-col items-center w-72 select-none">
+    <div className={cn("flex flex-col items-center select-none", forcePrintMode ? "w-[200px]" : "w-72")}>
       {/* Заголовок раунду */}
       {!isTeam && (
         <div className="mb-6 px-4 py-1.5 rounded-full bg-card/60 border border-border/80 shadow-sm backdrop-blur-md">
@@ -162,7 +165,7 @@ export function BracketRound({
                 (isByeInRound1 || shouldHideMatch || isLosersGhostMatch || isGhostCompleted) && "invisible pointer-events-none"
               )}
             >
-              <MatchCard match={match} onClick={onMatchClick} />
+              <MatchCard match={match} onClick={onMatchClick} forcePrintMode={forcePrintMode} />
 
               {shouldDrawConnector &&
                 (isEven ? (
@@ -170,16 +173,16 @@ export function BracketRound({
                     className="absolute left-full w-12 pointer-events-none"
                     style={{ height: `${connectorHeight}px`, top: "50%" }}
                   >
-                    <div className="absolute left-0 top-0 w-6 h-full border-t-2 border-r-2 border-amber-500/35 rounded-tr-xl" />
-                    <div className="absolute left-6 bottom-0 w-6 border-b-2 border-amber-500/35" />
+                    <div className={cn("absolute left-0 top-0 w-6 h-full border-t-2 border-r-2 rounded-tr-xl", forcePrintMode ? "border-zinc-700" : "border-amber-500/35")} />
+                    <div className={cn("absolute left-6 bottom-0 w-6 border-b-2", forcePrintMode ? "border-zinc-700" : "border-amber-500/35")} />
                   </div>
                 ) : (
                   <div
                     className="absolute left-full w-12 pointer-events-none"
                     style={{ height: `${connectorHeight}px`, bottom: "50%" }}
                   >
-                    <div className="absolute left-0 bottom-0 w-6 h-full border-b-2 border-r-2 border-amber-500/35 rounded-br-xl" />
-                    <div className="absolute left-6 top-0 w-6 border-t-2 border-amber-500/35" />
+                    <div className={cn("absolute left-0 bottom-0 w-6 h-full border-b-2 border-r-2 rounded-br-xl", forcePrintMode ? "border-zinc-700" : "border-amber-500/35")} />
+                    <div className={cn("absolute left-6 top-0 w-6 border-t-2", forcePrintMode ? "border-zinc-700" : "border-amber-500/35")} />
                   </div>
                 ))}
 
@@ -188,7 +191,7 @@ export function BracketRound({
                   className="absolute left-full w-12 pointer-events-none"
                   style={{ height: "2px", top: "50%" }}
                 >
-                  <div className="absolute left-0 top-0 w-12 border-b-2 border-amber-500/35" />
+                  <div className={cn("absolute left-0 top-0 w-12 border-b-2", forcePrintMode ? "border-zinc-700" : "border-amber-500/35")} />
                 </div>
               )}
             </div>

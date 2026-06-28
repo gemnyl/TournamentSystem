@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2, Clock, Trophy, Award, Unlock
+  ArrowLeft, GitBranch, Plus, Loader2, CheckCircle, Scale, Trash2, Clock, Trophy, Award, Unlock, Printer, Download
 } from "lucide-react";
 import { estimateSchedule } from "@/lib/scheduler";
 import { useForm } from "react-hook-form";
@@ -12,7 +12,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
 import { toast } from "@/hooks/use-toast";
-import { cn, formatSportType, formatRegistrationName, formatRegistrationClub, getAgeAsOf, normalizeSportType } from "@/lib/utils";
+import { cn, formatSportType, formatRegistrationName, formatRegistrationClub, getAgeAsOf, normalizeSportType, formatRegion } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,7 +72,7 @@ function CategoryResultRow({
           {res.registration.athlete.club.name}
           {res.registration.athlete.club.region && (
             <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
-              {res.registration.athlete.club.region}
+              {formatRegion(res.registration.athlete.club.region)}
             </span>
           )}
         </span>
@@ -84,7 +84,7 @@ function CategoryResultRow({
           {res.registration.team.club.name}
           {res.registration.team.club.region && (
             <span className="text-xs text-muted-foreground/60 ml-2 px-1.5 py-0.5 rounded bg-muted">
-              {res.registration.team.club.region}
+              {formatRegion(res.registration.team.club.region)}
             </span>
           )}
         </span>
@@ -253,6 +253,16 @@ export default function CategoryDetailPage() {
   const isCompleted = tournament?.status === "completed";
   const isChiefJudge = tournament?.chief_judge === user?.id;
   const canFinalizeOrUnlock = !isCompleted && (isOrganizer || isChiefJudge || (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id));
+  const canPrint = !!user && (
+    user.role === "admin" ||
+    user.role === "organizer" ||
+    user.role === "staff" ||
+    user.role === "judge" ||
+    tournament?.organizer === user.id ||
+    tournament?.staff_members?.includes(user.id) ||
+    tournament?.judges?.includes(user.id) ||
+    isChiefJudge
+  );
 
   // Delete registration state
   const [deleteRegDialog, setDeleteRegDialog] = useState<Registration | null>(null);
@@ -625,8 +635,8 @@ export default function CategoryDetailPage() {
 
   // Обчислюємо оцінку розкладу для поточної категорії
   let estimateBanner = null;
-  if (category && tatamis.length > 0 && matches.length > 0) {
-    const { categoryEstimates } = estimateSchedule(tatamis, matches, [category]);
+  if (category && tatamis.length > 0 && matches.length > 0 && category.status !== "completed" && !isCompleted) {
+    const { categoryEstimates } = estimateSchedule(tatamis, matches, [category], undefined, tournament?.start_date);
     const estimate = categoryEstimates[category.id];
     if (estimate) {
       const timeStr = new Date(estimate.startTime).toLocaleTimeString("uk-UA", {
@@ -739,11 +749,33 @@ export default function CategoryDetailPage() {
             </Button>
           )}
           {category.has_bracket ? (
-            <Button asChild variant="outline" size="sm">
-              <Link to={`/categories/${id}/bracket`}>
-                <GitBranch className="w-4 h-4" /> Переглянути сітку
-              </Link>
-            </Button>
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/categories/${id}/bracket`}>
+                  <GitBranch className="w-4 h-4" /> Переглянути сітку
+                </Link>
+              </Button>
+              {canPrint && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(`/categories/${id}/print?action=print`, "_blank")}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Printer className="w-4 h-4" /> Друк сітки
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(`/categories/${id}/print?action=download`, "_blank")}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Download className="w-4 h-4" /> Завантажити сітку
+                  </Button>
+                </>
+              )}
+            </>
           ) : null}
           {(isOrganizer || isChiefJudge) && !isCompleted && (
             <>

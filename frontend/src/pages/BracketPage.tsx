@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Loader2, RefreshCw, Wifi, WifiOff, Trophy, Check, Plus } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, Wifi, WifiOff, Trophy, Check, Plus, Printer, Download } from "lucide-react";
 import api from "@/lib/api";
 import { cn, formatRegistrationName, formatRegistrationClub, formatAthleteName } from "@/lib/utils";
 import { useMatchUpdates } from "@/hooks/useMatchUpdates";
@@ -10,7 +10,7 @@ import { MatchCard } from "@/components/bracket/MatchCard";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import type { BracketResponse, Category, Match, MatchEvent } from "@/types/api";
+import type { BracketResponse, Category, Match, MatchEvent, Tournament } from "@/types/api";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 
@@ -44,6 +44,7 @@ export default function BracketPage() {
   const { user, isOrganizer, isJudge } = useAuth();
   const [bracket, setBracket]   = useState<BracketResponse | null>(null);
   const [category, setCategory] = useState<Category | null>(null);
+  const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showPlaceholders, setShowPlaceholders] = useState(() => {
     try {
@@ -125,6 +126,7 @@ export default function BracketPage() {
   }, [category, categoryMatches, swissCurrentRound, swissMaxRounds]);
 
   const isCompleted = category?.status === "completed";
+  const isChiefJudge = tournament?.chief_judge === user?.id;
 
   const categoryTatami = useMemo(() => {
     const firstMatchWithTatami = categoryMatches?.find((m) => m.tatami !== null);
@@ -139,6 +141,19 @@ export default function BracketPage() {
       (isJudge && categoryTatami && categoryTatami.assigned_judge === user?.id)
     );
   }, [isCompleted, isOrganizer, isJudge, categoryTatami, user]);
+
+  const canPrint = useMemo(() => {
+    return !!user && (
+      user.role === "admin" ||
+      user.role === "organizer" ||
+      user.role === "staff" ||
+      user.role === "judge" ||
+      tournament?.organizer === user.id ||
+      tournament?.staff_members?.includes(user.id) ||
+      tournament?.judges?.includes(user.id) ||
+      isChiefJudge
+    );
+  }, [user, tournament, isChiefJudge]);
 
   const handleGenerateNextRound = async () => {
     setGeneratingNextRound(true);
@@ -171,16 +186,19 @@ export default function BracketPage() {
       setCategory(catRes.data);
 
       try {
-        const [res, tatamiRes] = await Promise.all([
+        const [res, tatamiRes, tournRes] = await Promise.all([
           api.get<CategoryStanding[]>(`/categories/${id}/results/`),
           api.get<any[] | { results: any[] }>(`/tatamis/?tournament=${catRes.data.tournament}`),
+          api.get<Tournament>(`/tournaments/${catRes.data.tournament}/`),
         ]);
         setStandings(res.data.filter(r => r.place != null && (r.place ?? 0) > 0).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)));
         const tatamiData = tatamiRes.data;
         setTatamis(Array.isArray(tatamiData) ? tatamiData : (tatamiData.results ?? []));
+        setTournament(tournRes.data);
       } catch {
         setStandings([]);
         setTatamis([]);
+        setTournament(null);
       }
     } finally {
       if (!silent) setIsLoading(false);
@@ -413,6 +431,27 @@ export default function BracketPage() {
             />{' '}
             Показувати технічні бої (BYE/TBD)
           </label>
+
+          {canPrint && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/categories/${id}/print?action=print`, "_blank")}
+                className="flex items-center gap-1.5"
+              >
+                <Printer className="w-4 h-4" /> Друк сітки
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/categories/${id}/print?action=download`, "_blank")}
+                className="flex items-center gap-1.5"
+              >
+                <Download className="w-4 h-4" /> Завантажити сітку
+              </Button>
+            </>
+          )}
 
           <Button variant="outline" size="sm" onClick={() => fetchBracket()}>
             <RefreshCw className="w-4 h-4" /> Оновити

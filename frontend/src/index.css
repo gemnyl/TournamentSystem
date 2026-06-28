@@ -126,3 +126,41 @@
     @apply animate-fade-in;
   }
 }
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background-color: white !important;
+    color: black !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .overflow-x-auto, .overflow-y-auto {
+    overflow: visible !important;
+  }
+  @page {
+    size: portrait;
+    margin: 8mm;
+  }
+  .print-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    zoom: 100% !important;
+  }
+  .print-header {
+    margin-bottom: 12px !important;
+    padding-bottom: 12px !important;
+  }
+  .no-print-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+  .print-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+}

@@ -23,9 +23,12 @@ export function estimateSchedule(
   tatamis: Tatami[],
   matches: Match[],
   categories: Category[],
-  settings = DEFAULT_SCHEDULER_SETTINGS
+  settings?: { athletePrepSeconds: number; categoryChangeoverSeconds: number },
+  tournamentStartDate?: string
 ): ScheduleEstimates {
+  const actualSettings = settings || DEFAULT_SCHEDULER_SETTINGS;
   const now = Date.now();
+  const tournamentStartMs = tournamentStartDate ? new Date(tournamentStartDate).getTime() : now;
   const matchStarts: Record<number, number> = {};
   const categoryEstimates: Record<number, { startTime: number; tatamiNumber: number | null; isLive: boolean; isTatamiActive: boolean }> = {};
 
@@ -65,7 +68,7 @@ export function estimateSchedule(
         : a.round_index - b.round_index;
     });
 
-    let timeAccumulator = now;
+    let timeAccumulator = Math.max(now, tournamentStartMs);
 
     sorted.forEach((match, idx) => {
       matchStarts[match.id] = timeAccumulator;
@@ -80,11 +83,11 @@ export function estimateSchedule(
 
       // Буфери між боями
       if (idx < sorted.length - 1) {
-        timeAccumulator += settings.athletePrepSeconds * 1000;
+        timeAccumulator += actualSettings.athletePrepSeconds * 1000;
 
         // Зміна категорії
         if (match.category !== sorted[idx + 1].category) {
-          timeAccumulator += settings.categoryChangeoverSeconds * 1000;
+          timeAccumulator += actualSettings.categoryChangeoverSeconds * 1000;
         }
       }
     });
@@ -117,7 +120,7 @@ export function estimateSchedule(
     });
 
     categoryEstimates[cat.id] = {
-      startTime: minStart === Infinity ? now : minStart,
+      startTime: minStart === Infinity ? tournamentStartMs : minStart,
       tatamiNumber: tatami ? tatami.number : null,
       isLive,
       isTatamiActive: tatami ? tatami.is_active : true
