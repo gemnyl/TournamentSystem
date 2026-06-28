@@ -1,5 +1,5 @@
 ##
-# compose.prod.yml — продакшен-стек для одного GCP Compute Engine VM (Free Tier e2-micro).
+# compose.prod.yml — продакшен-стек для одного Azure VM (Ubuntu, B-series burstable).
 #
 # Образи збираються в GitHub Actions і завантажуються з GHCR — на VM нічого не білдиться.
 # Caddy термінує TLS (автоматичний Let's Encrypt) і проксіює на frontend (nginx).
