@@ -1,0 +1,13 @@
+# Caddyfile — TLS-термінація з автоматичним Let's Encrypt.
+# Змінні DOMAIN та ACME_EMAIL підставляються з ~/app/.env (через compose.prod.yml).
+# Весь трафік (SPA, /api, /ws, /admin, /static, /media) проксіюється на frontend (nginx),
+# який уже містить усі правила маршрутизації.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy frontend:80
+}

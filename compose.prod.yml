@@ -1,0 +1,90 @@
+##
+# compose.prod.yml — продакшен-стек для одного GCP Compute Engine VM (Free Tier e2-micro).
+#
+# Образи збираються в GitHub Actions і завантажуються з GHCR — на VM нічого не білдиться.
+# Caddy термінує TLS (автоматичний Let's Encrypt) і проксіює на frontend (nginx).
+#
+# Запуск на VM (у каталозі ~/app, де лежить цей файл, Caddyfile та .env):
+#   docker compose -f compose.prod.yml pull
+#   docker compose -f compose.prod.yml up -d
+##
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    image: ${IMAGE_BACKEND:-ghcr.io/gemnyl/tournament-backend:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DJANGO_DEBUG: "False"
+      DB_HOST: db
+      DB_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      USE_REDIS_CHANNEL_LAYER: "True"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - media:/app/media
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/healthz/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  frontend:
+    image: ${IMAGE_FRONTEND:-ghcr.io/gemnyl/tournament-frontend:latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN:     ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
+volumes:
+  pgdata:
+  media:
+  caddy_data:
+  caddy_config:
