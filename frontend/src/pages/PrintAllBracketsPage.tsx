@@ -3,7 +3,6 @@ import { useParams, useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import type { BracketResponse, Category, Tournament } from "@/types/api";
 import { useAuth } from "@/hooks/useAuth";
-// @ts-ignore
 import html2pdf from "html2pdf.js";
 import { checkPrintAccess, getHtml2PdfOptions } from "@/lib/printUtils";
 import { PrintErrorState, PrintLoadingState, PrintNoAccessState } from "@/components/PrintStateTemplates";
